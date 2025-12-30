@@ -5,7 +5,7 @@ An MCP server for the [Morgen](https://morgen.so) calendar API.
 ## Requirements
 
 - [uv](https://github.com/astral-sh/uv) - Install with `brew install uv`
-- A Morgen API key - Get one from [Morgen Settings](https://platform.morgen.so/settings/api-keys)
+- A Morgen API key - Get one from [Morgen Developer Portal](https://platform.morgen.so/developers-api)
 
 ## Installation
 
