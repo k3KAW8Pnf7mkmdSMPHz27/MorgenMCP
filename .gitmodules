@@ -1,0 +1,3 @@
+[submodule "docs/morgen-dev-docs"]
+	path = docs/morgen-dev-docs
+	url = https://github.com/morgen-so/morgen-dev-docs.git

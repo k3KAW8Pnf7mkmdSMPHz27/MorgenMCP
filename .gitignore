@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# PyCharm / JetBrains IDEs
+.idea/
+
+# Junie (JetBrains AI assistant)
+.junie/
+
+# VS Code
+.vscode/
+
+# Editor swap files
+*.swp
+*.swo
+*~
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Local settings and secrets
+.claude/
+.env
+.env.local
+*.env
+
+# OS files
+.DS_Store
+Thumbs.db
