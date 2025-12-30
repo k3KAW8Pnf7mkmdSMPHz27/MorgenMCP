@@ -53,14 +53,39 @@ cd MorgenMCP
 # Install dependencies
 uv sync --all-extras
 
-# Set your API key
-export MORGEN_API_KEY="your_api_key"
-
-# Run the server locally
-uv run morgenmcp
-
 # Run tests
 uv run pytest
+```
+
+### Environment Setup with direnv
+
+The recommended way to manage your API key locally is with [direnv](https://direnv.net/), which automatically loads environment variables when you enter the project directory.
+
+```bash
+# Install direnv (macOS)
+brew install direnv
+
+# Add to your shell (~/.zshrc or ~/.bashrc)
+eval "$(direnv hook zsh)"  # or: eval "$(direnv hook bash)"
+```
+
+Create a `.envrc` file in the project root:
+
+```bash
+export MORGEN_API_KEY="your_api_key_here"
+```
+
+Then allow the directory:
+
+```bash
+direnv allow
+```
+
+Now your API key will be automatically available whenever you're in the project directory:
+
+```bash
+# Run the server locally
+uv run morgenmcp
 ```
 
 ### Local Debugging with MCP Inspector

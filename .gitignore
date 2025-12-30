@@ -51,6 +51,7 @@ htmlcov/
 .env
 .env.local
 *.env
+.envrc
 
 # OS files
 .DS_Store
