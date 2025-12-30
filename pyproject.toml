@@ -20,6 +20,10 @@ dev = [
 
 [project.scripts]
 morgenmcp = "morgenmcp.server:main"
+setup-dev = "morgenmcp.setup_dev:main"
+
+[tool.uv]
+package = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

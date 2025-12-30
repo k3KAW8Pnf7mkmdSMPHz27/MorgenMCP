@@ -62,7 +62,7 @@ uv run pytest
 Run the setup script to configure your development environment:
 
 ```bash
-./scripts/setup-dev.sh
+uv run setup-dev
 ```
 
 This script will:
