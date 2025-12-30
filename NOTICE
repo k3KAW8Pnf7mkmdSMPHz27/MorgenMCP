@@ -1,0 +1,14 @@
+MorgenMCP
+Copyright 2025 The Morgen MCP Authors
+
+This product includes software developed for the MorgenMCP project
+(https://github.com/k3KAW8Pnf7mkmdSMPHz27/MorgenMCP).
+
+For the list of contributors, see the git commit history at:
+https://github.com/k3KAW8Pnf7mkmdSMPHz27/MorgenMCP/commits
+or run: git log --format='%aN <%aE>' | sort -u
+
+This project uses the Morgen Calendar API. Morgen is a trademark of Morgen AG.
+API documentation referenced from https://github.com/morgen-so/morgen-dev-docs
+
+Licensed under the Apache License, Version 2.0.

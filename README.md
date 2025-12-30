@@ -76,4 +76,4 @@ Users can then reference the specific version in their MCP client configuration.
 
 ## License
 
-MIT
+Apache 2.0 - See [LICENSE](LICENSE) and [NOTICE](NOTICE) for details.
