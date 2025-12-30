@@ -57,31 +57,21 @@ uv sync --all-extras
 uv run pytest
 ```
 
-### Environment Setup with direnv
+### Environment Setup
 
-The recommended way to manage your API key locally is with [direnv](https://direnv.net/), which automatically loads environment variables when you enter the project directory.
-
-```bash
-# Install direnv (macOS)
-brew install direnv
-
-# Add to your shell (~/.zshrc or ~/.bashrc)
-eval "$(direnv hook zsh)"  # or: eval "$(direnv hook bash)"
-```
-
-Create a `.envrc` file in the project root:
+Run the setup script to configure your development environment:
 
 ```bash
-export MORGEN_API_KEY="your_api_key_here"
+./scripts/setup-dev.sh
 ```
 
-Then allow the directory:
+This script will:
+1. Check that [direnv](https://direnv.net/) is installed (with instructions if not)
+2. Prompt for your Morgen API key
+3. Create a `.envrc` file with your key
+4. Enable direnv for this directory
 
-```bash
-direnv allow
-```
-
-Now your API key will be automatically available whenever you're in the project directory:
+Once complete, your API key will be automatically available whenever you're in the project directory:
 
 ```bash
 # Run the server locally
