@@ -2,44 +2,41 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Commands
+## Quick Reference
 
 ```bash
-# Install dependencies
-uv sync --all-extras
-
-# Run the MCP server
-export MORGEN_API_KEY="your_api_key"
-uv run morgenmcp
-
-# Run all tests
-uv run pytest
-
-# Run a single test file
-uv run pytest tests/test_models.py
-
-# Run a specific test
-uv run pytest tests/test_tools.py::TestCreateEvent::test_create_event_success -v
+uv sync --all-extras          # Install dependencies
+export MORGEN_API_KEY="..."   # Set API key
+uv run morgenmcp              # Run server
+uv run pytest                 # Run tests
+uv run pytest tests/test_models.py -v  # Run specific test file
 ```
 
 ## Architecture
 
-This is a FastMCP-based MCP server that wraps the Morgen calendar API (https://api.morgen.so/v3/).
+FastMCP-based MCP server wrapping the Morgen calendar API (https://api.morgen.so/v3/).
 
-### Module Structure
+- **`server.py`** - Entry point with `@mcp.tool()` decorators delegating to tools modules
+- **`client.py`** - Async HTTP client; global instance via `get_client()`
+- **`models.py`** - Pydantic models with `Field(alias="...")` for camelCase API mapping
+- **`tools/`** - Tool implementations (`calendars.py`, `events.py`)
 
-- **`server.py`** - FastMCP server entry point. Registers MCP tools with `@mcp.tool()` decorators that delegate to the tools modules.
-- **`client.py`** - Async HTTP client (`MorgenClient`) for Morgen API. Handles authentication, rate limiting, and error responses. Uses a global client instance via `get_client()`.
-- **`models.py`** - Pydantic models based on JSCalendar spec. Key models: `Calendar`, `Event`, `EventCreateRequest`, `EventUpdateRequest`. All use `Field(alias="...")` for API field mapping.
-- **`tools/calendars.py`** - Calendar tools: `list_calendars`, `update_calendar_metadata`
-- **`tools/events.py`** - Event tools: `list_events`, `create_event`, `update_event`, `delete_event`
+### Patterns
 
-### Key Patterns
+- Tools return `{"success": True, ...}` or `{"error": "...", "status_code": N}`
+- Tests mock via `patch("morgenmcp.tools.*.get_client")`
 
-- All tools return dicts with either `{"success": True, ...}` or `{"error": "...", "status_code": N}`
-- Pydantic models use `populate_by_name=True` and `by_alias=True` for API serialization
-- Tests mock the client via `patch("morgenmcp.tools.*.get_client")`
+## Versioning & Release
 
-### API Documentation
+Versions are managed via git tags. No build step required.
 
-The `docs/morgen-dev-docs/` submodule contains the Morgen API documentation (MDX files). Update the submodule when the API changes.
+```bash
+git tag -a v0.1.0 -m "Release v0.1.0"
+git push origin v0.1.0
+```
+
+Users reference tags in their MCP client config: `git+https://github.com/k3KAW8Pnf7mkmdSMPHz27/MorgenMCP@v0.1.0`
+
+## API Docs
+
+See `docs/morgen-dev-docs/` submodule (MDX files).
