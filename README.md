@@ -63,6 +63,24 @@ uv run morgenmcp
 uv run pytest
 ```
 
+### Local Debugging with MCP Inspector
+
+The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) is a developer tool for testing and debugging MCP servers. It provides a web-based UI to interact with your server, test tools, and inspect requests/responses.
+
+```bash
+# Run the inspector with the local server
+npx @modelcontextprotocol/inspector -e MORGEN_API_KEY=$MORGEN_API_KEY uv run morgenmcp
+```
+
+This starts:
+- **Inspector UI** at `http://localhost:6274` - Interactive interface for testing tools
+- **MCP Proxy** at `http://localhost:6277` - Bridges the web UI to the MCP server
+
+From the Inspector UI, you can:
+- List and test all available tools (list_calendars, create_event, etc.)
+- View request/response payloads
+- Debug tool execution in real-time
+
 ## Releasing
 
 Releases are managed via git tags:
