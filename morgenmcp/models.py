@@ -8,7 +8,13 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-class CalendarRights(BaseModel):
+class MorgenModel(BaseModel):
+    """Base model with shared config for all Morgen API models."""
+
+    model_config = {"populate_by_name": True}
+
+
+class CalendarRights(MorgenModel):
     """Permissions for a calendar."""
 
     may_read_free_busy: bool = Field(alias="mayReadFreeBusy", default=False)
@@ -20,40 +26,32 @@ class CalendarRights(BaseModel):
     may_admin: bool = Field(alias="mayAdmin", default=False)
     may_delete: bool = Field(alias="mayDelete", default=False)
 
-    model_config = {"populate_by_name": True}
 
-
-class CalendarMetadata(BaseModel):
+class CalendarMetadata(MorgenModel):
     """Morgen-specific calendar metadata."""
 
     busy: bool | None = None
     override_color: str | None = Field(alias="overrideColor", default=None)
     override_name: str | None = Field(alias="overrideName", default=None)
 
-    model_config = {"populate_by_name": True}
 
-
-class OffsetTrigger(BaseModel):
+class OffsetTrigger(MorgenModel):
     """Alert trigger with offset from event start."""
 
     type: Literal["OffsetTrigger"] = Field(alias="@type", default="OffsetTrigger")
     offset: str  # ISO 8601 duration, e.g., "-PT30M"
     relative_to: str = Field(alias="relativeTo", default="start")
 
-    model_config = {"populate_by_name": True}
 
-
-class Alert(BaseModel):
+class Alert(MorgenModel):
     """Calendar event alert."""
 
     type: Literal["Alert"] = Field(alias="@type", default="Alert")
     trigger: OffsetTrigger
     action: str = "display"
 
-    model_config = {"populate_by_name": True}
 
-
-class Calendar(BaseModel):
+class Calendar(MorgenModel):
     """Morgen calendar model."""
 
     type: Literal["Calendar"] = Field(alias="@type", default="Calendar")
@@ -72,38 +70,30 @@ class Calendar(BaseModel):
     )
     metadata: CalendarMetadata | None = Field(alias="morgen.so:metadata", default=None)
 
-    model_config = {"populate_by_name": True}
 
-
-class CalendarUpdateRequest(BaseModel):
+class CalendarUpdateRequest(MorgenModel):
     """Request to update calendar metadata."""
 
     id: str
     account_id: str = Field(alias="accountId")
     metadata: CalendarMetadata = Field(alias="morgen.so:metadata")
 
-    model_config = {"populate_by_name": True}
 
-
-class Location(BaseModel):
+class Location(MorgenModel):
     """Event location."""
 
     type: Literal["Location"] = Field(alias="@type", default="Location")
     name: str | None = None
 
-    model_config = {"populate_by_name": True}
 
-
-class ParticipantRoles(BaseModel):
+class ParticipantRoles(MorgenModel):
     """Participant roles in an event."""
 
     attendee: bool = False
     owner: bool = False
 
-    model_config = {"populate_by_name": True}
 
-
-class Participant(BaseModel):
+class Participant(MorgenModel):
     """Event participant."""
 
     type: Literal["Participant"] = Field(alias="@type", default="Participant")
@@ -113,19 +103,15 @@ class Participant(BaseModel):
     account_owner: bool = Field(alias="accountOwner", default=False)
     participation_status: str = Field(alias="participationStatus", default="needs-action")
 
-    model_config = {"populate_by_name": True}
 
-
-class NDay(BaseModel):
+class NDay(MorgenModel):
     """Day component in recurrence rule."""
 
     type: Literal["NDay"] = Field(alias="@type", default="NDay")
     day: str  # "mo", "tu", "we", "th", "fr", "sa", "su"
 
-    model_config = {"populate_by_name": True}
 
-
-class RecurrenceRule(BaseModel):
+class RecurrenceRule(MorgenModel):
     """Recurrence rule for repeating events."""
 
     type: Literal["RecurrenceRule"] = Field(alias="@type", default="RecurrenceRule")
@@ -133,26 +119,20 @@ class RecurrenceRule(BaseModel):
     interval: int = 1
     by_day: list[NDay] | None = Field(alias="byDay", default=None)
 
-    model_config = {"populate_by_name": True}
 
-
-class VirtualRoom(BaseModel):
+class VirtualRoom(MorgenModel):
     """Derived virtual room information."""
 
     url: str | None = None
 
-    model_config = {"populate_by_name": True}
 
-
-class EventDerived(BaseModel):
+class EventDerived(MorgenModel):
     """Morgen-derived event fields (read-only)."""
 
     virtual_room: VirtualRoom | None = Field(alias="virtualRoom", default=None)
 
-    model_config = {"populate_by_name": True}
 
-
-class EventMetadata(BaseModel):
+class EventMetadata(MorgenModel):
     """Morgen-specific event metadata."""
 
     updated: str | None = None
@@ -162,10 +142,8 @@ class EventMetadata(BaseModel):
     progress: str | None = None  # "needs-action", "completed"
     task_id: str | None = Field(alias="taskId", default=None)
 
-    model_config = {"populate_by_name": True}
 
-
-class Event(BaseModel):
+class Event(MorgenModel):
     """Morgen calendar event model."""
 
     type: Literal["Event"] = Field(alias="@type", default="Event")
@@ -203,10 +181,8 @@ class Event(BaseModel):
     metadata: EventMetadata | None = Field(alias="morgen.so:metadata", default=None)
     request_virtual_room: str | None = Field(alias="morgen.so:requestVirtualRoom", default=None)
 
-    model_config = {"populate_by_name": True}
 
-
-class EventCreateRequest(BaseModel):
+class EventCreateRequest(MorgenModel):
     """Request to create a new event."""
 
     account_id: str = Field(alias="accountId")
@@ -228,10 +204,8 @@ class EventCreateRequest(BaseModel):
     google_color_id: str | None = Field(alias="google.com:colorId", default=None)
     request_virtual_room: str | None = Field(alias="morgen.so:requestVirtualRoom", default=None)
 
-    model_config = {"populate_by_name": True}
 
-
-class EventUpdateRequest(BaseModel):
+class EventUpdateRequest(MorgenModel):
     """Request to update an existing event."""
 
     id: str | None = None
@@ -257,17 +231,13 @@ class EventUpdateRequest(BaseModel):
     google_color_id: str | None = Field(alias="google.com:colorId", default=None)
     request_virtual_room: str | None = Field(alias="morgen.so:requestVirtualRoom", default=None)
 
-    model_config = {"populate_by_name": True}
 
-
-class EventDeleteRequest(BaseModel):
+class EventDeleteRequest(MorgenModel):
     """Request to delete an event."""
 
     id: str
     account_id: str = Field(alias="accountId")
     calendar_id: str = Field(alias="calendarId")
-
-    model_config = {"populate_by_name": True}
 
 
 class CalendarsListResponse(BaseModel):
@@ -282,14 +252,12 @@ class EventsListResponse(BaseModel):
     events: list[Event]
 
 
-class EventCreateResponse(BaseModel):
+class EventCreateResponse(MorgenModel):
     """Response from event create endpoint."""
 
     id: str
     calendar_id: str = Field(alias="calendarId")
     account_id: str = Field(alias="accountId")
-
-    model_config = {"populate_by_name": True}
 
 
 class APIResponse[T](BaseModel):

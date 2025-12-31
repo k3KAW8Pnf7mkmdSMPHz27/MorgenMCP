@@ -7,13 +7,13 @@ from morgenmcp.models import (
     EventCreateRequest,
     EventDeleteRequest,
     EventUpdateRequest,
-    Location,
-    MorgenAPIError,
-    Participant,
-    ParticipantRoles,
+)
+from morgenmcp.tools.utils import (
+    build_locations_dict,
+    build_participants_dict,
+    handle_tool_errors,
 )
 from morgenmcp.validators import (
-    ValidationError,
     validate_date_range,
     validate_duration,
     validate_email,
@@ -22,6 +22,7 @@ from morgenmcp.validators import (
 )
 
 
+@handle_tool_errors
 async def list_events(
     account_id: str,
     calendar_ids: list[str],
@@ -42,76 +43,64 @@ async def list_events(
     Returns:
         Dictionary with 'events' key containing list of event objects.
     """
-    try:
-        # Validate inputs
-        validate_local_datetime(start, "start")
-        validate_local_datetime(end, "end")
-        validate_date_range(start, end)
+    validate_local_datetime(start, "start")
+    validate_local_datetime(end, "end")
+    validate_date_range(start, end)
 
-        if not calendar_ids:
-            return {"error": "calendar_ids cannot be empty"}
+    if not calendar_ids:
+        return {"error": "calendar_ids cannot be empty"}
 
-        client = get_client()
-        events = await client.list_events(
-            account_id=account_id,
-            calendar_ids=calendar_ids,
-            start=start,
-            end=end,
-        )
+    client = get_client()
+    events = await client.list_events(
+        account_id=account_id,
+        calendar_ids=calendar_ids,
+        start=start,
+        end=end,
+    )
 
-        return {
-            "events": [
-                {
-                    "id": event.id,
-                    "calendarId": event.calendar_id,
-                    "accountId": event.account_id,
-                    "title": event.title,
-                    "description": event.description,
-                    "start": event.start,
-                    "duration": event.duration,
-                    "timeZone": event.time_zone,
-                    "isAllDay": event.show_without_time,
-                    "status": event.free_busy_status,
-                    "privacy": event.privacy,
-                    "locations": [
-                        {"name": loc.name}
-                        for loc in (event.locations or {}).values()
-                    ],
-                    "participants": [
-                        {
-                            "name": p.name,
-                            "email": p.email,
-                            "status": p.participation_status,
-                            "isOrganizer": p.roles.owner if p.roles else False,
-                        }
-                        for p in (event.participants or {}).values()
-                    ],
-                    "isRecurring": event.recurrence_rules is not None,
-                    "recurrenceId": event.recurrence_id,
-                    "masterEventId": event.master_event_id,
-                    "virtualRoomUrl": (
-                        event.derived.virtual_room.url
-                        if event.derived and event.derived.virtual_room
-                        else None
-                    ),
-                }
-                for event in events
-            ],
-            "count": len(events),
-        }
-    except ValidationError as e:
-        return {"error": str(e), "validation_error": True}
-    except MorgenAPIError as e:
-        return {
-            "error": str(e),
-            "status_code": e.status_code,
-        }
-    except Exception as e:
-        return {
-            "error": f"Unexpected error: {e}",
-        }
+    return {
+        "events": [
+            {
+                "id": event.id,
+                "calendarId": event.calendar_id,
+                "accountId": event.account_id,
+                "title": event.title,
+                "description": event.description,
+                "start": event.start,
+                "duration": event.duration,
+                "timeZone": event.time_zone,
+                "isAllDay": event.show_without_time,
+                "status": event.free_busy_status,
+                "privacy": event.privacy,
+                "locations": [
+                    {"name": loc.name}
+                    for loc in (event.locations or {}).values()
+                ],
+                "participants": [
+                    {
+                        "name": p.name,
+                        "email": p.email,
+                        "status": p.participation_status,
+                        "isOrganizer": p.roles.owner if p.roles else False,
+                    }
+                    for p in (event.participants or {}).values()
+                ],
+                "isRecurring": event.recurrence_rules is not None,
+                "recurrenceId": event.recurrence_id,
+                "masterEventId": event.master_event_id,
+                "virtualRoomUrl": (
+                    event.derived.virtual_room.url
+                    if event.derived and event.derived.virtual_room
+                    else None
+                ),
+            }
+            for event in events
+        ],
+        "count": len(events),
+    }
 
 
+@handle_tool_errors
 async def create_event(
     account_id: str,
     calendar_id: str,
@@ -147,75 +136,45 @@ async def create_event(
     Returns:
         Dictionary with created event ID and details.
     """
-    try:
-        # Validate inputs
-        validate_local_datetime(start, "start")
-        validate_duration(duration)
-        validate_timezone(time_zone)
+    validate_local_datetime(start, "start")
+    validate_duration(duration)
+    validate_timezone(time_zone)
 
-        if participants:
-            for email in participants:
-                validate_email(email)
+    if participants:
+        for email in participants:
+            validate_email(email)
 
-        # Build locations dict if provided
-        locations_dict = None
-        if location:
-            locations_dict = {"1": Location(name=location)}
+    request = EventCreateRequest(
+        account_id=account_id,
+        calendar_id=calendar_id,
+        title=title,
+        start=start,
+        duration=duration,
+        time_zone=time_zone,
+        show_without_time=is_all_day,
+        description=description,
+        locations=build_locations_dict(location),
+        participants=build_participants_dict(participants),
+        free_busy_status=free_busy_status,
+        privacy=privacy,
+        request_virtual_room=request_virtual_room,
+    )
 
-        # Build participants dict if provided
-        participants_dict = None
-        if participants:
-            participants_dict = {
-                email: Participant(
-                    name=email.split("@")[0],  # Use email prefix as name
-                    email=email,
-                    roles=ParticipantRoles(attendee=True),
-                    participation_status="needs-action",
-                )
-                for email in participants
-            }
+    client = get_client()
+    response = await client.create_event(request)
 
-        request = EventCreateRequest(
-            account_id=account_id,
-            calendar_id=calendar_id,
-            title=title,
-            start=start,
-            duration=duration,
-            time_zone=time_zone,
-            show_without_time=is_all_day,
-            description=description,
-            locations=locations_dict,
-            participants=participants_dict,
-            free_busy_status=free_busy_status,
-            privacy=privacy,
-            request_virtual_room=request_virtual_room,
-        )
-
-        client = get_client()
-        response = await client.create_event(request)
-
-        return {
-            "success": True,
-            "message": "Event created successfully.",
-            "event": {
-                "id": response.id,
-                "calendarId": response.calendar_id,
-                "accountId": response.account_id,
-            },
-        }
-    except ValidationError as e:
-        return {"error": str(e), "validation_error": True}
-    except MorgenAPIError as e:
-        return {
-            "error": str(e),
-            "status_code": e.status_code,
-        }
-    except Exception as e:
-        return {
-            "error": f"Unexpected error: {e}",
-        }
+    return {
+        "success": True,
+        "message": "Event created successfully.",
+        "event": {
+            "id": response.id,
+            "calendarId": response.calendar_id,
+            "accountId": response.account_id,
+        },
+    }
 
 
+@handle_tool_errors
 async def update_event(
     event_id: str,
     account_id: str,
@@ -263,61 +222,41 @@ async def update_event(
             "all four must be provided together.",
         }
 
-    try:
-        # Validate inputs if provided
-        if start is not None:
-            validate_local_datetime(start, "start")
-        if duration is not None:
-            validate_duration(duration)
-        if time_zone is not None:
-            validate_timezone(time_zone)
+    # Validate inputs if provided
+    if start is not None:
+        validate_local_datetime(start, "start")
+    if duration is not None:
+        validate_duration(duration)
+    if time_zone is not None:
+        validate_timezone(time_zone)
 
-        # Build locations dict if provided
-        locations_dict = None
-        if location is not None:
-            if location:
-                locations_dict = {"1": Location(name=location)}
-            else:
-                # Empty string means remove all locations
-                locations_dict = {}
+    request = EventUpdateRequest(
+        id=event_id,
+        account_id=account_id,
+        calendar_id=calendar_id,
+        title=title,
+        start=start,
+        duration=duration,
+        time_zone=time_zone,
+        show_without_time=is_all_day,
+        description=description,
+        locations=build_locations_dict(location, allow_empty=True),
+        free_busy_status=free_busy_status,
+        privacy=privacy,
+    )
 
-        request = EventUpdateRequest(
-            id=event_id,
-            account_id=account_id,
-            calendar_id=calendar_id,
-            title=title,
-            start=start,
-            duration=duration,
-            time_zone=time_zone,
-            show_without_time=is_all_day,
-            description=description,
-            locations=locations_dict,
-            free_busy_status=free_busy_status,
-            privacy=privacy,
-        )
+    client = get_client()
+    await client.update_event(request, series_update_mode=series_update_mode)
 
-        client = get_client()
-        await client.update_event(request, series_update_mode=series_update_mode)
-
-        return {
-            "success": True,
-            "message": "Event updated successfully.",
-            "eventId": event_id,
-            "seriesUpdateMode": series_update_mode,
-        }
-    except ValidationError as e:
-        return {"error": str(e), "validation_error": True}
-    except MorgenAPIError as e:
-        return {
-            "error": str(e),
-            "status_code": e.status_code,
-        }
-    except Exception as e:
-        return {
-            "error": f"Unexpected error: {e}",
-        }
+    return {
+        "success": True,
+        "message": "Event updated successfully.",
+        "eventId": event_id,
+        "seriesUpdateMode": series_update_mode,
+    }
 
 
+@handle_tool_errors
 async def delete_event(
     event_id: str,
     account_id: str,
@@ -335,28 +274,18 @@ async def delete_event(
     Returns:
         Dictionary indicating success or error.
     """
-    try:
-        request = EventDeleteRequest(
-            id=event_id,
-            account_id=account_id,
-            calendar_id=calendar_id,
-        )
+    request = EventDeleteRequest(
+        id=event_id,
+        account_id=account_id,
+        calendar_id=calendar_id,
+    )
 
-        client = get_client()
-        await client.delete_event(request, series_update_mode=series_update_mode)
+    client = get_client()
+    await client.delete_event(request, series_update_mode=series_update_mode)
 
-        return {
-            "success": True,
-            "message": "Event deleted successfully.",
-            "eventId": event_id,
-            "seriesUpdateMode": series_update_mode,
-        }
-    except MorgenAPIError as e:
-        return {
-            "error": str(e),
-            "status_code": e.status_code,
-        }
-    except Exception as e:
-        return {
-            "error": f"Unexpected error: {e}",
-        }
+    return {
+        "success": True,
+        "message": "Event deleted successfully.",
+        "eventId": event_id,
+        "seriesUpdateMode": series_update_mode,
+    }

@@ -1,6 +1,6 @@
 """Unit tests for MCP tools."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -19,6 +19,18 @@ from morgenmcp.models import (
 )
 from morgenmcp.tools.calendars import list_calendars, update_calendar_metadata
 from morgenmcp.tools.events import create_event, delete_event, list_events, update_event
+
+
+def assert_api_error(result: dict, status_code: int) -> None:
+    """Assert that result contains an API error with the expected status code."""
+    assert "error" in result
+    assert result["status_code"] == status_code
+
+
+def assert_validation_error(result: dict) -> None:
+    """Assert that result contains a validation error."""
+    assert "error" in result
+    assert result.get("validation_error") is True
 
 
 @pytest.fixture
@@ -132,8 +144,7 @@ class TestListCalendars:
 
         result = await list_calendars()
 
-        assert "error" in result
-        assert result["status_code"] == 429
+        assert_api_error(result, 429)
 
     @pytest.mark.asyncio
     async def test_list_calendars_with_no_metadata(self, mock_morgen_client):
@@ -194,8 +205,7 @@ class TestUpdateCalendarMetadata:
             busy=True,
         )
 
-        assert "error" in result
-        assert result["status_code"] == 404
+        assert_api_error(result, 404)
 
 
 class TestListEvents:
@@ -249,8 +259,7 @@ class TestListEvents:
             end="2023-03-02T00:00:00",
         )
 
-        assert "error" in result
-        assert result["status_code"] == 400
+        assert_api_error(result, 400)
 
     @pytest.mark.asyncio
     async def test_list_events_validation_error(self, mock_morgen_client):
@@ -262,8 +271,7 @@ class TestListEvents:
             end="2023-03-02T00:00:00",
         )
 
-        assert "error" in result
-        assert result.get("validation_error") is True
+        assert_validation_error(result)
         assert "Z" in result["error"]
 
 
@@ -358,8 +366,7 @@ class TestCreateEvent:
             time_zone="Europe/Berlin",
         )
 
-        assert "error" in result
-        assert result["status_code"] == 404
+        assert_api_error(result, 404)
 
     @pytest.mark.asyncio
     async def test_create_event_validation_error(self, mock_morgen_client):
@@ -373,8 +380,7 @@ class TestCreateEvent:
             time_zone="Europe/Berlin",
         )
 
-        assert "error" in result
-        assert result.get("validation_error") is True
+        assert_validation_error(result)
         assert "duration" in result["error"].lower()
 
 
@@ -460,8 +466,7 @@ class TestUpdateEvent:
             title="Updated",
         )
 
-        assert "error" in result
-        assert result["status_code"] == 404
+        assert_api_error(result, 404)
 
 
 class TestDeleteEvent:
@@ -509,8 +514,7 @@ class TestDeleteEvent:
             calendar_id="cal789",
         )
 
-        assert "error" in result
-        assert result["status_code"] == 404
+        assert_api_error(result, 404)
 
 
 class TestToolOutputFormat:

@@ -1,10 +1,11 @@
 """MCP tools for Morgen calendar operations."""
 
 from morgenmcp.client import get_client
-from morgenmcp.models import MorgenAPIError
-from morgenmcp.validators import ValidationError, validate_hex_color
+from morgenmcp.tools.utils import handle_tool_errors
+from morgenmcp.validators import validate_hex_color
 
 
+@handle_tool_errors
 async def list_calendars() -> dict:
     """List all calendars across connected calendar accounts.
 
@@ -14,49 +15,40 @@ async def list_calendars() -> dict:
     Returns:
         Dictionary with 'calendars' key containing list of calendar objects.
     """
-    try:
-        client = get_client()
-        calendars = await client.list_calendars()
+    client = get_client()
+    calendars = await client.list_calendars()
 
-        return {
-            "calendars": [
-                {
-                    "id": cal.id,
-                    "accountId": cal.account_id,
-                    "integrationId": cal.integration_id,
-                    "name": cal.name,
-                    "color": cal.color,
-                    "sortOrder": cal.sort_order,
-                    "permissions": {
-                        "canRead": cal.my_rights.may_read_items if cal.my_rights else False,
-                        "canWrite": cal.my_rights.may_write_all if cal.my_rights else False,
-                        "canDelete": cal.my_rights.may_delete if cal.my_rights else False,
-                    }
-                    if cal.my_rights
-                    else None,
-                    "metadata": {
-                        "busy": cal.metadata.busy if cal.metadata else None,
-                        "overrideColor": cal.metadata.override_color if cal.metadata else None,
-                        "overrideName": cal.metadata.override_name if cal.metadata else None,
-                    }
-                    if cal.metadata
-                    else None,
+    return {
+        "calendars": [
+            {
+                "id": cal.id,
+                "accountId": cal.account_id,
+                "integrationId": cal.integration_id,
+                "name": cal.name,
+                "color": cal.color,
+                "sortOrder": cal.sort_order,
+                "permissions": {
+                    "canRead": cal.my_rights.may_read_items if cal.my_rights else False,
+                    "canWrite": cal.my_rights.may_write_all if cal.my_rights else False,
+                    "canDelete": cal.my_rights.may_delete if cal.my_rights else False,
                 }
-                for cal in calendars
-            ],
-            "count": len(calendars),
-        }
-    except MorgenAPIError as e:
-        return {
-            "error": str(e),
-            "status_code": e.status_code,
-        }
-    except Exception as e:
-        return {
-            "error": f"Unexpected error: {e}",
-        }
+                if cal.my_rights
+                else None,
+                "metadata": {
+                    "busy": cal.metadata.busy if cal.metadata else None,
+                    "overrideColor": cal.metadata.override_color if cal.metadata else None,
+                    "overrideName": cal.metadata.override_name if cal.metadata else None,
+                }
+                if cal.metadata
+                else None,
+            }
+            for cal in calendars
+        ],
+        "count": len(calendars),
+    }
 
 
+@handle_tool_errors
 async def update_calendar_metadata(
     calendar_id: str,
     account_id: str,
@@ -84,39 +76,26 @@ async def update_calendar_metadata(
             "error": "At least one of busy, override_color, or override_name must be provided.",
         }
 
-    try:
-        # Validate inputs
-        if override_color is not None:
-            validate_hex_color(override_color)
+    if override_color is not None:
+        validate_hex_color(override_color)
 
-        client = get_client()
-        await client.update_calendar_metadata(
-            calendar_id=calendar_id,
-            account_id=account_id,
-            busy=busy,
-            override_color=override_color,
-            override_name=override_name,
-        )
+    client = get_client()
+    await client.update_calendar_metadata(
+        calendar_id=calendar_id,
+        account_id=account_id,
+        busy=busy,
+        override_color=override_color,
+        override_name=override_name,
+    )
 
-        return {
-            "success": True,
-            "message": "Calendar metadata updated successfully.",
-            "updated": {
-                "calendarId": calendar_id,
-                "accountId": account_id,
-                "busy": busy,
-                "overrideColor": override_color,
-                "overrideName": override_name,
-            },
-        }
-    except ValidationError as e:
-        return {"error": str(e), "validation_error": True}
-    except MorgenAPIError as e:
-        return {
-            "error": str(e),
-            "status_code": e.status_code,
-        }
-    except Exception as e:
-        return {
-            "error": f"Unexpected error: {e}",
-        }
+    return {
+        "success": True,
+        "message": "Calendar metadata updated successfully.",
+        "updated": {
+            "calendarId": calendar_id,
+            "accountId": account_id,
+            "busy": busy,
+            "overrideColor": override_color,
+            "overrideName": override_name,
+        },
+    }
