@@ -252,12 +252,18 @@ class EventsListResponse(BaseModel):
     events: list[Event]
 
 
-class EventCreateResponse(MorgenModel):
-    """Response from event create endpoint."""
+class CreatedEventInfo(MorgenModel):
+    """Information about a newly created event."""
 
     id: str
     calendar_id: str = Field(alias="calendarId")
     account_id: str = Field(alias="accountId")
+
+
+class EventCreateResponse(MorgenModel):
+    """Response from event create endpoint."""
+
+    event: CreatedEventInfo
 
 
 class APIResponse[T](BaseModel):

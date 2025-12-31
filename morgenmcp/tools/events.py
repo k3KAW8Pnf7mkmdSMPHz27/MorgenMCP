@@ -167,9 +167,9 @@ async def create_event(
         "success": True,
         "message": "Event created successfully.",
         "event": {
-            "id": response.id,
-            "calendarId": response.calendar_id,
-            "accountId": response.account_id,
+            "id": response.event.id,
+            "calendarId": response.event.calendar_id,
+            "accountId": response.event.account_id,
         },
     }
 

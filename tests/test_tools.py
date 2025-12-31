@@ -8,6 +8,7 @@ from morgenmcp.models import (
     Calendar,
     CalendarMetadata,
     CalendarRights,
+    CreatedEventInfo,
     Event,
     EventCreateResponse,
     EventDerived,
@@ -282,9 +283,11 @@ class TestCreateEvent:
     async def test_create_event_success(self, mock_morgen_client):
         """Test successful event creation."""
         mock_morgen_client.create_event.return_value = EventCreateResponse(
-            id="new_evt_123",
-            calendar_id="cal456",
-            account_id="acc789",
+            event=CreatedEventInfo(
+                id="new_evt_123",
+                calendar_id="cal456",
+                account_id="acc789",
+            )
         )
 
         result = await create_event(
@@ -303,9 +306,11 @@ class TestCreateEvent:
     async def test_create_event_with_location(self, mock_morgen_client):
         """Test event creation with location."""
         mock_morgen_client.create_event.return_value = EventCreateResponse(
-            id="new_evt_123",
-            calendar_id="cal456",
-            account_id="acc789",
+            event=CreatedEventInfo(
+                id="new_evt_123",
+                calendar_id="cal456",
+                account_id="acc789",
+            )
         )
 
         result = await create_event(
@@ -328,9 +333,11 @@ class TestCreateEvent:
     async def test_create_event_with_participants(self, mock_morgen_client):
         """Test event creation with participants."""
         mock_morgen_client.create_event.return_value = EventCreateResponse(
-            id="new_evt_123",
-            calendar_id="cal456",
-            account_id="acc789",
+            event=CreatedEventInfo(
+                id="new_evt_123",
+                calendar_id="cal456",
+                account_id="acc789",
+            )
         )
 
         result = await create_event(

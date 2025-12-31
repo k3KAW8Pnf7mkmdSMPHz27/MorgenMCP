@@ -282,14 +282,16 @@ class TestEventModels:
     def test_event_create_response(self):
         """Test EventCreateResponse parsing."""
         data = {
-            "id": "new_evt_123",
-            "calendarId": "cal456",
-            "accountId": "acc789",
+            "event": {
+                "id": "new_evt_123",
+                "calendarId": "cal456",
+                "accountId": "acc789",
+            }
         }
         response = EventCreateResponse.model_validate(data)
 
-        assert response.id == "new_evt_123"
-        assert response.calendar_id == "cal456"
+        assert response.event.id == "new_evt_123"
+        assert response.event.calendar_id == "cal456"
 
     def test_events_list_response(self):
         """Test EventsListResponse parsing."""
