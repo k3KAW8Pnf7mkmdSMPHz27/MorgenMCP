@@ -8,8 +8,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 uv sync --all-extras                    # Install dependencies
 echo "MORGEN_API_KEY=..." > .env        # Configure API key (loaded automatically)
 uv run morgenmcp                        # Run server
-uv run pytest                           # Run all tests
+uv run pytest                           # Run all tests (excludes integration)
 uv run pytest tests/test_tools.py::TestCreateEvent -v  # Run specific test class
+uv run pytest tests/test_integration.py -v -s -m integration  # Run live API tests
 ```
 
 ## Local Debugging
@@ -33,7 +34,13 @@ FastMCP-based MCP server wrapping the Morgen calendar API (https://api.morgen.so
 
 - Tools return `{"success": True, ...}` or `{"error": "...", "status_code": N}` or `{"error": "...", "validation_error": True}`
 - Datetime fields use LocalDateTime format (`2023-03-01T10:00:00`) - no Z suffix; timezone is separate
-- Tests mock via `patch("morgenmcp.tools.*.get_client")`
+- `EventCreateResponse` has nested structure: `response.event.id`, not `response.id`
+
+### Testing
+
+- **Tool tests** (`test_tools.py`): Mock via `patch("morgenmcp.tools.*.get_client")`
+- **Client tests** (`test_client.py`): Mock HTTP via `@respx.mock` decorator on test methods
+- **Integration tests** (`test_integration.py`): Hit real API, excluded from CI via pytest marker
 
 ## Versioning & Release
 
