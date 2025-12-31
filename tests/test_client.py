@@ -172,10 +172,10 @@ class TestClientErrorHandling:
         mock_client._handle_error(response)
 
 
-@respx.mock
 class TestCalendarEndpoints:
     """Tests for calendar API endpoints."""
 
+    @respx.mock
     @pytest.mark.asyncio
     async def test_list_calendars_success(self):
         """Test successful calendar listing."""
@@ -205,6 +205,7 @@ class TestCalendarEndpoints:
         assert calendars[0].id == "cal123"
         assert calendars[0].name == "Work"
 
+    @respx.mock
     @pytest.mark.asyncio
     async def test_list_calendars_empty(self):
         """Test calendar listing with no calendars."""
@@ -220,6 +221,7 @@ class TestCalendarEndpoints:
 
         assert len(calendars) == 0
 
+    @respx.mock
     @pytest.mark.asyncio
     async def test_update_calendar_metadata_success(self):
         """Test successful calendar metadata update."""
@@ -237,10 +239,10 @@ class TestCalendarEndpoints:
             )
 
 
-@respx.mock
 class TestEventEndpoints:
     """Tests for event API endpoints."""
 
+    @respx.mock
     @pytest.mark.asyncio
     async def test_list_events_success(self):
         """Test successful event listing."""
@@ -278,6 +280,7 @@ class TestEventEndpoints:
         assert events[0].id == "evt123"
         assert events[0].title == "Meeting"
 
+    @respx.mock
     @pytest.mark.asyncio
     async def test_list_events_query_params(self):
         """Test that list_events sends correct query parameters."""
@@ -298,6 +301,7 @@ class TestEventEndpoints:
         assert "accountId=acc123" in str(request.url)
         assert "calendarIds=cal1%2Ccal2" in str(request.url)  # URL encoded comma
 
+    @respx.mock
     @pytest.mark.asyncio
     async def test_create_event_success(self):
         """Test successful event creation."""
@@ -306,9 +310,11 @@ class TestEventEndpoints:
                 200,
                 json={
                     "data": {
-                        "id": "new_evt_123",
-                        "calendarId": "cal456",
-                        "accountId": "acc789",
+                        "event": {
+                            "id": "new_evt_123",
+                            "calendarId": "cal456",
+                            "accountId": "acc789",
+                        }
                     }
                 },
             )
@@ -326,9 +332,10 @@ class TestEventEndpoints:
             )
             response = await client.create_event(request)
 
-        assert response.id == "new_evt_123"
-        assert response.calendar_id == "cal456"
+        assert response.event.id == "new_evt_123"
+        assert response.event.calendar_id == "cal456"
 
+    @respx.mock
     @pytest.mark.asyncio
     async def test_update_event_success(self):
         """Test successful event update."""
@@ -346,6 +353,7 @@ class TestEventEndpoints:
             # Should not raise
             await client.update_event(request)
 
+    @respx.mock
     @pytest.mark.asyncio
     async def test_update_event_series_mode(self):
         """Test event update with series update mode."""
@@ -366,6 +374,7 @@ class TestEventEndpoints:
         request_made = route.calls.last.request
         assert "seriesUpdateMode=all" in str(request_made.url)
 
+    @respx.mock
     @pytest.mark.asyncio
     async def test_delete_event_success(self):
         """Test successful event deletion."""
