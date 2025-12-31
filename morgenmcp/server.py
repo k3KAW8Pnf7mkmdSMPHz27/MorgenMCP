@@ -82,8 +82,8 @@ async def morgen_list_events(
     Args:
         account_id: The calendar account ID (from list_calendars).
         calendar_ids: List of calendar IDs (must all belong to the same account).
-        start: Start of time window in ISO 8601 format (e.g., "2023-03-01T00:00:00Z").
-        end: End of time window in ISO 8601 format. Max 6 months from start.
+        start: Start of time window in LocalDateTime format (e.g., "2023-03-01T00:00:00") - no Z suffix.
+        end: End of time window in LocalDateTime format. Max 6 months from start.
     """
     return await list_events(
         account_id=account_id,

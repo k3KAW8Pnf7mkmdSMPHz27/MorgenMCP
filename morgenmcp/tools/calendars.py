@@ -2,6 +2,7 @@
 
 from morgenmcp.client import get_client
 from morgenmcp.models import MorgenAPIError
+from morgenmcp.validators import ValidationError, validate_hex_color
 
 
 async def list_calendars() -> dict:
@@ -84,6 +85,10 @@ async def update_calendar_metadata(
         }
 
     try:
+        # Validate inputs
+        if override_color is not None:
+            validate_hex_color(override_color)
+
         client = get_client()
         await client.update_calendar_metadata(
             calendar_id=calendar_id,
@@ -104,6 +109,8 @@ async def update_calendar_metadata(
                 "overrideName": override_name,
             },
         }
+    except ValidationError as e:
+        return {"error": str(e), "validation_error": True}
     except MorgenAPIError as e:
         return {
             "error": str(e),

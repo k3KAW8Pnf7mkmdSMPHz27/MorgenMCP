@@ -12,6 +12,14 @@ from morgenmcp.models import (
     Participant,
     ParticipantRoles,
 )
+from morgenmcp.validators import (
+    ValidationError,
+    validate_date_range,
+    validate_duration,
+    validate_email,
+    validate_local_datetime,
+    validate_timezone,
+)
 
 
 async def list_events(
@@ -28,13 +36,21 @@ async def list_events(
     Args:
         account_id: The calendar account ID to retrieve events from.
         calendar_ids: List of calendar IDs (must all belong to the same account).
-        start: Start of time window in ISO 8601 format (e.g., "2023-03-01T00:00:00Z").
-        end: End of time window in ISO 8601 format. Max 6 months from start.
+        start: Start of time window in LocalDateTime format (e.g., "2023-03-01T00:00:00").
+        end: End of time window in LocalDateTime format. Max 6 months from start.
 
     Returns:
         Dictionary with 'events' key containing list of event objects.
     """
     try:
+        # Validate inputs
+        validate_local_datetime(start, "start")
+        validate_local_datetime(end, "end")
+        validate_date_range(start, end)
+
+        if not calendar_ids:
+            return {"error": "calendar_ids cannot be empty"}
+
         client = get_client()
         events = await client.list_events(
             account_id=account_id,
@@ -83,6 +99,8 @@ async def list_events(
             ],
             "count": len(events),
         }
+    except ValidationError as e:
+        return {"error": str(e), "validation_error": True}
     except MorgenAPIError as e:
         return {
             "error": str(e),
@@ -130,6 +148,15 @@ async def create_event(
         Dictionary with created event ID and details.
     """
     try:
+        # Validate inputs
+        validate_local_datetime(start, "start")
+        validate_duration(duration)
+        validate_timezone(time_zone)
+
+        if participants:
+            for email in participants:
+                validate_email(email)
+
         # Build locations dict if provided
         locations_dict = None
         if location:
@@ -176,6 +203,8 @@ async def create_event(
                 "accountId": response.account_id,
             },
         }
+    except ValidationError as e:
+        return {"error": str(e), "validation_error": True}
     except MorgenAPIError as e:
         return {
             "error": str(e),
@@ -235,6 +264,14 @@ async def update_event(
         }
 
     try:
+        # Validate inputs if provided
+        if start is not None:
+            validate_local_datetime(start, "start")
+        if duration is not None:
+            validate_duration(duration)
+        if time_zone is not None:
+            validate_timezone(time_zone)
+
         # Build locations dict if provided
         locations_dict = None
         if location is not None:
@@ -268,6 +305,8 @@ async def update_event(
             "eventId": event_id,
             "seriesUpdateMode": series_update_mode,
         }
+    except ValidationError as e:
+        return {"error": str(e), "validation_error": True}
     except MorgenAPIError as e:
         return {
             "error": str(e),

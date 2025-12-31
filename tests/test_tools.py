@@ -209,8 +209,8 @@ class TestListEvents:
         result = await list_events(
             account_id="acc789",
             calendar_ids=["cal456"],
-            start="2023-03-01T00:00:00Z",
-            end="2023-03-02T00:00:00Z",
+            start="2023-03-01T00:00:00",
+            end="2023-03-02T00:00:00",
         )
 
         assert "events" in result
@@ -228,8 +228,8 @@ class TestListEvents:
         result = await list_events(
             account_id="acc789",
             calendar_ids=["cal456"],
-            start="2023-03-01T00:00:00Z",
-            end="2023-03-02T00:00:00Z",
+            start="2023-03-01T00:00:00",
+            end="2023-03-02T00:00:00",
         )
 
         assert result["events"] == []
@@ -245,12 +245,26 @@ class TestListEvents:
         result = await list_events(
             account_id="acc789",
             calendar_ids=["cal456"],
-            start="invalid",
-            end="invalid",
+            start="2023-03-01T00:00:00",
+            end="2023-03-02T00:00:00",
         )
 
         assert "error" in result
         assert result["status_code"] == 400
+
+    @pytest.mark.asyncio
+    async def test_list_events_validation_error(self, mock_morgen_client):
+        """Test event listing with validation error (Z suffix)."""
+        result = await list_events(
+            account_id="acc789",
+            calendar_ids=["cal456"],
+            start="2023-03-01T00:00:00Z",
+            end="2023-03-02T00:00:00",
+        )
+
+        assert "error" in result
+        assert result.get("validation_error") is True
+        assert "Z" in result["error"]
 
 
 class TestCreateEvent:
@@ -332,9 +346,24 @@ class TestCreateEvent:
     async def test_create_event_api_error(self, mock_morgen_client):
         """Test event creation with API error."""
         mock_morgen_client.create_event.side_effect = MorgenAPIError(
-            "Invalid duration format", status_code=400
+            "Calendar not found", status_code=404
         )
 
+        result = await create_event(
+            account_id="acc789",
+            calendar_id="cal456",
+            title="Bad Event",
+            start="2023-03-15T14:00:00",
+            duration="PT1H",
+            time_zone="Europe/Berlin",
+        )
+
+        assert "error" in result
+        assert result["status_code"] == 404
+
+    @pytest.mark.asyncio
+    async def test_create_event_validation_error(self, mock_morgen_client):
+        """Test event creation with validation error (invalid duration)."""
         result = await create_event(
             account_id="acc789",
             calendar_id="cal456",
@@ -345,7 +374,8 @@ class TestCreateEvent:
         )
 
         assert "error" in result
-        assert result["status_code"] == 400
+        assert result.get("validation_error") is True
+        assert "duration" in result["error"].lower()
 
 
 class TestUpdateEvent:
