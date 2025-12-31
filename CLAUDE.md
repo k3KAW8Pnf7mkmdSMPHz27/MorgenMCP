@@ -5,12 +5,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Quick Reference
 
 ```bash
-uv sync --all-extras          # Install dependencies
-export MORGEN_API_KEY="..."   # Set API key
-uv run morgenmcp              # Run server
-uv run pytest                 # Run tests
-uv run pytest tests/test_models.py -v  # Run specific test file
+uv sync --all-extras                    # Install dependencies
+echo "MORGEN_API_KEY=..." > .env        # Configure API key (loaded automatically)
+uv run morgenmcp                        # Run server
+uv run pytest                           # Run all tests
+uv run pytest tests/test_tools.py::TestCreateEvent -v  # Run specific test class
 ```
+
+## Local Debugging
+
+```bash
+npx @modelcontextprotocol/inspector -e MORGEN_API_KEY=$MORGEN_API_KEY uv run morgenmcp
+```
+Opens Inspector UI at http://localhost:6274 for testing tools interactively.
 
 ## Architecture
 

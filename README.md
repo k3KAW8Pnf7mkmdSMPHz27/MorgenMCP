@@ -59,22 +59,15 @@ uv run pytest
 
 ### Environment Setup
 
-Run the setup script to configure your development environment:
+Create a `.env` file with your API key:
 
 ```bash
-uv run setup-dev
+echo "MORGEN_API_KEY=your_api_key" > .env
 ```
 
-This script will:
-1. Check that [direnv](https://direnv.net/) is installed (with instructions if not)
-2. Prompt for your Morgen API key
-3. Create a `.envrc` file with your key
-4. Enable direnv for this directory
-
-Once complete, your API key will be automatically available whenever you're in the project directory:
+The server loads `.env` automatically when running locally:
 
 ```bash
-# Run the server locally
 uv run morgenmcp
 ```
 

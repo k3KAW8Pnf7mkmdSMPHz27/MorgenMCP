@@ -1,5 +1,9 @@
 """FastMCP server for Morgen calendar API."""
 
+from dotenv import load_dotenv
+
+load_dotenv()  # Load .env from CWD if present
+
 from typing import Literal
 
 from fastmcp import FastMCP
