@@ -15,9 +15,9 @@ uv run pytest tests/test_tools.py::TestCreateEvent -v  # Run specific test class
 ## Local Debugging
 
 ```bash
-npx @modelcontextprotocol/inspector -e MORGEN_API_KEY=$MORGEN_API_KEY uv run morgenmcp
+npx @modelcontextprotocol/inspector uv run morgenmcp
 ```
-Opens Inspector UI at http://localhost:6274 for testing tools interactively.
+Opens Inspector UI at http://localhost:6274 for testing tools.
 
 ## Architecture
 
