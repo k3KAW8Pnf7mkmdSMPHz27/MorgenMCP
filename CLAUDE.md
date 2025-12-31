@@ -26,11 +26,13 @@ FastMCP-based MCP server wrapping the Morgen calendar API (https://api.morgen.so
 - **`server.py`** - Entry point with `@mcp.tool()` decorators delegating to tools modules
 - **`client.py`** - Async HTTP client; global instance via `get_client()`
 - **`models.py`** - Pydantic models with `Field(alias="...")` for camelCase API mapping
+- **`validators.py`** - Input validation (datetime, duration, timezone, email, color)
 - **`tools/`** - Tool implementations (`calendars.py`, `events.py`)
 
 ### Patterns
 
-- Tools return `{"success": True, ...}` or `{"error": "...", "status_code": N}`
+- Tools return `{"success": True, ...}` or `{"error": "...", "status_code": N}` or `{"error": "...", "validation_error": True}`
+- Datetime fields use LocalDateTime format (`2023-03-01T10:00:00`) - no Z suffix; timezone is separate
 - Tests mock via `patch("morgenmcp.tools.*.get_client")`
 
 ## Versioning & Release
