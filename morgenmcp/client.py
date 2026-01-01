@@ -6,6 +6,8 @@ from typing import Any
 import httpx
 
 from morgenmcp.models import (
+    Account,
+    AccountsListResponse,
     APIResponse,
     Calendar,
     CalendarsListResponse,
@@ -124,6 +126,21 @@ class MorgenClient:
                 status_code=response.status_code,
                 rate_limit_info=rate_limit_info,
             )
+
+    # Account endpoints
+
+    async def list_accounts(self) -> list[Account]:
+        """List all connected calendar accounts.
+
+        Returns:
+            List of Account objects.
+        """
+        response = await self.client.get("/integrations/accounts/list")
+        self._handle_error(response)
+
+        data = response.json()
+        api_response = APIResponse[AccountsListResponse].model_validate(data)
+        return api_response.data.accounts
 
     # Calendar endpoints
 

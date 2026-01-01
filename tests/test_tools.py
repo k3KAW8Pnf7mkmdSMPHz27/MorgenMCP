@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from morgenmcp.models import (
+    Account,
     Calendar,
     CalendarMetadata,
     CalendarRights,
@@ -18,6 +19,7 @@ from morgenmcp.models import (
     ParticipantRoles,
     VirtualRoom,
 )
+from morgenmcp.tools.accounts import list_accounts
 from morgenmcp.tools.calendars import list_calendars, update_calendar_metadata
 from morgenmcp.tools.events import create_event, delete_event, list_events, update_event
 
@@ -37,9 +39,11 @@ def assert_validation_error(result: dict) -> None:
 @pytest.fixture
 def mock_morgen_client():
     """Create a mock Morgen client."""
-    with patch("morgenmcp.tools.calendars.get_client") as cal_mock, \
+    with patch("morgenmcp.tools.accounts.get_client") as acc_mock, \
+         patch("morgenmcp.tools.calendars.get_client") as cal_mock, \
          patch("morgenmcp.tools.events.get_client") as evt_mock:
         client = AsyncMock()
+        acc_mock.return_value = client
         cal_mock.return_value = client
         evt_mock.return_value = client
         yield client
@@ -108,6 +112,84 @@ def sample_event():
             virtual_room=VirtualRoom(url="https://meet.google.com/abc-defg-hij")
         ),
     )
+
+
+@pytest.fixture
+def sample_account():
+    """Create a sample account for testing."""
+    return Account(
+        id="acc123",
+        provider_id="provider-uuid-456",
+        integration_id="google",
+        provider_user_id="user@gmail.com",
+        provider_user_display_name="Test User",
+    )
+
+
+class TestListAccounts:
+    """Tests for list_accounts tool."""
+
+    @pytest.mark.asyncio
+    async def test_list_accounts_success(self, mock_morgen_client, sample_account):
+        """Test successful account listing."""
+        mock_morgen_client.list_accounts.return_value = [sample_account]
+
+        result = await list_accounts()
+
+        assert "accounts" in result
+        assert result["count"] == 1
+        assert result["accounts"][0]["id"] == "acc123"
+        assert result["accounts"][0]["integrationId"] == "google"
+        assert result["accounts"][0]["email"] == "user@gmail.com"
+        assert result["accounts"][0]["displayName"] == "Test User"
+
+    @pytest.mark.asyncio
+    async def test_list_accounts_empty(self, mock_morgen_client):
+        """Test account listing with no accounts."""
+        mock_morgen_client.list_accounts.return_value = []
+
+        result = await list_accounts()
+
+        assert result["accounts"] == []
+        assert result["count"] == 0
+
+    @pytest.mark.asyncio
+    async def test_list_accounts_api_error(self, mock_morgen_client):
+        """Test account listing with API error."""
+        mock_morgen_client.list_accounts.side_effect = MorgenAPIError(
+            "Authentication failed", status_code=401
+        )
+
+        result = await list_accounts()
+
+        assert_api_error(result, 401)
+
+    @pytest.mark.asyncio
+    async def test_list_accounts_multiple(self, mock_morgen_client):
+        """Test listing multiple accounts."""
+        accounts = [
+            Account(
+                id="acc1",
+                provider_id="p1",
+                integration_id="google",
+                provider_user_id="user1@gmail.com",
+                provider_user_display_name="User One",
+            ),
+            Account(
+                id="acc2",
+                provider_id="p2",
+                integration_id="o365",
+                provider_user_id="user2@outlook.com",
+                provider_user_display_name="User Two",
+            ),
+        ]
+        mock_morgen_client.list_accounts.return_value = accounts
+
+        result = await list_accounts()
+
+        assert result["count"] == 2
+        assert result["accounts"][0]["integrationId"] == "google"
+        assert result["accounts"][1]["integrationId"] == "o365"
 
 
 class TestListCalendars:

@@ -240,6 +240,22 @@ class EventDeleteRequest(MorgenModel):
     calendar_id: str = Field(alias="calendarId")
 
 
+class Account(MorgenModel):
+    """Connected calendar account."""
+
+    id: str
+    provider_id: str = Field(alias="providerId")
+    integration_id: str = Field(alias="integrationId")
+    provider_user_id: str = Field(alias="providerUserId")
+    provider_user_display_name: str = Field(alias="providerUserDisplayName")
+
+
+class AccountsListResponse(BaseModel):
+    """Response from accounts list endpoint."""
+
+    accounts: list[Account]
+
+
 class CalendarsListResponse(BaseModel):
     """Response from calendars list endpoint."""
 

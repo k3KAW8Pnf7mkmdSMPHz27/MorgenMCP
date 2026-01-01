@@ -6,6 +6,7 @@ load_dotenv()  # Load .env from CWD if present
 
 from fastmcp import FastMCP
 
+from morgenmcp.tools.accounts import list_accounts
 from morgenmcp.tools.calendars import list_calendars, update_calendar_metadata
 from morgenmcp.tools.events import create_event, delete_event, list_events, update_event
 
@@ -15,6 +16,7 @@ mcp = FastMCP(
     instructions="""
     Morgen Calendar MCP Server provides access to Morgen's unified calendar API.
 
+    Use list_accounts to see connected calendar accounts.
     Use list_calendars to discover available calendars and their IDs.
     Use list_events to retrieve events from specific calendars within a time window.
     Use create_event, update_event, and delete_event to manage calendar events.
@@ -28,6 +30,7 @@ mcp = FastMCP(
 )
 
 # Register tools directly - docstrings come from the tool functions
+mcp.tool(name="morgen_list_accounts")(list_accounts)
 mcp.tool(name="morgen_list_calendars")(list_calendars)
 mcp.tool(name="morgen_update_calendar_metadata")(update_calendar_metadata)
 mcp.tool(name="morgen_list_events")(list_events)
