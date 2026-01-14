@@ -1,16 +1,23 @@
 """MCP tools for Morgen event operations."""
 
-from typing import Literal
+import asyncio
+from collections import defaultdict
+from datetime import datetime
+from typing import Any, Literal
 
 from morgenmcp.client import get_client
 from morgenmcp.models import (
+    Event,
     EventCreateRequest,
     EventDeleteRequest,
     EventUpdateRequest,
 )
+from morgenmcp.tools.id_registry import register_id, resolve_id, resolve_ids
+from morgenmcp.tools.id_utils import extract_account_from_calendar, extract_ids_from_event
 from morgenmcp.tools.utils import (
     build_locations_dict,
     build_participants_dict,
+    filter_none_values,
     handle_tool_errors,
 )
 from morgenmcp.validators import (
@@ -22,87 +29,174 @@ from morgenmcp.validators import (
 )
 
 
+def _format_compact_event(event: Event) -> str:
+    """Format an event in compact one-liner format with virtual ID."""
+    virtual_id = register_id(event.id)
+    title = event.title or "(No title)"
+
+    if event.show_without_time:
+        # All-day event: "Mar 15 (all-day): Holiday [abc123]"
+        try:
+            dt = datetime.fromisoformat(event.start)
+            date_str = dt.strftime("%b %d")
+        except (ValueError, TypeError):
+            date_str = event.start
+        return f"{date_str} (all-day): {title} [{virtual_id}]"
+    else:
+        # Timed event: "10:00-11:00: Team standup [abc123]"
+        try:
+            start_dt = datetime.fromisoformat(event.start)
+            start_str = start_dt.strftime("%H:%M")
+
+            # Parse duration (e.g., PT1H, PT30M, PT1H30M)
+            duration = event.duration or "PT0M"
+            hours = 0
+            minutes = 0
+            if "H" in duration:
+                h_part = duration.split("H")[0].replace("PT", "")
+                hours = int(h_part) if h_part else 0
+                remaining = duration.split("H")[1] if "H" in duration else duration
+            else:
+                remaining = duration.replace("PT", "")
+            if "M" in remaining:
+                m_part = remaining.replace("M", "")
+                minutes = int(m_part) if m_part else 0
+
+            from datetime import timedelta
+
+            end_dt = start_dt + timedelta(hours=hours, minutes=minutes)
+            end_str = end_dt.strftime("%H:%M")
+            return f"{start_str}-{end_str}: {title} [{virtual_id}]"
+        except (ValueError, TypeError):
+            return f"{event.start}: {title} [{virtual_id}]"
+
+
+def _format_full_event(event: Event) -> dict[str, Any]:
+    """Format an event in full format with all fields and virtual IDs."""
+    return filter_none_values({
+        "id": register_id(event.id),
+        "calendarId": register_id(event.calendar_id),
+        "accountId": register_id(event.account_id),
+        "title": event.title,
+        "description": event.description,
+        "start": event.start,
+        "duration": event.duration,
+        "timeZone": event.time_zone,
+        "isAllDay": event.show_without_time,
+        "status": event.free_busy_status,
+        "privacy": event.privacy,
+        "locations": [
+            {"name": loc.name} for loc in (event.locations or {}).values()
+        ],
+        "participants": [
+            {
+                "name": p.name,
+                "email": p.email,
+                "status": p.participation_status,
+                "isOrganizer": p.roles.owner if p.roles else False,
+            }
+            for p in (event.participants or {}).values()
+        ],
+        "isRecurring": event.recurrence_rules is not None,
+        "recurrenceId": event.recurrence_id,
+        "masterEventId": register_id(event.master_event_id) if event.master_event_id else None,
+        "virtualRoomUrl": (
+            event.derived.virtual_room.url
+            if event.derived and event.derived.virtual_room
+            else None
+        ),
+    })
+
+
 @handle_tool_errors
 async def list_events(
-    account_id: str,
-    calendar_ids: list[str],
     start: str,
     end: str,
+    calendar_ids: list[str] | None = None,
+    compact: bool = False,
 ) -> dict:
-    """List events from specified calendars within a time window.
+    """List events from calendars within a time window.
 
     Recurring events are automatically expanded to individual occurrences.
     Deleted or cancelled events are not included.
 
     Args:
-        account_id: The calendar account ID to retrieve events from.
-        calendar_ids: List of calendar IDs (must all belong to the same account).
         start: Start of time window in LocalDateTime format (e.g., "2023-03-01T00:00:00").
         end: End of time window in LocalDateTime format. Max 6 months from start.
+        calendar_ids: Optional list of virtual calendar IDs. If omitted, queries all calendars.
+        compact: If True, returns compact one-liner format to reduce tokens.
+            Format: "10:00-11:00: Meeting title [event_id]"
 
     Returns:
-        Dictionary with 'events' key containing list of event objects.
+        Dictionary with 'events' key containing list of event objects (or strings if compact).
     """
     validate_local_datetime(start, "start")
     validate_local_datetime(end, "end")
     validate_date_range(start, end)
 
-    if not calendar_ids:
-        return {"error": "calendar_ids cannot be empty"}
-
     client = get_client()
-    events = await client.list_events(
-        account_id=account_id,
-        calendar_ids=calendar_ids,
-        start=start,
-        end=end,
-    )
+    all_events: list[Event] = []
 
-    return {
-        "events": [
-            {
-                "id": event.id,
-                "calendarId": event.calendar_id,
-                "accountId": event.account_id,
-                "title": event.title,
-                "description": event.description,
-                "start": event.start,
-                "duration": event.duration,
-                "timeZone": event.time_zone,
-                "isAllDay": event.show_without_time,
-                "status": event.free_busy_status,
-                "privacy": event.privacy,
-                "locations": [
-                    {"name": loc.name}
-                    for loc in (event.locations or {}).values()
-                ],
-                "participants": [
-                    {
-                        "name": p.name,
-                        "email": p.email,
-                        "status": p.participation_status,
-                        "isOrganizer": p.roles.owner if p.roles else False,
-                    }
-                    for p in (event.participants or {}).values()
-                ],
-                "isRecurring": event.recurrence_rules is not None,
-                "recurrenceId": event.recurrence_id,
-                "masterEventId": event.master_event_id,
-                "virtualRoomUrl": (
-                    event.derived.virtual_room.url
-                    if event.derived and event.derived.virtual_room
-                    else None
-                ),
-            }
-            for event in events
-        ],
-        "count": len(events),
-    }
+    if calendar_ids is not None:
+        # Specific calendars requested - resolve virtual IDs and extract account
+        if not calendar_ids:
+            return {"error": "calendar_ids cannot be empty when provided"}
+
+        real_calendar_ids = resolve_ids(calendar_ids)
+        # Extract account ID from first calendar (all calendars in a query must be from same account)
+        real_account_id = extract_account_from_calendar(real_calendar_ids[0])
+
+        all_events = await client.list_events(
+            account_id=real_account_id,
+            calendar_ids=real_calendar_ids,
+            start=start,
+            end=end,
+        )
+    else:
+        # Fetch all calendars and query by account
+        calendars = await client.list_calendars()
+
+        # Group calendars by account_id (using real IDs internally)
+        calendars_by_account: dict[str, list[str]] = defaultdict(list)
+        for cal in calendars:
+            calendars_by_account[cal.account_id].append(cal.id)
+
+        # Query events for each account in parallel
+        async def fetch_account_events(acc_id: str, cal_ids: list[str]) -> list[Event]:
+            return await client.list_events(
+                account_id=acc_id,
+                calendar_ids=cal_ids,
+                start=start,
+                end=end,
+            )
+
+        tasks = [
+            fetch_account_events(acc_id, cal_ids)
+            for acc_id, cal_ids in calendars_by_account.items()
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for result in results:
+            if isinstance(result, Exception):
+                # Skip failed accounts, continue with others
+                continue
+            all_events.extend(result)
+
+    # Format output (IDs are registered during formatting)
+    if compact:
+        return {
+            "events": [_format_compact_event(event) for event in all_events],
+            "count": len(all_events),
+        }
+    else:
+        return {
+            "events": [_format_full_event(event) for event in all_events],
+            "count": len(all_events),
+        }
 
 
 @handle_tool_errors
 async def create_event(
-    account_id: str,
     calendar_id: str,
     title: str,
     start: str,
@@ -119,8 +213,7 @@ async def create_event(
     """Create a new calendar event.
 
     Args:
-        account_id: The ID of the account to create the event in.
-        calendar_id: The ID of the calendar to create the event in.
+        calendar_id: The virtual ID of the calendar to create the event in.
         title: The event title/summary.
         start: Start time in LocalDateTime format (e.g., "2023-03-01T10:15:00").
         duration: Duration in ISO 8601 format (e.g., "PT1H" for 1 hour, "PT30M" for 30 min).
@@ -144,9 +237,13 @@ async def create_event(
         for email in participants:
             validate_email(email)
 
+    # Resolve virtual calendar ID and extract account ID
+    real_calendar_id = resolve_id(calendar_id)
+    real_account_id = extract_account_from_calendar(real_calendar_id)
+
     request = EventCreateRequest(
-        account_id=account_id,
-        calendar_id=calendar_id,
+        account_id=real_account_id,
+        calendar_id=real_calendar_id,
         title=title,
         start=start,
         duration=duration,
@@ -163,13 +260,14 @@ async def create_event(
     client = get_client()
     response = await client.create_event(request)
 
+    # Register and return virtual IDs
     return {
         "success": True,
         "message": "Event created successfully.",
         "event": {
-            "id": response.event.id,
-            "calendarId": response.event.calendar_id,
-            "accountId": response.event.account_id,
+            "id": register_id(response.event.id),
+            "calendarId": register_id(response.event.calendar_id),
+            "accountId": register_id(response.event.account_id),
         },
     }
 
@@ -177,8 +275,6 @@ async def create_event(
 @handle_tool_errors
 async def update_event(
     event_id: str,
-    account_id: str,
-    calendar_id: str,
     title: str | None = None,
     start: str | None = None,
     duration: str | None = None,
@@ -196,9 +292,7 @@ async def update_event(
     fields (start, duration, time_zone, is_all_day), you must provide all four.
 
     Args:
-        event_id: The Morgen ID of the event to update.
-        account_id: The ID of the account the event belongs to.
-        calendar_id: The ID of the calendar the event belongs to.
+        event_id: The virtual ID of the event to update.
         title: New event title.
         start: New start time in LocalDateTime format.
         duration: New duration in ISO 8601 format.
@@ -230,10 +324,14 @@ async def update_event(
     if time_zone is not None:
         validate_timezone(time_zone)
 
+    # Resolve virtual event ID and extract account/calendar IDs
+    real_event_id = resolve_id(event_id)
+    real_account_id, real_calendar_id = extract_ids_from_event(real_event_id)
+
     request = EventUpdateRequest(
-        id=event_id,
-        account_id=account_id,
-        calendar_id=calendar_id,
+        id=real_event_id,
+        account_id=real_account_id,
+        calendar_id=real_calendar_id,
         title=title,
         start=start,
         duration=duration,
@@ -259,25 +357,25 @@ async def update_event(
 @handle_tool_errors
 async def delete_event(
     event_id: str,
-    account_id: str,
-    calendar_id: str,
     series_update_mode: Literal["single", "future", "all"] = "single",
 ) -> dict:
     """Delete a calendar event.
 
     Args:
-        event_id: The Morgen ID of the event to delete.
-        account_id: The ID of the account the event belongs to.
-        calendar_id: The ID of the calendar the event belongs to.
+        event_id: The virtual ID of the event to delete.
         series_update_mode: For recurring events - "single", "future", or "all".
 
     Returns:
         Dictionary indicating success or error.
     """
+    # Resolve virtual event ID and extract account/calendar IDs
+    real_event_id = resolve_id(event_id)
+    real_account_id, real_calendar_id = extract_ids_from_event(real_event_id)
+
     request = EventDeleteRequest(
-        id=event_id,
-        account_id=account_id,
-        calendar_id=calendar_id,
+        id=real_event_id,
+        account_id=real_account_id,
+        calendar_id=real_calendar_id,
     )
 
     client = get_client()
@@ -288,4 +386,161 @@ async def delete_event(
         "message": "Event deleted successfully.",
         "eventId": event_id,
         "seriesUpdateMode": series_update_mode,
+    }
+
+
+@handle_tool_errors
+async def batch_delete_events(
+    event_ids: list[str],
+    series_update_mode: Literal["single", "future", "all"] = "single",
+) -> dict:
+    """Delete multiple calendar events in a single tool call.
+
+    Args:
+        event_ids: List of virtual event IDs to delete.
+        series_update_mode: For recurring events - "single", "future", or "all".
+
+    Returns:
+        Dictionary with 'deleted' (list of virtual IDs) and 'failed' (list of {id, error}).
+    """
+    if not event_ids:
+        return {"deleted": [], "failed": [], "message": "No events to delete."}
+
+    client = get_client()
+    deleted: list[str] = []
+    failed: list[dict[str, str]] = []
+
+    # Prepare delete operations
+    to_delete: list[tuple[str, str, str, str]] = []  # (virtual_id, real_event_id, real_account_id, real_calendar_id)
+    for virtual_event_id in event_ids:
+        try:
+            real_event_id = resolve_id(virtual_event_id)
+            real_account_id, real_calendar_id = extract_ids_from_event(real_event_id)
+            to_delete.append((virtual_event_id, real_event_id, real_account_id, real_calendar_id))
+        except Exception as e:
+            failed.append({"id": virtual_event_id, "error": str(e)})
+
+    # Delete events in parallel
+    async def delete_single(real_event_id: str, real_account_id: str, real_calendar_id: str) -> None:
+        request = EventDeleteRequest(
+            id=real_event_id,
+            account_id=real_account_id,
+            calendar_id=real_calendar_id,
+        )
+        await client.delete_event(request, series_update_mode=series_update_mode)
+
+    tasks = [
+        delete_single(real_event_id, real_account_id, real_calendar_id)
+        for virtual_event_id, real_event_id, real_account_id, real_calendar_id in to_delete
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    for i, result in enumerate(results):
+        virtual_event_id = to_delete[i][0]
+        if isinstance(result, Exception):
+            failed.append({"id": virtual_event_id, "error": str(result)})
+        else:
+            deleted.append(virtual_event_id)
+
+    return {
+        "deleted": deleted,
+        "failed": failed,
+        "summary": f"Deleted {len(deleted)}, failed {len(failed)}",
+    }
+
+
+@handle_tool_errors
+async def batch_update_events(
+    updates: list[dict[str, Any]],
+    series_update_mode: Literal["single", "future", "all"] = "single",
+) -> dict:
+    """Update multiple calendar events in a single tool call.
+
+    Args:
+        updates: List of update dicts. Each must have 'event_id' (virtual ID) and optional fields:
+            title, start, duration, time_zone, is_all_day, description, location,
+            free_busy_status, privacy.
+        series_update_mode: For recurring events - "single", "future", or "all".
+
+    Returns:
+        Dictionary with 'updated' (list of virtual IDs) and 'failed' (list of {id, error}).
+    """
+    if not updates:
+        return {"updated": [], "failed": [], "message": "No updates to apply."}
+
+    client = get_client()
+    updated: list[str] = []
+    failed: list[dict[str, str]] = []
+
+    # Validate and prepare updates
+    to_update: list[tuple[str, str, str, str, dict[str, Any]]] = []  # (virtual_id, real_event_id, real_account_id, real_calendar_id, update)
+    for update in updates:
+        virtual_event_id = update.get("event_id")
+        if not virtual_event_id:
+            failed.append({"id": "(unknown)", "error": "Missing event_id in update"})
+            continue
+
+        # Validate timing fields constraint
+        timing_fields = ["start", "duration", "time_zone", "is_all_day"]
+        timing_provided = [f for f in timing_fields if update.get(f) is not None]
+        if timing_provided and len(timing_provided) != 4:
+            failed.append({
+                "id": virtual_event_id,
+                "error": "When updating timing fields, all four (start, duration, "
+                         "time_zone, is_all_day) must be provided together.",
+            })
+            continue
+
+        try:
+            real_event_id = resolve_id(virtual_event_id)
+            real_account_id, real_calendar_id = extract_ids_from_event(real_event_id)
+            to_update.append((virtual_event_id, real_event_id, real_account_id, real_calendar_id, update))
+        except Exception as e:
+            failed.append({"id": virtual_event_id, "error": str(e)})
+
+    # Apply updates in parallel
+    async def update_single(
+        real_event_id: str, real_account_id: str, real_calendar_id: str, update: dict[str, Any]
+    ) -> None:
+        # Validate inputs
+        if update.get("start"):
+            validate_local_datetime(update["start"], "start")
+        if update.get("duration"):
+            validate_duration(update["duration"])
+        if update.get("time_zone"):
+            validate_timezone(update["time_zone"])
+
+        request = EventUpdateRequest(
+            id=real_event_id,
+            account_id=real_account_id,
+            calendar_id=real_calendar_id,
+            title=update.get("title"),
+            start=update.get("start"),
+            duration=update.get("duration"),
+            time_zone=update.get("time_zone"),
+            show_without_time=update.get("is_all_day"),
+            description=update.get("description"),
+            locations=build_locations_dict(update.get("location"), allow_empty=True),
+            free_busy_status=update.get("free_busy_status"),
+            privacy=update.get("privacy"),
+        )
+        await client.update_event(request, series_update_mode=series_update_mode)
+
+    tasks = [
+        update_single(real_event_id, real_account_id, real_calendar_id, update)
+        for virtual_event_id, real_event_id, real_account_id, real_calendar_id, update in to_update
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    for i, result in enumerate(results):
+        virtual_event_id = to_update[i][0]
+        if isinstance(result, Exception):
+            failed.append({"id": virtual_event_id, "error": str(result)})
+        else:
+            updated.append(virtual_event_id)
+
+    return {
+        "updated": updated,
+        "failed": failed,
+        "summary": f"Updated {len(updated)}, failed {len(failed)}",
     }

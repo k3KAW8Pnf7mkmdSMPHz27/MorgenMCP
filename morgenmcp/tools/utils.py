@@ -1,10 +1,22 @@
 """Utility functions for MCP tools."""
 
 from functools import wraps
-from typing import Callable
+from typing import Any, Callable
 
 from morgenmcp.models import Location, MorgenAPIError, Participant, ParticipantRoles
 from morgenmcp.validators import ValidationError
+
+
+def filter_none_values(d: dict[str, Any]) -> dict[str, Any]:
+    """Remove keys with None values or empty lists from a dict.
+
+    Args:
+        d: Dictionary to filter.
+
+    Returns:
+        New dictionary with None values and empty lists removed.
+    """
+    return {k: v for k, v in d.items() if v is not None and v != []}
 
 
 def handle_tool_errors(func: Callable) -> Callable:

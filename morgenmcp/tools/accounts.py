@@ -1,7 +1,8 @@
 """MCP tools for Morgen account operations."""
 
 from morgenmcp.client import get_client
-from morgenmcp.tools.utils import handle_tool_errors
+from morgenmcp.tools.id_registry import register_id
+from morgenmcp.tools.utils import filter_none_values, handle_tool_errors
 
 
 @handle_tool_errors
@@ -19,12 +20,12 @@ async def list_accounts() -> dict:
 
     return {
         "accounts": [
-            {
-                "id": acc.id,
+            filter_none_values({
+                "id": register_id(acc.id),
                 "integrationId": acc.integration_id,
                 "email": acc.provider_user_id,
                 "displayName": acc.provider_user_display_name,
-            }
+            })
             for acc in accounts
         ],
         "count": len(accounts),
