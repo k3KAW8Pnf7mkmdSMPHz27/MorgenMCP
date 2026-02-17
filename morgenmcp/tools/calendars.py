@@ -9,24 +9,38 @@ from morgenmcp.validators import validate_hex_color
 
 def _format_calendar(cal) -> dict:
     """Format a calendar object, filtering out null values and virtualizing IDs."""
-    return filter_none_values({
-        "id": register_id(cal.id),
-        "accountId": register_id(cal.account_id),
-        "integrationId": cal.integration_id,
-        "name": cal.name,
-        "color": cal.color,
-        "sortOrder": cal.sort_order,
-        "permissions": filter_none_values({
-            "canRead": cal.my_rights.may_read_items if cal.my_rights else None,
-            "canWrite": cal.my_rights.may_write_all if cal.my_rights else None,
-            "canDelete": cal.my_rights.may_delete if cal.my_rights else None,
-        }) if cal.my_rights else None,
-        "metadata": filter_none_values({
-            "busy": cal.metadata.busy if cal.metadata else None,
-            "overrideColor": cal.metadata.override_color if cal.metadata else None,
-            "overrideName": cal.metadata.override_name if cal.metadata else None,
-        }) if cal.metadata else None,
-    })
+    return filter_none_values(
+        {
+            "id": register_id(cal.id),
+            "accountId": register_id(cal.account_id),
+            "integrationId": cal.integration_id,
+            "name": cal.name,
+            "color": cal.color,
+            "sortOrder": cal.sort_order,
+            "permissions": filter_none_values(
+                {
+                    "canRead": cal.my_rights.may_read_items if cal.my_rights else None,
+                    "canWrite": cal.my_rights.may_write_all if cal.my_rights else None,
+                    "canDelete": cal.my_rights.may_delete if cal.my_rights else None,
+                }
+            )
+            if cal.my_rights
+            else None,
+            "metadata": filter_none_values(
+                {
+                    "busy": cal.metadata.busy if cal.metadata else None,
+                    "overrideColor": cal.metadata.override_color
+                    if cal.metadata
+                    else None,
+                    "overrideName": cal.metadata.override_name
+                    if cal.metadata
+                    else None,
+                }
+            )
+            if cal.metadata
+            else None,
+        }
+    )
 
 
 @handle_tool_errors

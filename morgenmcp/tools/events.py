@@ -13,7 +13,10 @@ from morgenmcp.models import (
     EventUpdateRequest,
 )
 from morgenmcp.tools.id_registry import register_id, resolve_id, resolve_ids
-from morgenmcp.tools.id_utils import extract_account_from_calendar, extract_ids_from_event
+from morgenmcp.tools.id_utils import (
+    extract_account_from_calendar,
+    extract_ids_from_event,
+)
 from morgenmcp.tools.utils import (
     build_locations_dict,
     build_participants_dict,
@@ -39,7 +42,7 @@ def _format_compact_event(event: Event) -> str:
         try:
             dt = datetime.fromisoformat(event.start)
             date_str = dt.strftime("%b %d")
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             date_str = event.start
         return f"{date_str} (all-day): {title} [{virtual_id}]"
     else:
@@ -67,45 +70,49 @@ def _format_compact_event(event: Event) -> str:
             end_dt = start_dt + timedelta(hours=hours, minutes=minutes)
             end_str = end_dt.strftime("%H:%M")
             return f"{start_str}-{end_str}: {title} [{virtual_id}]"
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             return f"{event.start}: {title} [{virtual_id}]"
 
 
 def _format_full_event(event: Event) -> dict[str, Any]:
     """Format an event in full format with all fields and virtual IDs."""
-    return filter_none_values({
-        "id": register_id(event.id),
-        "calendarId": register_id(event.calendar_id),
-        "accountId": register_id(event.account_id),
-        "title": event.title,
-        "description": event.description,
-        "start": event.start,
-        "duration": event.duration,
-        "timeZone": event.time_zone,
-        "isAllDay": event.show_without_time,
-        "status": event.free_busy_status,
-        "privacy": event.privacy,
-        "locations": [
-            {"name": loc.name} for loc in (event.locations or {}).values()
-        ],
-        "participants": [
-            {
-                "name": p.name,
-                "email": p.email,
-                "status": p.participation_status,
-                "isOrganizer": p.roles.owner if p.roles else False,
-            }
-            for p in (event.participants or {}).values()
-        ],
-        "isRecurring": event.recurrence_rules is not None,
-        "recurrenceId": event.recurrence_id,
-        "masterEventId": register_id(event.master_event_id) if event.master_event_id else None,
-        "virtualRoomUrl": (
-            event.derived.virtual_room.url
-            if event.derived and event.derived.virtual_room
-            else None
-        ),
-    })
+    return filter_none_values(
+        {
+            "id": register_id(event.id),
+            "calendarId": register_id(event.calendar_id),
+            "accountId": register_id(event.account_id),
+            "title": event.title,
+            "description": event.description,
+            "start": event.start,
+            "duration": event.duration,
+            "timeZone": event.time_zone,
+            "isAllDay": event.show_without_time,
+            "status": event.free_busy_status,
+            "privacy": event.privacy,
+            "locations": [
+                {"name": loc.name} for loc in (event.locations or {}).values()
+            ],
+            "participants": [
+                {
+                    "name": p.name,
+                    "email": p.email,
+                    "status": p.participation_status,
+                    "isOrganizer": p.roles.owner if p.roles else False,
+                }
+                for p in (event.participants or {}).values()
+            ],
+            "isRecurring": event.recurrence_rules is not None,
+            "recurrenceId": event.recurrence_id,
+            "masterEventId": register_id(event.master_event_id)
+            if event.master_event_id
+            else None,
+            "virtualRoomUrl": (
+                event.derived.virtual_room.url
+                if event.derived and event.derived.virtual_room
+                else None
+            ),
+        }
+    )
 
 
 @handle_tool_errors
@@ -208,7 +215,8 @@ async def create_event(
     participants: list[str] | None = None,
     free_busy_status: Literal["free", "busy"] = "busy",
     privacy: Literal["public", "private", "secret"] = "public",
-    request_virtual_room: Literal["default", "googleMeet", "microsoftTeams"] | None = None,
+    request_virtual_room: Literal["default", "googleMeet", "microsoftTeams"]
+    | None = None,
 ) -> dict:
     """Create a new calendar event.
 
@@ -411,17 +419,23 @@ async def batch_delete_events(
     failed: list[dict[str, str]] = []
 
     # Prepare delete operations
-    to_delete: list[tuple[str, str, str, str]] = []  # (virtual_id, real_event_id, real_account_id, real_calendar_id)
+    to_delete: list[
+        tuple[str, str, str, str]
+    ] = []  # (virtual_id, real_event_id, real_account_id, real_calendar_id)
     for virtual_event_id in event_ids:
         try:
             real_event_id = resolve_id(virtual_event_id)
             real_account_id, real_calendar_id = extract_ids_from_event(real_event_id)
-            to_delete.append((virtual_event_id, real_event_id, real_account_id, real_calendar_id))
+            to_delete.append(
+                (virtual_event_id, real_event_id, real_account_id, real_calendar_id)
+            )
         except Exception as e:
             failed.append({"id": virtual_event_id, "error": str(e)})
 
     # Delete events in parallel
-    async def delete_single(real_event_id: str, real_account_id: str, real_calendar_id: str) -> None:
+    async def delete_single(
+        real_event_id: str, real_account_id: str, real_calendar_id: str
+    ) -> None:
         request = EventDeleteRequest(
             id=real_event_id,
             account_id=real_account_id,
@@ -473,7 +487,9 @@ async def batch_update_events(
     failed: list[dict[str, str]] = []
 
     # Validate and prepare updates
-    to_update: list[tuple[str, str, str, str, dict[str, Any]]] = []  # (virtual_id, real_event_id, real_account_id, real_calendar_id, update)
+    to_update: list[
+        tuple[str, str, str, str, dict[str, Any]]
+    ] = []  # (virtual_id, real_event_id, real_account_id, real_calendar_id, update)
     for update in updates:
         virtual_event_id = update.get("event_id")
         if not virtual_event_id:
@@ -484,23 +500,36 @@ async def batch_update_events(
         timing_fields = ["start", "duration", "time_zone", "is_all_day"]
         timing_provided = [f for f in timing_fields if update.get(f) is not None]
         if timing_provided and len(timing_provided) != 4:
-            failed.append({
-                "id": virtual_event_id,
-                "error": "When updating timing fields, all four (start, duration, "
-                         "time_zone, is_all_day) must be provided together.",
-            })
+            failed.append(
+                {
+                    "id": virtual_event_id,
+                    "error": "When updating timing fields, all four (start, duration, "
+                    "time_zone, is_all_day) must be provided together.",
+                }
+            )
             continue
 
         try:
             real_event_id = resolve_id(virtual_event_id)
             real_account_id, real_calendar_id = extract_ids_from_event(real_event_id)
-            to_update.append((virtual_event_id, real_event_id, real_account_id, real_calendar_id, update))
+            to_update.append(
+                (
+                    virtual_event_id,
+                    real_event_id,
+                    real_account_id,
+                    real_calendar_id,
+                    update,
+                )
+            )
         except Exception as e:
             failed.append({"id": virtual_event_id, "error": str(e)})
 
     # Apply updates in parallel
     async def update_single(
-        real_event_id: str, real_account_id: str, real_calendar_id: str, update: dict[str, Any]
+        real_event_id: str,
+        real_account_id: str,
+        real_calendar_id: str,
+        update: dict[str, Any],
     ) -> None:
         # Validate inputs
         if update.get("start"):

@@ -63,7 +63,7 @@ class MorgenClient:
             await self._client.aclose()
             self._client = None
 
-    async def __aenter__(self) -> "MorgenClient":
+    async def __aenter__(self) -> MorgenClient:
         """Async context manager entry."""
         return self
 
@@ -71,7 +71,9 @@ class MorgenClient:
         """Async context manager exit."""
         await self.close()
 
-    def _parse_rate_limit_headers(self, response: httpx.Response) -> RateLimitInfo | None:
+    def _parse_rate_limit_headers(
+        self, response: httpx.Response
+    ) -> RateLimitInfo | None:
         """Parse rate limit information from response headers."""
         try:
             limit = response.headers.get("RateLimit-Limit")
@@ -84,7 +86,7 @@ class MorgenClient:
                     remaining=int(remaining),
                     reset_seconds=int(reset),
                 )
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             pass
         return None
 

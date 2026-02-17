@@ -20,12 +20,14 @@ async def list_accounts() -> dict:
 
     return {
         "accounts": [
-            filter_none_values({
-                "id": register_id(acc.id),
-                "integrationId": acc.integration_id,
-                "email": acc.provider_user_id,
-                "displayName": acc.provider_user_display_name,
-            })
+            filter_none_values(
+                {
+                    "id": register_id(acc.id),
+                    "integrationId": acc.integration_id,
+                    "email": acc.provider_user_id,
+                    "displayName": acc.provider_user_display_name,
+                }
+            )
             for acc in accounts
         ],
         "count": len(accounts),

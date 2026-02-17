@@ -52,7 +52,11 @@ def extract_ids_from_event(event_id: str) -> tuple[str, str]:
     account_id = decoded[2]
     calendar_email = decoded[0]
     # Reconstruct calendar ID: base64([accountId, calendarEmail])
-    calendar_id = base64.b64encode(
-        json.dumps([account_id, calendar_email], separators=(",", ":")).encode()
-    ).decode().rstrip("=")
+    calendar_id = (
+        base64.b64encode(
+            json.dumps([account_id, calendar_email], separators=(",", ":")).encode()
+        )
+        .decode()
+        .rstrip("=")
+    )
     return account_id, calendar_id

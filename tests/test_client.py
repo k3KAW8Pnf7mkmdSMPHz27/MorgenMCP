@@ -1,7 +1,7 @@
 """Unit tests for Morgen API client."""
 
-import pytest
 import httpx
+import pytest
 import respx
 
 from morgenmcp.client import MorgenClient, get_client, set_client
@@ -25,6 +25,7 @@ def reset_global_client():
     yield
     # Reset by setting to None indirectly
     import morgenmcp.client
+
     morgenmcp.client._client = None
 
 

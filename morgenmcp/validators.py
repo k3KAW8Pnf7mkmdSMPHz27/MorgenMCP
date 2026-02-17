@@ -8,7 +8,6 @@ Z suffix from datetime could shift events by hours).
 import re
 from zoneinfo import available_timezones
 
-
 # Pre-compile regex patterns for performance
 LOCAL_DATETIME_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$")
 ISO_DURATION_PATTERN = re.compile(
@@ -62,14 +61,14 @@ def validate_local_datetime(value: str, field_name: str = "datetime") -> str:
             f"The timezone should be specified separately in the timeZone parameter."
         )
 
-    if "+" in value or (value.count("-") > 2):
-        # Check for timezone offset like +00:00 or -05:00
-        if re.search(r"[+-]\d{2}:\d{2}$", value):
-            raise ValidationError(
-                f"Invalid {field_name} format: '{value}'. "
-                f"Remove the timezone offset - use LocalDateTime format (e.g., '2023-03-01T10:00:00'). "
-                f"The timezone should be specified separately in the timeZone parameter."
-            )
+    # Check for timezone offset like +00:00 or -05:00
+    if ("+" in value or value.count("-") > 2) and re.search(r"[+-]\d{2}:\d{2}$", value):
+        raise ValidationError(
+            f"Invalid {field_name} format: '{value}'. "
+            "Remove the timezone offset - use LocalDateTime format "
+            "(e.g., '2023-03-01T10:00:00'). "
+            "The timezone should be specified separately in the timeZone parameter."
+        )
 
     if not LOCAL_DATETIME_PATTERN.match(value):
         raise ValidationError(
@@ -128,7 +127,9 @@ def validate_timezone(value: str | None) -> str | None:
         return None
 
     if not value:
-        raise ValidationError("'timeZone' cannot be an empty string (use None for floating events)")
+        raise ValidationError(
+            "'timeZone' cannot be an empty string (use None for floating events)"
+        )
 
     valid_timezones = _get_valid_timezones()
 
@@ -151,7 +152,9 @@ def validate_timezone(value: str | None) -> str | None:
         if suggestions:
             error_msg += f" Did you mean: {', '.join(suggestions)}?"
         else:
-            error_msg += " Examples: 'Europe/Berlin', 'America/New_York', 'Asia/Tokyo', 'UTC'"
+            error_msg += (
+                " Examples: 'Europe/Berlin', 'America/New_York', 'Asia/Tokyo', 'UTC'"
+            )
 
         raise ValidationError(error_msg)
 
@@ -224,12 +227,10 @@ def validate_date_range(start: str, end: str, max_days: int = 180) -> None:
         start_dt = datetime.fromisoformat(start)
         end_dt = datetime.fromisoformat(end)
     except ValueError as e:
-        raise ValidationError(f"Cannot parse date range: {e}")
+        raise ValidationError(f"Cannot parse date range: {e}") from e
 
     if end_dt <= start_dt:
-        raise ValidationError(
-            f"'end' ({end}) must be after 'start' ({start})"
-        )
+        raise ValidationError(f"'end' ({end}) must be after 'start' ({start})")
 
     days_diff = (end_dt - start_dt).days
     if days_diff > max_days:

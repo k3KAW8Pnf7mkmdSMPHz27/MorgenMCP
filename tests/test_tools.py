@@ -48,16 +48,26 @@ def assert_validation_error(result: dict) -> None:
 
 def make_calendar_id(account_id: str, calendar_email: str) -> str:
     """Create a Morgen-style calendar ID: base64([accountId, calendarEmail])."""
-    return base64.b64encode(
-        json.dumps([account_id, calendar_email], separators=(",", ":")).encode()
-    ).decode().rstrip("=")
+    return (
+        base64.b64encode(
+            json.dumps([account_id, calendar_email], separators=(",", ":")).encode()
+        )
+        .decode()
+        .rstrip("=")
+    )
 
 
 def make_event_id(calendar_email: str, event_uid: str, account_id: str) -> str:
     """Create a Morgen-style event ID: base64([calendarEmail, eventUid, accountId])."""
-    return base64.b64encode(
-        json.dumps([calendar_email, event_uid, account_id], separators=(",", ":")).encode()
-    ).decode().rstrip("=")
+    return (
+        base64.b64encode(
+            json.dumps(
+                [calendar_email, event_uid, account_id], separators=(",", ":")
+            ).encode()
+        )
+        .decode()
+        .rstrip("=")
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -71,9 +81,11 @@ def clear_id_registry():
 @pytest.fixture
 def mock_morgen_client():
     """Create a mock Morgen client."""
-    with patch("morgenmcp.tools.accounts.get_client") as acc_mock, \
-         patch("morgenmcp.tools.calendars.get_client") as cal_mock, \
-         patch("morgenmcp.tools.events.get_client") as evt_mock:
+    with (
+        patch("morgenmcp.tools.accounts.get_client") as acc_mock,
+        patch("morgenmcp.tools.calendars.get_client") as cal_mock,
+        patch("morgenmcp.tools.events.get_client") as evt_mock,
+    ):
         client = AsyncMock()
         acc_mock.return_value = client
         cal_mock.return_value = client
@@ -294,7 +306,9 @@ class TestListCalendars:
         assert_api_error(result, 429)
 
     @pytest.mark.asyncio
-    async def test_list_calendars_with_no_metadata(self, mock_morgen_client, sample_calendar_id, sample_account_id):
+    async def test_list_calendars_with_no_metadata(
+        self, mock_morgen_client, sample_calendar_id, sample_account_id
+    ):
         """Test calendar listing with calendar that has no metadata."""
         calendar = Calendar(
             id=sample_calendar_id,
@@ -314,7 +328,9 @@ class TestUpdateCalendarMetadata:
     """Tests for update_calendar_metadata tool."""
 
     @pytest.mark.asyncio
-    async def test_update_calendar_metadata_success(self, mock_morgen_client, sample_calendar_id):
+    async def test_update_calendar_metadata_success(
+        self, mock_morgen_client, sample_calendar_id
+    ):
         """Test successful calendar metadata update."""
         mock_morgen_client.update_calendar_metadata.return_value = None
 
@@ -332,7 +348,9 @@ class TestUpdateCalendarMetadata:
         assert result["updated"]["busy"] is False
 
     @pytest.mark.asyncio
-    async def test_update_calendar_metadata_no_fields(self, mock_morgen_client, sample_calendar_id):
+    async def test_update_calendar_metadata_no_fields(
+        self, mock_morgen_client, sample_calendar_id
+    ):
         """Test update with no fields provided."""
         virtual_cal = register_id(sample_calendar_id)
 
@@ -344,7 +362,9 @@ class TestUpdateCalendarMetadata:
         assert "At least one" in result["error"]
 
     @pytest.mark.asyncio
-    async def test_update_calendar_metadata_api_error(self, mock_morgen_client, sample_calendar_id):
+    async def test_update_calendar_metadata_api_error(
+        self, mock_morgen_client, sample_calendar_id
+    ):
         """Test update with API error."""
         mock_morgen_client.update_calendar_metadata.side_effect = MorgenAPIError(
             "Calendar not found", status_code=404
@@ -364,7 +384,9 @@ class TestListEvents:
     """Tests for list_events tool."""
 
     @pytest.mark.asyncio
-    async def test_list_events_success(self, mock_morgen_client, sample_event, sample_calendar_id):
+    async def test_list_events_success(
+        self, mock_morgen_client, sample_event, sample_calendar_id
+    ):
         """Test successful event listing with explicit calendars."""
         mock_morgen_client.list_events.return_value = [sample_event]
 
@@ -382,7 +404,10 @@ class TestListEvents:
         # IDs are now virtualized (7-char Base64url)
         assert len(result["events"][0]["id"]) == 7
         assert result["events"][0]["title"] == "Team Meeting"
-        assert result["events"][0]["virtualRoomUrl"] == "https://meet.google.com/abc-defg-hij"
+        assert (
+            result["events"][0]["virtualRoomUrl"]
+            == "https://meet.google.com/abc-defg-hij"
+        )
         assert len(result["events"][0]["participants"]) == 2
 
     @pytest.mark.asyncio
@@ -419,7 +444,9 @@ class TestListEvents:
         assert_api_error(result, 400)
 
     @pytest.mark.asyncio
-    async def test_list_events_validation_error(self, mock_morgen_client, sample_calendar_id):
+    async def test_list_events_validation_error(
+        self, mock_morgen_client, sample_calendar_id
+    ):
         """Test event listing with validation error (Z suffix)."""
         virtual_cal = register_id(sample_calendar_id)
 
@@ -433,7 +460,9 @@ class TestListEvents:
         assert "Z" in result["error"]
 
     @pytest.mark.asyncio
-    async def test_list_events_all_calendars(self, mock_morgen_client, sample_event, sample_calendar):
+    async def test_list_events_all_calendars(
+        self, mock_morgen_client, sample_event, sample_calendar
+    ):
         """Test event listing without calendar_ids queries all calendars."""
         mock_morgen_client.list_calendars.return_value = [sample_calendar]
         mock_morgen_client.list_events.return_value = [sample_event]
@@ -448,7 +477,9 @@ class TestListEvents:
         mock_morgen_client.list_calendars.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_list_events_compact_mode(self, mock_morgen_client, sample_event, sample_calendar_id):
+    async def test_list_events_compact_mode(
+        self, mock_morgen_client, sample_event, sample_calendar_id
+    ):
         """Test event listing with compact mode."""
         mock_morgen_client.list_events.return_value = [sample_event]
 
@@ -469,9 +500,13 @@ class TestListEvents:
         assert "[" in result["events"][0] and "]" in result["events"][0]
 
     @pytest.mark.asyncio
-    async def test_list_events_compact_all_day(self, mock_morgen_client, sample_calendar_id, sample_account_id):
+    async def test_list_events_compact_all_day(
+        self, mock_morgen_client, sample_calendar_id, sample_account_id
+    ):
         """Test compact mode with all-day event."""
-        all_day_event_id = make_event_id("test@example.com", "allday_uid", sample_account_id)
+        all_day_event_id = make_event_id(
+            "test@example.com", "allday_uid", sample_account_id
+        )
         all_day_event = Event(
             id=all_day_event_id,
             calendar_id=sample_calendar_id,
@@ -501,9 +536,13 @@ class TestCreateEvent:
     """Tests for create_event tool."""
 
     @pytest.mark.asyncio
-    async def test_create_event_success(self, mock_morgen_client, sample_calendar_id, sample_account_id):
+    async def test_create_event_success(
+        self, mock_morgen_client, sample_calendar_id, sample_account_id
+    ):
         """Test successful event creation."""
-        new_event_id = make_event_id("test@example.com", "new_evt_123", sample_account_id)
+        new_event_id = make_event_id(
+            "test@example.com", "new_evt_123", sample_account_id
+        )
         mock_morgen_client.create_event.return_value = EventCreateResponse(
             event=CreatedEventInfo(
                 id=new_event_id,
@@ -528,9 +567,13 @@ class TestCreateEvent:
         assert len(result["event"]["id"]) == 7
 
     @pytest.mark.asyncio
-    async def test_create_event_with_location(self, mock_morgen_client, sample_calendar_id, sample_account_id):
+    async def test_create_event_with_location(
+        self, mock_morgen_client, sample_calendar_id, sample_account_id
+    ):
         """Test event creation with location."""
-        new_event_id = make_event_id("test@example.com", "new_evt_123", sample_account_id)
+        new_event_id = make_event_id(
+            "test@example.com", "new_evt_123", sample_account_id
+        )
         mock_morgen_client.create_event.return_value = EventCreateResponse(
             event=CreatedEventInfo(
                 id=new_event_id,
@@ -557,9 +600,13 @@ class TestCreateEvent:
         assert request.locations is not None
 
     @pytest.mark.asyncio
-    async def test_create_event_with_participants(self, mock_morgen_client, sample_calendar_id, sample_account_id):
+    async def test_create_event_with_participants(
+        self, mock_morgen_client, sample_calendar_id, sample_account_id
+    ):
         """Test event creation with participants."""
-        new_event_id = make_event_id("test@example.com", "new_evt_123", sample_account_id)
+        new_event_id = make_event_id(
+            "test@example.com", "new_evt_123", sample_account_id
+        )
         mock_morgen_client.create_event.return_value = EventCreateResponse(
             event=CreatedEventInfo(
                 id=new_event_id,
@@ -606,7 +653,9 @@ class TestCreateEvent:
         assert_api_error(result, 404)
 
     @pytest.mark.asyncio
-    async def test_create_event_validation_error(self, mock_morgen_client, sample_calendar_id):
+    async def test_create_event_validation_error(
+        self, mock_morgen_client, sample_calendar_id
+    ):
         """Test event creation with validation error (invalid duration)."""
         virtual_cal = register_id(sample_calendar_id)
 
@@ -642,7 +691,9 @@ class TestUpdateEvent:
         assert result["eventId"] == virtual_evt
 
     @pytest.mark.asyncio
-    async def test_update_event_timing_fields_incomplete(self, mock_morgen_client, sample_event_id):
+    async def test_update_event_timing_fields_incomplete(
+        self, mock_morgen_client, sample_event_id
+    ):
         """Test update with incomplete timing fields."""
         virtual_evt = register_id(sample_event_id)
 
@@ -656,7 +707,9 @@ class TestUpdateEvent:
         assert "all four must be provided" in result["error"]
 
     @pytest.mark.asyncio
-    async def test_update_event_timing_fields_complete(self, mock_morgen_client, sample_event_id):
+    async def test_update_event_timing_fields_complete(
+        self, mock_morgen_client, sample_event_id
+    ):
         """Test update with complete timing fields."""
         mock_morgen_client.update_event.return_value = None
 
@@ -756,7 +809,9 @@ class TestToolOutputFormat:
     """Tests for consistent tool output format."""
 
     @pytest.mark.asyncio
-    async def test_success_response_has_success_key(self, mock_morgen_client, sample_calendar_id):
+    async def test_success_response_has_success_key(
+        self, mock_morgen_client, sample_calendar_id
+    ):
         """Test that success responses include success key."""
         mock_morgen_client.update_calendar_metadata.return_value = None
 
@@ -813,7 +868,9 @@ class TestBatchDeleteEvents:
         assert "Deleted 2" in result["summary"]
 
     @pytest.mark.asyncio
-    async def test_batch_delete_unregistered_id(self, mock_morgen_client, sample_account_id):
+    async def test_batch_delete_unregistered_id(
+        self, mock_morgen_client, sample_account_id
+    ):
         """Test batch deletion with unregistered event ID."""
         evt_id1 = make_event_id("test@example.com", "uid1", sample_account_id)
         virtual_evt1 = register_id(evt_id1)
@@ -827,7 +884,9 @@ class TestBatchDeleteEvents:
         assert "not found" in result["failed"][0]["error"]
 
     @pytest.mark.asyncio
-    async def test_batch_delete_partial_failure(self, mock_morgen_client, sample_account_id):
+    async def test_batch_delete_partial_failure(
+        self, mock_morgen_client, sample_account_id
+    ):
         """Test batch deletion with partial API failure."""
         evt_id1 = make_event_id("test@example.com", "uid1", sample_account_id)
         evt_id2 = make_event_id("test@example.com", "uid2", sample_account_id)
@@ -867,26 +926,32 @@ class TestBatchUpdateEvents:
         virtual_evt2 = register_id(evt_id2)
         mock_morgen_client.update_event.return_value = None
 
-        result = await batch_update_events(updates=[
-            {"event_id": virtual_evt1, "title": "New Title 1"},
-            {"event_id": virtual_evt2, "title": "New Title 2"},
-        ])
+        result = await batch_update_events(
+            updates=[
+                {"event_id": virtual_evt1, "title": "New Title 1"},
+                {"event_id": virtual_evt2, "title": "New Title 2"},
+            ]
+        )
 
         assert result["updated"] == [virtual_evt1, virtual_evt2]
         assert result["failed"] == []
         assert "Updated 2" in result["summary"]
 
     @pytest.mark.asyncio
-    async def test_batch_update_unregistered_id(self, mock_morgen_client, sample_account_id):
+    async def test_batch_update_unregistered_id(
+        self, mock_morgen_client, sample_account_id
+    ):
         """Test batch update with unregistered event ID."""
         evt_id1 = make_event_id("test@example.com", "uid1", sample_account_id)
         virtual_evt1 = register_id(evt_id1)
         mock_morgen_client.update_event.return_value = None
 
-        result = await batch_update_events(updates=[
-            {"event_id": virtual_evt1, "title": "New Title"},
-            {"event_id": "unregistered", "title": "Will Fail"},
-        ])
+        result = await batch_update_events(
+            updates=[
+                {"event_id": virtual_evt1, "title": "New Title"},
+                {"event_id": "unregistered", "title": "Will Fail"},
+            ]
+        )
 
         assert result["updated"] == [virtual_evt1]
         assert len(result["failed"]) == 1
@@ -895,23 +960,32 @@ class TestBatchUpdateEvents:
     @pytest.mark.asyncio
     async def test_batch_update_missing_event_id(self, mock_morgen_client):
         """Test batch update with missing event_id."""
-        result = await batch_update_events(updates=[
-            {"title": "No Event ID"},
-        ])
+        result = await batch_update_events(
+            updates=[
+                {"title": "No Event ID"},
+            ]
+        )
 
         assert result["updated"] == []
         assert len(result["failed"]) == 1
         assert "Missing event_id" in result["failed"][0]["error"]
 
     @pytest.mark.asyncio
-    async def test_batch_update_timing_validation(self, mock_morgen_client, sample_account_id):
+    async def test_batch_update_timing_validation(
+        self, mock_morgen_client, sample_account_id
+    ):
         """Test batch update validates timing fields constraint."""
         evt_id1 = make_event_id("test@example.com", "uid1", sample_account_id)
         virtual_evt1 = register_id(evt_id1)
 
-        result = await batch_update_events(updates=[
-            {"event_id": virtual_evt1, "start": "2023-03-15T10:00:00"},  # Missing duration, time_zone, is_all_day
-        ])
+        result = await batch_update_events(
+            updates=[
+                {
+                    "event_id": virtual_evt1,
+                    "start": "2023-03-15T10:00:00",
+                },  # Missing duration, time_zone, is_all_day
+            ]
+        )
 
         assert result["updated"] == []
         assert len(result["failed"]) == 1
@@ -927,7 +1001,9 @@ class TestBatchUpdateEvents:
         assert "No updates" in result["message"]
 
     @pytest.mark.asyncio
-    async def test_batch_update_partial_failure(self, mock_morgen_client, sample_account_id):
+    async def test_batch_update_partial_failure(
+        self, mock_morgen_client, sample_account_id
+    ):
         """Test batch update with partial API failure."""
         evt_id1 = make_event_id("test@example.com", "uid1", sample_account_id)
         evt_id2 = make_event_id("test@example.com", "uid2", sample_account_id)
@@ -939,10 +1015,12 @@ class TestBatchUpdateEvents:
             MorgenAPIError("Event not found", status_code=404),
         ]
 
-        result = await batch_update_events(updates=[
-            {"event_id": virtual_evt1, "title": "Updated"},
-            {"event_id": virtual_evt2, "title": "Will Fail"},
-        ])
+        result = await batch_update_events(
+            updates=[
+                {"event_id": virtual_evt1, "title": "Updated"},
+                {"event_id": virtual_evt2, "title": "Will Fail"},
+            ]
+        )
 
         assert virtual_evt1 in result["updated"]
         assert any(f["id"] == virtual_evt2 for f in result["failed"])

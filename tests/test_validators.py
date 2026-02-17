@@ -266,6 +266,4 @@ class TestValidateDateRange:
             )
 
         # But pass with max_days=60
-        validate_date_range(
-            "2023-03-01T00:00:00", "2023-04-01T00:00:00", max_days=60
-        )
+        validate_date_range("2023-03-01T00:00:00", "2023-04-01T00:00:00", max_days=60)
