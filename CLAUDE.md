@@ -10,9 +10,11 @@ echo "MORGEN_API_KEY=..." > .env        # Configure API key (loaded automaticall
 uv run morgenmcp                        # Run server
 uv run pytest                           # Run all tests (excludes integration)
 uv run pytest tests/test_tools.py::TestCreateEvent -v  # Run specific test class
+uv run pytest tests/test_tools.py::TestCreateEvent::test_create_basic_event -v  # Run single test
 uv run pytest tests/test_integration.py -v -s -m integration  # Run live API tests
 uv run ruff check .                     # Lint code
 uv run ruff format .                    # Format code
+uv run pyright morgenmcp/               # Type check
 pre-commit install                      # Set up git hooks (once)
 ```
 
@@ -27,17 +29,25 @@ Opens Inspector UI at http://localhost:6274 for testing tools.
 
 FastMCP-based MCP server wrapping the Morgen calendar API (https://api.morgen.so/v3/).
 
-- **`server.py`** - Entry point with `@mcp.tool()` decorators delegating to tools modules
-- **`client.py`** - Async HTTP client; global instance via `get_client()`
-- **`models.py`** - Pydantic models with `Field(alias="...")` for camelCase API mapping
+- **`server.py`** - Entry point registering tools from tools modules (`load_dotenv()` runs before imports — E402 suppressed by ruff). Tools are **not** decorated with `@mcp.tool()` on the function; instead, `server.py` uses `mcp.tool(name=..., tags=..., annotations=...)(func)` as a call expression. This decoupling means tool functions remain plain async functions importable for unit testing.
+- **`client.py`** - Async HTTP client; global instance via `get_client()`. Auth header: `"Authorization": f"ApiKey {self.api_key}"` (not `Bearer`).
+- **`models.py`** - Pydantic models using `Annotated[type, Field(alias="...")]` pattern. Base `MorgenModel` config: `validate_by_name=True, validate_by_alias=True`. Serialize with `model.model_dump(by_alias=True, exclude_none=True)`.
 - **`validators.py`** - Input validation (datetime, duration, timezone, email, color)
-- **`tools/`** - Tool implementations (`calendars.py`, `events.py`)
+- **`tools/`** - Tool implementations:
+  - `accounts.py`, `calendars.py`, `events.py` - MCP tool functions
+  - `id_registry.py` - Virtual ID ↔ real ID bidirectional mapping
+  - `id_utils.py` - Extract account/calendar IDs from encoded Morgen IDs
+  - `utils.py` - Shared helpers (`filter_none_values`, `handle_tool_errors`)
 
 ### Patterns
 
-- Tools return `{"success": True, ...}` or `{"error": "...", "status_code": N}` or `{"error": "...", "validation_error": True}`
+- Tools return `{"success": True, ...}` on success
+- Tools raise `ToolError` (from `fastmcp.exceptions`) on failure — messages are always visible to LLMs
+- `@handle_tool_errors` in `utils.py` converts ValidationError, MorgenAPIError, and unexpected exceptions to ToolError
+- Batch operations return partial results with `{"deleted": [...], "failed": [...]}` — per-item failures are dict entries, not ToolError
 - Datetime fields use LocalDateTime format (`2023-03-01T10:00:00`) - no Z suffix; timezone is separate
 - `EventCreateResponse` has nested structure: `response.event.id`, not `response.id`
+- **Timing fields constraint**: `update_event` and `batch_update_events` require all four timing fields (`start`, `duration`, `time_zone`, `is_all_day`) together or none — partial updates are rejected
 
 ### Morgen API ID Structure
 
@@ -61,11 +71,24 @@ This allows deriving account_id and calendar_id from event_id without caching.
 
 Tools expose 7-character Base64url virtual IDs (e.g., `aB-9xZ_`) instead of raw Morgen IDs for token efficiency. The `id_registry` module handles mapping between virtual and real IDs. Character set: `A-Za-z0-9-_`.
 
+Virtual IDs are **session-scoped** (module-level dicts, not persisted). Restarting the server loses all mappings. LLMs must call list tools (e.g., `list_calendars`, `list_events`) before using IDs in write operations.
+
 ### Testing
 
 - **Tool tests** (`test_tools.py`): Mock via `patch("morgenmcp.tools.*.get_client")`
 - **Client tests** (`test_client.py`): Mock HTTP via `@respx.mock` decorator on test methods
+- **MCP protocol tests** (`test_mcp_server.py`): In-memory protocol-level tests using `fastmcp.Client(mcp)` — verifies tool registration, annotations, and end-to-end call flow
 - **Integration tests** (`test_integration.py`): Hit real API, excluded from CI via pytest marker
+
+### Environment
+
+- Python `>= 3.14` (set in `pyproject.toml`)
+- `fastmcp==3.0.0b2` — pinned to a specific beta version
+
+### Stale Code
+
+- `conftest.py` helpers (`assert_api_error`, `assert_validation_error`) reference an old error-dict pattern (`{"error": ..., "status_code": ...}`) that was replaced by `ToolError` exceptions — they are dead code
+- `.junie/guidelines.md` shows the same outdated error-dict pattern and incorrectly describes tool registration as `@mcp.tool()` decorated functions
 
 ## Versioning & Release
 
@@ -78,6 +101,25 @@ git push origin v0.1.0
 
 Users reference tags in their MCP client config: `git+https://github.com/k3KAW8Pnf7mkmdSMPHz27/MorgenMCP@v0.1.0`
 
-## API Docs
+## Documentation Resources
 
-See `docs/morgen-dev-docs/` submodule (MDX files).
+Five documentation sources are available. Use them in combination to get accurate, up-to-date information.
+
+| Source | URL / Path | What it covers |
+|--------|-----------|----------------|
+| **Morgen API** (online) | https://docs.morgen.so/ | Endpoints, parameters, schemas, changelog |
+| **Morgen API** (local) | `docs/morgen-dev-docs/content/*.mdx` | Same content, readable offline via Explore/Read |
+| **FastMCP** (online) | https://gofastmcp.com/llms.txt | Server framework (latest version, requires network) |
+| **FastMCP** (local) | `docs/fastmcp/docs/` | Same content, readable offline. Key dirs: `servers/`, `clients/`, `development/`, `patterns/` |
+| **MCP Protocol** | https://modelcontextprotocol.io/llms.txt | Protocol spec: transports, tool schema, JSON-RPC messages |
+
+- **Morgen docs submodule**: `f977d08` (updated automatically by SessionStart hook)
+- **FastMCP docs submodule**: `v3.0.0rc2` / `b14b137f` (updated automatically by SessionStart hook)
+
+### How to use these sources
+
+- **Before implementing or modifying any tool**, look up the relevant Morgen API endpoint in both the online docs and the local MDX files to confirm parameters, required fields, and response shapes. The online docs may be newer; the local submodule is version-pinned and always available.
+- **For FastMCP patterns** (tool registration, return types, error handling, testing), read the local docs at `docs/fastmcp/docs/` first. Key files: `servers/tools.mdx`, `servers/context.mdx`, `development/tests.mdx`. Fall back to `https://gofastmcp.com/llms.txt` if local docs are insufficient.
+- **For MCP protocol questions** (transport, JSON-RPC, tool schema), fetch `https://modelcontextprotocol.io/llms.txt` first, then the relevant spec page.
+- **Use the Explore agent** to query multiple sources in parallel — e.g., one agent fetching the online Morgen docs while another reads the local MDX files. This cross-references information and catches discrepancies.
+- **When adding a new tool or changing tool signatures**, check both FastMCP docs (for decorator/return-type patterns) and the MCP protocol spec (for schema requirements) to ensure compliance.
