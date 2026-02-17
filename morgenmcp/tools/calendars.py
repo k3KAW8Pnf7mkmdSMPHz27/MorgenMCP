@@ -1,5 +1,7 @@
 """MCP tools for Morgen calendar operations."""
 
+from fastmcp.exceptions import ToolError
+
 from morgenmcp.client import get_client
 from morgenmcp.tools.id_registry import register_id, resolve_id
 from morgenmcp.tools.id_utils import extract_account_from_calendar
@@ -84,9 +86,9 @@ async def update_calendar_metadata(
         Dictionary indicating success or error.
     """
     if busy is None and override_color is None and override_name is None:
-        return {
-            "error": "At least one of busy, override_color, or override_name must be provided.",
-        }
+        raise ToolError(
+            "At least one of busy, override_color, or override_name must be provided."
+        )
 
     if override_color is not None:
         validate_hex_color(override_color)

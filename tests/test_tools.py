@@ -5,6 +5,7 @@ import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from fastmcp.exceptions import ToolError
 
 from morgenmcp.models import (
     Account,
@@ -32,18 +33,6 @@ from morgenmcp.tools.events import (
     update_event,
 )
 from morgenmcp.tools.id_registry import clear_registry, register_id
-
-
-def assert_api_error(result: dict, status_code: int) -> None:
-    """Assert that result contains an API error with the expected status code."""
-    assert "error" in result
-    assert result["status_code"] == status_code
-
-
-def assert_validation_error(result: dict) -> None:
-    """Assert that result contains a validation error."""
-    assert "error" in result
-    assert result.get("validation_error") is True
 
 
 def make_calendar_id(account_id: str, calendar_email: str) -> str:
@@ -235,9 +224,8 @@ class TestListAccounts:
             "Authentication failed", status_code=401
         )
 
-        result = await list_accounts()
-
-        assert_api_error(result, 401)
+        with pytest.raises(ToolError, match="API error.*401"):
+            await list_accounts()
 
     @pytest.mark.asyncio
     async def test_list_accounts_multiple(self, mock_morgen_client):
@@ -301,9 +289,8 @@ class TestListCalendars:
             "Rate limit exceeded", status_code=429
         )
 
-        result = await list_calendars()
-
-        assert_api_error(result, 429)
+        with pytest.raises(ToolError, match="API error.*429"):
+            await list_calendars()
 
     @pytest.mark.asyncio
     async def test_list_calendars_with_no_metadata(
@@ -354,12 +341,10 @@ class TestUpdateCalendarMetadata:
         """Test update with no fields provided."""
         virtual_cal = register_id(sample_calendar_id)
 
-        result = await update_calendar_metadata(
-            calendar_id=virtual_cal,
-        )
-
-        assert "error" in result
-        assert "At least one" in result["error"]
+        with pytest.raises(ToolError, match="At least one"):
+            await update_calendar_metadata(
+                calendar_id=virtual_cal,
+            )
 
     @pytest.mark.asyncio
     async def test_update_calendar_metadata_api_error(
@@ -372,12 +357,11 @@ class TestUpdateCalendarMetadata:
 
         virtual_cal = register_id(sample_calendar_id)
 
-        result = await update_calendar_metadata(
-            calendar_id=virtual_cal,
-            busy=True,
-        )
-
-        assert_api_error(result, 404)
+        with pytest.raises(ToolError, match="API error.*404"):
+            await update_calendar_metadata(
+                calendar_id=virtual_cal,
+                busy=True,
+            )
 
 
 class TestListEvents:
@@ -435,13 +419,12 @@ class TestListEvents:
 
         virtual_cal = register_id(sample_calendar_id)
 
-        result = await list_events(
-            start="2023-03-01T00:00:00",
-            end="2023-03-02T00:00:00",
-            calendar_ids=[virtual_cal],
-        )
-
-        assert_api_error(result, 400)
+        with pytest.raises(ToolError, match="API error.*400"):
+            await list_events(
+                start="2023-03-01T00:00:00",
+                end="2023-03-02T00:00:00",
+                calendar_ids=[virtual_cal],
+            )
 
     @pytest.mark.asyncio
     async def test_list_events_validation_error(
@@ -450,14 +433,12 @@ class TestListEvents:
         """Test event listing with validation error (Z suffix)."""
         virtual_cal = register_id(sample_calendar_id)
 
-        result = await list_events(
-            start="2023-03-01T00:00:00Z",
-            end="2023-03-02T00:00:00",
-            calendar_ids=[virtual_cal],
-        )
-
-        assert_validation_error(result)
-        assert "Z" in result["error"]
+        with pytest.raises(ToolError, match="Validation error.*Z"):
+            await list_events(
+                start="2023-03-01T00:00:00Z",
+                end="2023-03-02T00:00:00",
+                calendar_ids=[virtual_cal],
+            )
 
     @pytest.mark.asyncio
     async def test_list_events_all_calendars(
@@ -642,15 +623,14 @@ class TestCreateEvent:
 
         virtual_cal = register_id(sample_calendar_id)
 
-        result = await create_event(
-            calendar_id=virtual_cal,
-            title="Bad Event",
-            start="2023-03-15T14:00:00",
-            duration="PT1H",
-            time_zone="Europe/Berlin",
-        )
-
-        assert_api_error(result, 404)
+        with pytest.raises(ToolError, match="API error.*404"):
+            await create_event(
+                calendar_id=virtual_cal,
+                title="Bad Event",
+                start="2023-03-15T14:00:00",
+                duration="PT1H",
+                time_zone="Europe/Berlin",
+            )
 
     @pytest.mark.asyncio
     async def test_create_event_validation_error(
@@ -659,16 +639,14 @@ class TestCreateEvent:
         """Test event creation with validation error (invalid duration)."""
         virtual_cal = register_id(sample_calendar_id)
 
-        result = await create_event(
-            calendar_id=virtual_cal,
-            title="Bad Event",
-            start="2023-03-15T14:00:00",
-            duration="invalid",
-            time_zone="Europe/Berlin",
-        )
-
-        assert_validation_error(result)
-        assert "duration" in result["error"].lower()
+        with pytest.raises(ToolError, match="Validation error.*duration"):
+            await create_event(
+                calendar_id=virtual_cal,
+                title="Bad Event",
+                start="2023-03-15T14:00:00",
+                duration="invalid",
+                time_zone="Europe/Berlin",
+            )
 
 
 class TestUpdateEvent:
@@ -697,14 +675,12 @@ class TestUpdateEvent:
         """Test update with incomplete timing fields."""
         virtual_evt = register_id(sample_event_id)
 
-        result = await update_event(
-            event_id=virtual_evt,
-            start="2023-03-15T14:00:00",
-            # Missing duration, time_zone, is_all_day
-        )
-
-        assert "error" in result
-        assert "all four must be provided" in result["error"]
+        with pytest.raises(ToolError, match="all four must be provided"):
+            await update_event(
+                event_id=virtual_evt,
+                start="2023-03-15T14:00:00",
+                # Missing duration, time_zone, is_all_day
+            )
 
     @pytest.mark.asyncio
     async def test_update_event_timing_fields_complete(
@@ -753,12 +729,11 @@ class TestUpdateEvent:
 
         virtual_evt = register_id(sample_event_id)
 
-        result = await update_event(
-            event_id=virtual_evt,
-            title="Updated",
-        )
-
-        assert_api_error(result, 404)
+        with pytest.raises(ToolError, match="API error.*404"):
+            await update_event(
+                event_id=virtual_evt,
+                title="Updated",
+            )
 
 
 class TestDeleteEvent:
@@ -800,9 +775,8 @@ class TestDeleteEvent:
 
         virtual_evt = register_id(sample_event_id)
 
-        result = await delete_event(event_id=virtual_evt)
-
-        assert_api_error(result, 404)
+        with pytest.raises(ToolError, match="API error.*404"):
+            await delete_event(event_id=virtual_evt)
 
 
 class TestToolOutputFormat:
@@ -826,16 +800,14 @@ class TestToolOutputFormat:
         assert result["success"] is True
 
     @pytest.mark.asyncio
-    async def test_error_response_has_error_key(self, mock_morgen_client):
-        """Test that error responses include error key."""
+    async def test_error_raises_tool_error(self, mock_morgen_client):
+        """Test that errors raise ToolError."""
         mock_morgen_client.list_calendars.side_effect = MorgenAPIError(
             "Test error", status_code=500
         )
 
-        result = await list_calendars()
-
-        assert "error" in result
-        assert "status_code" in result
+        with pytest.raises(ToolError, match="API error.*500"):
+            await list_calendars()
 
     @pytest.mark.asyncio
     async def test_list_response_has_count(self, mock_morgen_client):

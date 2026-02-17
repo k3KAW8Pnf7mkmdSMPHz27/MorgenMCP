@@ -1,7 +1,10 @@
 """Utility functions for MCP tools."""
 
+from collections.abc import Callable
 from functools import wraps
-from typing import Any, Callable
+from typing import Any
+
+from fastmcp.exceptions import ToolError
 
 from morgenmcp.models import Location, MorgenAPIError, Participant, ParticipantRoles
 from morgenmcp.validators import ValidationError
@@ -23,19 +26,21 @@ def handle_tool_errors(func: Callable) -> Callable:
     """Decorator to handle common tool errors consistently.
 
     Catches ValidationError, MorgenAPIError, and unexpected exceptions,
-    returning appropriate error dicts.
+    raising ToolError so messages are always visible to LLMs.
     """
 
     @wraps(func)
     async def wrapper(*args, **kwargs) -> dict:
         try:
             return await func(*args, **kwargs)
+        except ToolError:
+            raise
         except ValidationError as e:
-            return {"error": str(e), "validation_error": True}
+            raise ToolError(f"Validation error: {e}") from e
         except MorgenAPIError as e:
-            return {"error": str(e), "status_code": e.status_code}
+            raise ToolError(f"API error (HTTP {e.status_code}): {e}") from e
         except Exception as e:
-            return {"error": f"Unexpected error: {e}"}
+            raise ToolError(f"Unexpected error: {e}") from e
 
     return wrapper
 

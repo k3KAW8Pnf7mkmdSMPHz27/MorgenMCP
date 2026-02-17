@@ -5,6 +5,8 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Any, Literal
 
+from fastmcp.exceptions import ToolError
+
 from morgenmcp.client import get_client
 from morgenmcp.models import (
     Event,
@@ -147,7 +149,7 @@ async def list_events(
     if calendar_ids is not None:
         # Specific calendars requested - resolve virtual IDs and extract account
         if not calendar_ids:
-            return {"error": "calendar_ids cannot be empty when provided"}
+            raise ToolError("calendar_ids cannot be empty when provided")
 
         real_calendar_ids = resolve_ids(calendar_ids)
         # Extract account ID from first calendar (all calendars in a query must be from same account)
@@ -184,7 +186,7 @@ async def list_events(
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         for result in results:
-            if isinstance(result, Exception):
+            if isinstance(result, BaseException):
                 # Skip failed accounts, continue with others
                 continue
             all_events.extend(result)
@@ -319,10 +321,10 @@ async def update_event(
     timing_fields = [start, duration, time_zone, is_all_day]
     timing_provided = [f for f in timing_fields if f is not None]
     if timing_provided and len(timing_provided) != 4:
-        return {
-            "error": "When updating timing fields (start, duration, time_zone, is_all_day), "
-            "all four must be provided together.",
-        }
+        raise ToolError(
+            "When updating timing fields (start, duration, time_zone, is_all_day), "
+            "all four must be provided together."
+        )
 
     # Validate inputs if provided
     if start is not None:
