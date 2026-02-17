@@ -1,7 +1,5 @@
 """Unit tests for Pydantic models."""
 
-import pytest
-
 from morgenmcp.models import (
     Alert,
     Calendar,
@@ -203,9 +201,7 @@ class TestEventModels:
             "showWithoutTime": False,
             "freeBusyStatus": "busy",
             "privacy": "public",
-            "locations": {
-                "1": {"@type": "Location", "name": "Room 101"}
-            },
+            "locations": {"1": {"@type": "Location", "name": "Room 101"}},
             "participants": {
                 "john@example.com": {
                     "@type": "Participant",

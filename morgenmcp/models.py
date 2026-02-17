@@ -4,49 +4,50 @@ Based on JSCalendar-inspired schema from Morgen documentation.
 See: https://docs.morgen.so
 """
 
-from typing import Literal
+from typing import Annotated, Literal
+
 from pydantic import BaseModel, Field
 
 
 class MorgenModel(BaseModel):
     """Base model with shared config for all Morgen API models."""
 
-    model_config = {"populate_by_name": True}
+    model_config = {"validate_by_name": True, "validate_by_alias": True}
 
 
 class CalendarRights(MorgenModel):
     """Permissions for a calendar."""
 
-    may_read_free_busy: bool = Field(alias="mayReadFreeBusy", default=False)
-    may_read_items: bool = Field(alias="mayReadItems", default=False)
-    may_write_all: bool = Field(alias="mayWriteAll", default=False)
-    may_write_own: bool = Field(alias="mayWriteOwn", default=False)
-    may_update_private: bool = Field(alias="mayUpdatePrivate", default=False)
-    may_rsvp: bool = Field(alias="mayRSVP", default=False)
-    may_admin: bool = Field(alias="mayAdmin", default=False)
-    may_delete: bool = Field(alias="mayDelete", default=False)
+    may_read_free_busy: Annotated[bool, Field(alias="mayReadFreeBusy")] = False
+    may_read_items: Annotated[bool, Field(alias="mayReadItems")] = False
+    may_write_all: Annotated[bool, Field(alias="mayWriteAll")] = False
+    may_write_own: Annotated[bool, Field(alias="mayWriteOwn")] = False
+    may_update_private: Annotated[bool, Field(alias="mayUpdatePrivate")] = False
+    may_rsvp: Annotated[bool, Field(alias="mayRSVP")] = False
+    may_admin: Annotated[bool, Field(alias="mayAdmin")] = False
+    may_delete: Annotated[bool, Field(alias="mayDelete")] = False
 
 
 class CalendarMetadata(MorgenModel):
     """Morgen-specific calendar metadata."""
 
     busy: bool | None = None
-    override_color: str | None = Field(alias="overrideColor", default=None)
-    override_name: str | None = Field(alias="overrideName", default=None)
+    override_color: Annotated[str | None, Field(alias="overrideColor")] = None
+    override_name: Annotated[str | None, Field(alias="overrideName")] = None
 
 
 class OffsetTrigger(MorgenModel):
     """Alert trigger with offset from event start."""
 
-    type: Literal["OffsetTrigger"] = Field(alias="@type", default="OffsetTrigger")
+    type: Annotated[Literal["OffsetTrigger"], Field(alias="@type")] = "OffsetTrigger"
     offset: str  # ISO 8601 duration, e.g., "-PT30M"
-    relative_to: str = Field(alias="relativeTo", default="start")
+    relative_to: Annotated[str, Field(alias="relativeTo")] = "start"
 
 
 class Alert(MorgenModel):
     """Calendar event alert."""
 
-    type: Literal["Alert"] = Field(alias="@type", default="Alert")
+    type: Annotated[Literal["Alert"], Field(alias="@type")] = "Alert"
     trigger: OffsetTrigger
     action: str = "display"
 
@@ -54,35 +55,37 @@ class Alert(MorgenModel):
 class Calendar(MorgenModel):
     """Morgen calendar model."""
 
-    type: Literal["Calendar"] = Field(alias="@type", default="Calendar")
+    type: Annotated[Literal["Calendar"], Field(alias="@type")] = "Calendar"
     id: str
-    account_id: str = Field(alias="accountId")
-    integration_id: str = Field(alias="integrationId")
+    account_id: Annotated[str, Field(alias="accountId")]
+    integration_id: Annotated[str, Field(alias="integrationId")]
     name: str | None = None
     color: str | None = None
-    sort_order: int = Field(alias="sortOrder", default=0)
-    my_rights: CalendarRights | None = Field(alias="myRights", default=None)
-    default_alerts_with_time: dict[str, Alert] | None = Field(
-        alias="defaultAlertsWithTime", default=None
+    sort_order: Annotated[int, Field(alias="sortOrder")] = 0
+    my_rights: Annotated[CalendarRights | None, Field(alias="myRights")] = None
+    default_alerts_with_time: Annotated[
+        dict[str, Alert] | None, Field(alias="defaultAlertsWithTime")
+    ] = None
+    default_alerts_without_time: Annotated[
+        dict[str, Alert] | None, Field(alias="defaultAlertsWithoutTime")
+    ] = None
+    metadata: Annotated[CalendarMetadata | None, Field(alias="morgen.so:metadata")] = (
+        None
     )
-    default_alerts_without_time: dict[str, Alert] | None = Field(
-        alias="defaultAlertsWithoutTime", default=None
-    )
-    metadata: CalendarMetadata | None = Field(alias="morgen.so:metadata", default=None)
 
 
 class CalendarUpdateRequest(MorgenModel):
     """Request to update calendar metadata."""
 
     id: str
-    account_id: str = Field(alias="accountId")
-    metadata: CalendarMetadata = Field(alias="morgen.so:metadata")
+    account_id: Annotated[str, Field(alias="accountId")]
+    metadata: Annotated[CalendarMetadata, Field(alias="morgen.so:metadata")]
 
 
 class Location(MorgenModel):
     """Event location."""
 
-    type: Literal["Location"] = Field(alias="@type", default="Location")
+    type: Annotated[Literal["Location"], Field(alias="@type")] = "Location"
     name: str | None = None
 
 
@@ -96,28 +99,30 @@ class ParticipantRoles(MorgenModel):
 class Participant(MorgenModel):
     """Event participant."""
 
-    type: Literal["Participant"] = Field(alias="@type", default="Participant")
+    type: Annotated[Literal["Participant"], Field(alias="@type")] = "Participant"
     name: str | None = None
     email: str | None = None
     roles: ParticipantRoles | None = None
-    account_owner: bool = Field(alias="accountOwner", default=False)
-    participation_status: str = Field(alias="participationStatus", default="needs-action")
+    account_owner: Annotated[bool, Field(alias="accountOwner")] = False
+    participation_status: Annotated[str, Field(alias="participationStatus")] = (
+        "needs-action"
+    )
 
 
 class NDay(MorgenModel):
     """Day component in recurrence rule."""
 
-    type: Literal["NDay"] = Field(alias="@type", default="NDay")
+    type: Annotated[Literal["NDay"], Field(alias="@type")] = "NDay"
     day: str  # "mo", "tu", "we", "th", "fr", "sa", "su"
 
 
 class RecurrenceRule(MorgenModel):
     """Recurrence rule for repeating events."""
 
-    type: Literal["RecurrenceRule"] = Field(alias="@type", default="RecurrenceRule")
+    type: Annotated[Literal["RecurrenceRule"], Field(alias="@type")] = "RecurrenceRule"
     frequency: str  # "daily", "weekly", "monthly", "yearly"
     interval: int = 1
-    by_day: list[NDay] | None = Field(alias="byDay", default=None)
+    by_day: Annotated[list[NDay] | None, Field(alias="byDay")] = None
 
 
 class VirtualRoom(MorgenModel):
@@ -129,125 +134,149 @@ class VirtualRoom(MorgenModel):
 class EventDerived(MorgenModel):
     """Morgen-derived event fields (read-only)."""
 
-    virtual_room: VirtualRoom | None = Field(alias="virtualRoom", default=None)
+    virtual_room: Annotated[VirtualRoom | None, Field(alias="virtualRoom")] = None
 
 
 class EventMetadata(MorgenModel):
     """Morgen-specific event metadata."""
 
     updated: str | None = None
-    category_id: str | None = Field(alias="categoryId", default=None)
-    category_name: str | None = Field(alias="categoryName", default=None)
-    category_color: str | None = Field(alias="categoryColor", default=None)
+    category_id: Annotated[str | None, Field(alias="categoryId")] = None
+    category_name: Annotated[str | None, Field(alias="categoryName")] = None
+    category_color: Annotated[str | None, Field(alias="categoryColor")] = None
     progress: str | None = None  # "needs-action", "completed"
-    task_id: str | None = Field(alias="taskId", default=None)
+    task_id: Annotated[str | None, Field(alias="taskId")] = None
 
 
 class Event(MorgenModel):
     """Morgen calendar event model."""
 
-    type: Literal["Event"] = Field(alias="@type", default="Event")
+    type: Annotated[Literal["Event"], Field(alias="@type")] = "Event"
     id: str
     uid: str | None = None
-    calendar_id: str = Field(alias="calendarId")
-    account_id: str = Field(alias="accountId")
-    integration_id: str = Field(alias="integrationId")
-    base_event_id: str | None = Field(alias="baseEventId", default=None)
-    master_event_id: str | None = Field(alias="masterEventId", default=None)
-    master_base_event_id: str | None = Field(alias="masterBaseEventId", default=None)
+    calendar_id: Annotated[str, Field(alias="calendarId")]
+    account_id: Annotated[str, Field(alias="accountId")]
+    integration_id: Annotated[str, Field(alias="integrationId")]
+    base_event_id: Annotated[str | None, Field(alias="baseEventId")] = None
+    master_event_id: Annotated[str | None, Field(alias="masterEventId")] = None
+    master_base_event_id: Annotated[str | None, Field(alias="masterBaseEventId")] = None
     created: str | None = None
     updated: str | None = None
-    recurrence_id: str | None = Field(alias="recurrenceId", default=None)
-    recurrence_id_time_zone: str | None = Field(alias="recurrenceIdTimeZone", default=None)
+    recurrence_id: Annotated[str | None, Field(alias="recurrenceId")] = None
+    recurrence_id_time_zone: Annotated[
+        str | None, Field(alias="recurrenceIdTimeZone")
+    ] = None
     title: str | None = None
     description: str | None = None
-    description_content_type: str = Field(
-        alias="descriptionContentType", default="text/plain"
+    description_content_type: Annotated[str, Field(alias="descriptionContentType")] = (
+        "text/plain"
     )
     start: str  # LocalDateTime format: "2023-03-01T10:15:00"
-    time_zone: str | None = Field(alias="timeZone", default=None)
+    time_zone: Annotated[str | None, Field(alias="timeZone")] = None
     duration: str  # ISO 8601 duration: "PT1H", "PT30M"
-    show_without_time: bool = Field(alias="showWithoutTime", default=False)
+    show_without_time: Annotated[bool, Field(alias="showWithoutTime")] = False
     privacy: str = "public"  # "public", "private", "secret"
-    free_busy_status: str = Field(alias="freeBusyStatus", default="busy")  # "free", "busy"
+    free_busy_status: Annotated[str, Field(alias="freeBusyStatus")] = (
+        "busy"  # "free", "busy"
+    )
     locations: dict[str, Location] | None = None
     participants: dict[str, Participant] | None = None
     alerts: dict[str, Alert] | None = None
-    use_default_alerts: bool = Field(alias="useDefaultAlerts", default=False)
-    recurrence_rules: list[RecurrenceRule] | None = Field(alias="recurrenceRules", default=None)
-    google_color_id: str | None = Field(alias="google.com:colorId", default=None)
-    google_hangout_link: str | None = Field(alias="google.com:hangoutLink", default=None)
-    derived: EventDerived | None = Field(alias="morgen.so:derived", default=None)
-    metadata: EventMetadata | None = Field(alias="morgen.so:metadata", default=None)
-    request_virtual_room: str | None = Field(alias="morgen.so:requestVirtualRoom", default=None)
+    use_default_alerts: Annotated[bool, Field(alias="useDefaultAlerts")] = False
+    recurrence_rules: Annotated[
+        list[RecurrenceRule] | None, Field(alias="recurrenceRules")
+    ] = None
+    google_color_id: Annotated[str | None, Field(alias="google.com:colorId")] = None
+    google_hangout_link: Annotated[
+        str | None, Field(alias="google.com:hangoutLink")
+    ] = None
+    derived: Annotated[EventDerived | None, Field(alias="morgen.so:derived")] = None
+    metadata: Annotated[EventMetadata | None, Field(alias="morgen.so:metadata")] = None
+    request_virtual_room: Annotated[
+        str | None, Field(alias="morgen.so:requestVirtualRoom")
+    ] = None
 
 
 class EventCreateRequest(MorgenModel):
     """Request to create a new event."""
 
-    account_id: str = Field(alias="accountId")
-    calendar_id: str = Field(alias="calendarId")
+    account_id: Annotated[str, Field(alias="accountId")]
+    calendar_id: Annotated[str, Field(alias="calendarId")]
     title: str
     start: str  # LocalDateTime format
     duration: str  # ISO 8601 duration
-    time_zone: str | None = Field(alias="timeZone", default=None)
-    show_without_time: bool = Field(alias="showWithoutTime", default=False)
+    time_zone: Annotated[str | None, Field(alias="timeZone")] = None
+    show_without_time: Annotated[bool, Field(alias="showWithoutTime")] = False
     description: str | None = None
-    description_content_type: str | None = Field(alias="descriptionContentType", default=None)
+    description_content_type: Annotated[
+        str | None, Field(alias="descriptionContentType")
+    ] = None
     locations: dict[str, Location] | None = None
     participants: dict[str, Participant] | None = None
     alerts: dict[str, Alert] | None = None
-    use_default_alerts: bool | None = Field(alias="useDefaultAlerts", default=None)
+    use_default_alerts: Annotated[bool | None, Field(alias="useDefaultAlerts")] = None
     privacy: str | None = None
-    free_busy_status: str | None = Field(alias="freeBusyStatus", default=None)
-    recurrence_rules: list[RecurrenceRule] | None = Field(alias="recurrenceRules", default=None)
-    google_color_id: str | None = Field(alias="google.com:colorId", default=None)
-    request_virtual_room: str | None = Field(alias="morgen.so:requestVirtualRoom", default=None)
+    free_busy_status: Annotated[str | None, Field(alias="freeBusyStatus")] = None
+    recurrence_rules: Annotated[
+        list[RecurrenceRule] | None, Field(alias="recurrenceRules")
+    ] = None
+    google_color_id: Annotated[str | None, Field(alias="google.com:colorId")] = None
+    request_virtual_room: Annotated[
+        str | None, Field(alias="morgen.so:requestVirtualRoom")
+    ] = None
 
 
 class EventUpdateRequest(MorgenModel):
     """Request to update an existing event."""
 
     id: str | None = None
-    account_id: str = Field(alias="accountId")
-    calendar_id: str = Field(alias="calendarId")
-    master_event_id: str | None = Field(alias="masterEventId", default=None)
-    recurrence_id: str | None = Field(alias="recurrenceId", default=None)
-    recurrence_id_time_zone: str | None = Field(alias="recurrenceIdTimeZone", default=None)
+    account_id: Annotated[str, Field(alias="accountId")]
+    calendar_id: Annotated[str, Field(alias="calendarId")]
+    master_event_id: Annotated[str | None, Field(alias="masterEventId")] = None
+    recurrence_id: Annotated[str | None, Field(alias="recurrenceId")] = None
+    recurrence_id_time_zone: Annotated[
+        str | None, Field(alias="recurrenceIdTimeZone")
+    ] = None
     title: str | None = None
     start: str | None = None
     duration: str | None = None
-    time_zone: str | None = Field(alias="timeZone", default=None)
-    show_without_time: bool | None = Field(alias="showWithoutTime", default=None)
+    time_zone: Annotated[str | None, Field(alias="timeZone")] = None
+    show_without_time: Annotated[bool | None, Field(alias="showWithoutTime")] = None
     description: str | None = None
-    description_content_type: str | None = Field(alias="descriptionContentType", default=None)
+    description_content_type: Annotated[
+        str | None, Field(alias="descriptionContentType")
+    ] = None
     locations: dict[str, Location] | None = None
     participants: dict[str, Participant | None] | None = None
     alerts: dict[str, Alert | None] | None = None
-    use_default_alerts: bool | None = Field(alias="useDefaultAlerts", default=None)
+    use_default_alerts: Annotated[bool | None, Field(alias="useDefaultAlerts")] = None
     privacy: str | None = None
-    free_busy_status: str | None = Field(alias="freeBusyStatus", default=None)
-    recurrence_rules: list[RecurrenceRule] | None = Field(alias="recurrenceRules", default=None)
-    google_color_id: str | None = Field(alias="google.com:colorId", default=None)
-    request_virtual_room: str | None = Field(alias="morgen.so:requestVirtualRoom", default=None)
+    free_busy_status: Annotated[str | None, Field(alias="freeBusyStatus")] = None
+    recurrence_rules: Annotated[
+        list[RecurrenceRule] | None, Field(alias="recurrenceRules")
+    ] = None
+    google_color_id: Annotated[str | None, Field(alias="google.com:colorId")] = None
+    request_virtual_room: Annotated[
+        str | None, Field(alias="morgen.so:requestVirtualRoom")
+    ] = None
 
 
 class EventDeleteRequest(MorgenModel):
     """Request to delete an event."""
 
     id: str
-    account_id: str = Field(alias="accountId")
-    calendar_id: str = Field(alias="calendarId")
+    account_id: Annotated[str, Field(alias="accountId")]
+    calendar_id: Annotated[str, Field(alias="calendarId")]
 
 
 class Account(MorgenModel):
     """Connected calendar account."""
 
     id: str
-    provider_id: str = Field(alias="providerId")
-    integration_id: str = Field(alias="integrationId")
-    provider_user_id: str = Field(alias="providerUserId")
-    provider_user_display_name: str = Field(alias="providerUserDisplayName")
+    provider_id: Annotated[str, Field(alias="providerId")]
+    integration_id: Annotated[str, Field(alias="integrationId")]
+    provider_user_id: Annotated[str, Field(alias="providerUserId")]
+    provider_user_display_name: Annotated[str, Field(alias="providerUserDisplayName")]
 
 
 class AccountsListResponse(BaseModel):
@@ -272,8 +301,8 @@ class CreatedEventInfo(MorgenModel):
     """Information about a newly created event."""
 
     id: str
-    calendar_id: str = Field(alias="calendarId")
-    account_id: str = Field(alias="accountId")
+    calendar_id: Annotated[str, Field(alias="calendarId")]
+    account_id: Annotated[str, Field(alias="accountId")]
 
 
 class EventCreateResponse(MorgenModel):
