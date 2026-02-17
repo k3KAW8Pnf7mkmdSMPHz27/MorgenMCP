@@ -5,20 +5,20 @@ description = "MCP server for Morgen calendar API"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.14"
 dependencies = [
-    "fastmcp>=0.4.1",
-    "httpx>=0.27",
-    "pydantic>=2.0",
-    "pydantic-core>=2.41.5",
+    "fastmcp==3.0.0b2",
+    "httpx>=0.28",
+    "pydantic>=2.12",
     "python-dotenv>=1.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0",
-    "pytest-asyncio>=0.24",
-    "respx>=0.21",
-    "ruff>=0.9",
+    "pytest>=9.0",
+    "pytest-asyncio>=1.0",
+    "respx>=0.22",
+    "ruff>=0.15",
     "pre-commit>=4.0",
+    "pyright>=1.1.408",
 ]
 
 [project.scripts]
@@ -26,6 +26,7 @@ morgenmcp = "morgenmcp.server:main"
 
 [tool.uv]
 package = true
+prerelease = "if-necessary-or-explicit"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -48,6 +49,18 @@ select = [
     "B",    # flake8-bugbear
     "SIM",  # flake8-simplify
 ]
+ignore = [
+    "E501",  # line too long (handled by formatter, docstrings exempt)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"morgenmcp/server.py" = ["E402"]  # load_dotenv() must run before imports
 
 [tool.ruff.lint.isort]
 known-first-party = ["morgenmcp"]
+
+[tool.pyright]
+pythonVersion = "3.14"
+typeCheckingMode = "standard"
+venvPath = "."
+venv = ".venv"

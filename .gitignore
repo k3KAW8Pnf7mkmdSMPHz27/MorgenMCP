@@ -46,8 +46,10 @@ htmlcov/
 .tox/
 .nox/
 
-# Local settings and secrets
-.claude/
+# Local settings and secrets — track shared config, ignore the rest
+.claude/*
+!.claude/settings.json
+!.claude/hooks
 .env
 .env.local
 *.env
