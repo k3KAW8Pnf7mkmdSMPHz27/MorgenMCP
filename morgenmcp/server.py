@@ -43,16 +43,79 @@ mcp = FastMCP(
     """,
 )
 
-# Register tools directly - docstrings come from the tool functions
-mcp.tool(name="morgen_list_accounts")(list_accounts)
-mcp.tool(name="morgen_list_calendars")(list_calendars)
-mcp.tool(name="morgen_update_calendar_metadata")(update_calendar_metadata)
-mcp.tool(name="morgen_list_events")(list_events)
-mcp.tool(name="morgen_create_event")(create_event)
-mcp.tool(name="morgen_update_event")(update_event)
-mcp.tool(name="morgen_delete_event")(delete_event)
-mcp.tool(name="morgen_batch_delete_events")(batch_delete_events)
-mcp.tool(name="morgen_batch_update_events")(batch_update_events)
+# Register tools with annotations and tags
+mcp.tool(
+    name="morgen_list_accounts",
+    tags={"accounts", "read"},
+    annotations={"readOnlyHint": True, "openWorldHint": True},
+)(list_accounts)
+mcp.tool(
+    name="morgen_list_calendars",
+    tags={"calendars", "read"},
+    annotations={"readOnlyHint": True, "openWorldHint": True},
+)(list_calendars)
+mcp.tool(
+    name="morgen_update_calendar_metadata",
+    tags={"calendars", "write"},
+    annotations={
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)(update_calendar_metadata)
+mcp.tool(
+    name="morgen_list_events",
+    tags={"events", "read"},
+    annotations={"readOnlyHint": True, "openWorldHint": True},
+)(list_events)
+mcp.tool(
+    name="morgen_create_event",
+    tags={"events", "write"},
+    annotations={
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "openWorldHint": True,
+    },
+)(create_event)
+mcp.tool(
+    name="morgen_update_event",
+    tags={"events", "write"},
+    annotations={
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)(update_event)
+mcp.tool(
+    name="morgen_delete_event",
+    tags={"events", "delete"},
+    annotations={
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "openWorldHint": True,
+    },
+)(delete_event)
+mcp.tool(
+    name="morgen_batch_delete_events",
+    tags={"events", "delete", "batch"},
+    annotations={
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "openWorldHint": True,
+    },
+)(batch_delete_events)
+mcp.tool(
+    name="morgen_batch_update_events",
+    tags={"events", "write", "batch"},
+    annotations={
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": False,
+        "openWorldHint": True,
+    },
+)(batch_update_events)
 
 
 def main() -> None:
