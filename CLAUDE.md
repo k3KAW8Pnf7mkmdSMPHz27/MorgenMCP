@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 uv sync --all-extras                    # Install dependencies
-echo "MORGEN_API_KEY=..." > .env        # Configure API key (loaded automatically)
+echo "export MORGEN_API_KEY=..." > .envrc && direnv allow  # Configure API key
 uv run morgenmcp                        # Run server
 uv run pytest                           # Run all tests (excludes integration)
 uv run pytest tests/test_tools.py::TestCreateEvent -v  # Run specific test class
@@ -29,7 +29,7 @@ Opens Inspector UI at http://localhost:6274 for testing tools.
 
 FastMCP-based MCP server wrapping the Morgen calendar API (https://api.morgen.so/v3/).
 
-- **`server.py`** - Entry point registering tools from tools modules (`load_dotenv()` runs before imports — E402 suppressed by ruff). Tools are **not** decorated with `@mcp.tool()` on the function; instead, `server.py` uses `mcp.tool(name=..., tags=..., annotations=...)(func)` as a call expression. This decoupling means tool functions remain plain async functions importable for unit testing.
+- **`server.py`** - Entry point registering tools from tools modules. Tools are **not** decorated with `@mcp.tool()` on the function; instead, `server.py` uses `mcp.tool(name=..., tags=..., annotations=...)(func)` as a call expression. This decoupling means tool functions remain plain async functions importable for unit testing.
 - **`client.py`** - Async HTTP client; global instance via `get_client()`. Auth header: `"Authorization": f"ApiKey {self.api_key}"` (not `Bearer`).
 - **`models.py`** - Pydantic models using `Annotated[type, Field(alias="...")]` pattern. Base `MorgenModel` config: `validate_by_name=True, validate_by_alias=True`. Serialize with `model.model_dump(by_alias=True, exclude_none=True)`.
 - **`validators.py`** - Input validation (datetime, duration, timezone, email, color)
@@ -83,12 +83,7 @@ Virtual IDs are **session-scoped** (module-level dicts, not persisted). Restarti
 ### Environment
 
 - Python `>= 3.14` (set in `pyproject.toml`)
-- `fastmcp==3.0.0b2` — pinned to a specific beta version
-
-### Stale Code
-
-- `conftest.py` helpers (`assert_api_error`, `assert_validation_error`) reference an old error-dict pattern (`{"error": ..., "status_code": ...}`) that was replaced by `ToolError` exceptions — they are dead code
-- `.junie/guidelines.md` shows the same outdated error-dict pattern and incorrectly describes tool registration as `@mcp.tool()` decorated functions
+- `fastmcp==3.0.0` — pinned to stable release
 
 ## Versioning & Release
 
@@ -108,18 +103,18 @@ Five documentation sources are available. Use them in combination to get accurat
 | Source | URL / Path | What it covers |
 |--------|-----------|----------------|
 | **Morgen API** (online) | https://docs.morgen.so/ | Endpoints, parameters, schemas, changelog |
-| **Morgen API** (local) | `docs/morgen-dev-docs/content/*.mdx` | Same content, readable offline via Explore/Read |
+| **Morgen API** (local) | `docs/morgen-dev-docs/content/*.mdx` | Same content, readable offline. Use the `morgen-api-docs` agent for lookups |
 | **FastMCP** (online) | https://gofastmcp.com/llms.txt | Server framework (latest version, requires network) |
-| **FastMCP** (local) | `docs/fastmcp/docs/` | Same content, readable offline. Key dirs: `servers/`, `clients/`, `development/`, `patterns/` |
+| **FastMCP** (local) | `docs/fastmcp/docs/` | Same content, readable offline. Use the `fastmcp-docs` agent for lookups |
 | **MCP Protocol** | https://modelcontextprotocol.io/llms.txt | Protocol spec: transports, tool schema, JSON-RPC messages |
 
 - **Morgen docs submodule**: `f977d08` (updated automatically by SessionStart hook)
-- **FastMCP docs submodule**: `v3.0.0rc2` / `b14b137f` (updated automatically by SessionStart hook)
+- **FastMCP docs submodule**: `v3.0.0` / `92f4c503` (updated automatically by SessionStart hook)
 
 ### How to use these sources
 
 - **Before implementing or modifying any tool**, look up the relevant Morgen API endpoint in both the online docs and the local MDX files to confirm parameters, required fields, and response shapes. The online docs may be newer; the local submodule is version-pinned and always available.
-- **For FastMCP patterns** (tool registration, return types, error handling, testing), read the local docs at `docs/fastmcp/docs/` first. Key files: `servers/tools.mdx`, `servers/context.mdx`, `development/tests.mdx`. Fall back to `https://gofastmcp.com/llms.txt` if local docs are insufficient.
+- **For FastMCP patterns** (tool registration, return types, error handling, testing), use the `fastmcp-docs` agent — it searches `docs/fastmcp/docs/` (v3 only) and returns file paths, line numbers, and code examples. Fall back to `https://gofastmcp.com/llms.txt` if local docs are insufficient.
 - **For MCP protocol questions** (transport, JSON-RPC, tool schema), fetch `https://modelcontextprotocol.io/llms.txt` first, then the relevant spec page.
-- **Use the Explore agent** to query multiple sources in parallel — e.g., one agent fetching the online Morgen docs while another reads the local MDX files. This cross-references information and catches discrepancies.
+- **Use the `morgen-api-docs` agent** (read-only) for Morgen API questions — it searches `docs/morgen-dev-docs/content/` and returns file paths, line numbers, and direct quotes. For cross-referencing, run it in parallel with a WebFetch of the online docs.
 - **When adding a new tool or changing tool signatures**, check both FastMCP docs (for decorator/return-type patterns) and the MCP protocol spec (for schema requirements) to ensure compliance.

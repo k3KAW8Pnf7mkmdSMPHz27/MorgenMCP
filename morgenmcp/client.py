@@ -86,7 +86,7 @@ class MorgenClient:
                     remaining=int(remaining),
                     reset_seconds=int(reset),
                 )
-        except ValueError, TypeError:
+        except (ValueError, TypeError):
             pass
         return None
 

@@ -1,13 +1,8 @@
 """Shared pytest fixtures and helpers."""
 
+import os
 
-def assert_api_error(result: dict, status_code: int) -> None:
-    """Assert that result contains an API error with the expected status code."""
-    assert "error" in result
-    assert result["status_code"] == status_code
-
-
-def assert_validation_error(result: dict) -> None:
-    """Assert that result contains a validation error."""
-    assert "error" in result
-    assert result.get("validation_error") is True
+# Provide a fallback API key so tests that don't mock the client
+# (e.g. MCP protocol tests exercising the lifespan) don't fail
+# when direnv hasn't loaded .envrc into the shell.
+os.environ.setdefault("MORGEN_API_KEY", "test-placeholder-key")

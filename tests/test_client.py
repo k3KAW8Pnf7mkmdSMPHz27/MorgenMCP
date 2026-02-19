@@ -21,11 +21,11 @@ def mock_client():
 
 @pytest.fixture
 def reset_global_client():
-    """Reset global client after tests."""
-    yield
-    # Reset by setting to None indirectly
+    """Reset global client before and after tests."""
     import morgenmcp.client
 
+    morgenmcp.client._client = None
+    yield
     morgenmcp.client._client = None
 
 
@@ -90,6 +90,47 @@ class TestClientRateLimitHandling:
             200,
             headers={
                 "RateLimit-Limit": "not_a_number",
+                "RateLimit-Remaining": "100",
+                "RateLimit-Reset": "459",
+            },
+        )
+        info = mock_client._parse_rate_limit_headers(response)
+
+        assert info is None
+
+    def test_parse_rate_limit_headers_partial_present(self, mock_client):
+        """Test parsing when only some rate limit headers are present (returns None)."""
+        response = httpx.Response(
+            200,
+            headers={
+                "RateLimit-Limit": "250",
+                # Missing Remaining and Reset
+            },
+        )
+        info = mock_client._parse_rate_limit_headers(response)
+
+        assert info is None
+
+    def test_parse_rate_limit_headers_all_non_numeric(self, mock_client):
+        """Test parsing when all rate limit headers are non-numeric (ValueError)."""
+        response = httpx.Response(
+            200,
+            headers={
+                "RateLimit-Limit": "abc",
+                "RateLimit-Remaining": "def",
+                "RateLimit-Reset": "ghi",
+            },
+        )
+        info = mock_client._parse_rate_limit_headers(response)
+
+        assert info is None
+
+    def test_parse_rate_limit_headers_float_values(self, mock_client):
+        """Test parsing when rate limit headers contain float values (ValueError)."""
+        response = httpx.Response(
+            200,
+            headers={
+                "RateLimit-Limit": "250.5",
                 "RateLimit-Remaining": "100",
                 "RateLimit-Reset": "459",
             },
@@ -177,7 +218,6 @@ class TestCalendarEndpoints:
     """Tests for calendar API endpoints."""
 
     @respx.mock
-    @pytest.mark.asyncio
     async def test_list_calendars_success(self):
         """Test successful calendar listing."""
         respx.get("https://api.morgen.so/v3/calendars/list").mock(
@@ -207,7 +247,6 @@ class TestCalendarEndpoints:
         assert calendars[0].name == "Work"
 
     @respx.mock
-    @pytest.mark.asyncio
     async def test_list_calendars_empty(self):
         """Test calendar listing with no calendars."""
         respx.get("https://api.morgen.so/v3/calendars/list").mock(
@@ -223,7 +262,6 @@ class TestCalendarEndpoints:
         assert len(calendars) == 0
 
     @respx.mock
-    @pytest.mark.asyncio
     async def test_update_calendar_metadata_success(self):
         """Test successful calendar metadata update."""
         respx.post("https://api.morgen.so/v3/calendars/update").mock(
@@ -244,7 +282,6 @@ class TestEventEndpoints:
     """Tests for event API endpoints."""
 
     @respx.mock
-    @pytest.mark.asyncio
     async def test_list_events_success(self):
         """Test successful event listing."""
         respx.get("https://api.morgen.so/v3/events/list").mock(
@@ -282,7 +319,6 @@ class TestEventEndpoints:
         assert events[0].title == "Meeting"
 
     @respx.mock
-    @pytest.mark.asyncio
     async def test_list_events_query_params(self):
         """Test that list_events sends correct query parameters."""
         route = respx.get("https://api.morgen.so/v3/events/list").mock(
@@ -303,7 +339,6 @@ class TestEventEndpoints:
         assert "calendarIds=cal1%2Ccal2" in str(request.url)  # URL encoded comma
 
     @respx.mock
-    @pytest.mark.asyncio
     async def test_create_event_success(self):
         """Test successful event creation."""
         respx.post("https://api.morgen.so/v3/events/create").mock(
@@ -337,7 +372,6 @@ class TestEventEndpoints:
         assert response.event.calendar_id == "cal456"
 
     @respx.mock
-    @pytest.mark.asyncio
     async def test_update_event_success(self):
         """Test successful event update."""
         respx.post("https://api.morgen.so/v3/events/update").mock(
@@ -355,7 +389,6 @@ class TestEventEndpoints:
             await client.update_event(request)
 
     @respx.mock
-    @pytest.mark.asyncio
     async def test_update_event_series_mode(self):
         """Test event update with series update mode."""
         route = respx.post("https://api.morgen.so/v3/events/update").mock(
@@ -376,7 +409,6 @@ class TestEventEndpoints:
         assert "seriesUpdateMode=all" in str(request_made.url)
 
     @respx.mock
-    @pytest.mark.asyncio
     async def test_delete_event_success(self):
         """Test successful event deletion."""
         respx.post("https://api.morgen.so/v3/events/delete").mock(
@@ -423,7 +455,6 @@ class TestGlobalClient:
 class TestClientContextManager:
     """Tests for async context manager."""
 
-    @pytest.mark.asyncio
     async def test_context_manager_closes_client(self):
         """Test that context manager properly closes the client."""
         async with MorgenClient(api_key="test_key") as client:
@@ -434,7 +465,6 @@ class TestClientContextManager:
         # After exiting context, client should be closed
         assert client._client is None
 
-    @pytest.mark.asyncio
     async def test_context_manager_returns_client(self):
         """Test that context manager returns the client."""
         async with MorgenClient(api_key="test_key") as client:

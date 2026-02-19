@@ -1,8 +1,7 @@
 """FastMCP server for Morgen calendar API."""
 
-from dotenv import load_dotenv
-
-load_dotenv()  # Load .env from CWD if present
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastmcp import FastMCP
 
@@ -17,9 +16,23 @@ from morgenmcp.tools.events import (
     update_event,
 )
 
+
+@asynccontextmanager
+async def lifespan(server: FastMCP) -> AsyncIterator[None]:
+    """Initialize and clean up the Morgen HTTP client."""
+    from morgenmcp.client import get_client
+
+    try:
+        yield
+    finally:
+        client = get_client()
+        await client.close()
+
+
 # Create the MCP server
 mcp = FastMCP(
     "morgen-calendar",
+    lifespan=lifespan,
     instructions="""
     Morgen Calendar MCP Server provides access to Morgen's unified calendar API.
 
@@ -47,17 +60,29 @@ mcp = FastMCP(
 mcp.tool(
     name="morgen_list_accounts",
     tags={"accounts", "read"},
-    annotations={"readOnlyHint": True, "openWorldHint": True},
+    timeout=30.0,
+    annotations={
+        "title": "List Accounts",
+        "readOnlyHint": True,
+        "openWorldHint": True,
+    },
 )(list_accounts)
 mcp.tool(
     name="morgen_list_calendars",
     tags={"calendars", "read"},
-    annotations={"readOnlyHint": True, "openWorldHint": True},
+    timeout=30.0,
+    annotations={
+        "title": "List Calendars",
+        "readOnlyHint": True,
+        "openWorldHint": True,
+    },
 )(list_calendars)
 mcp.tool(
     name="morgen_update_calendar_metadata",
     tags={"calendars", "write"},
+    timeout=30.0,
     annotations={
+        "title": "Update Calendar Metadata",
         "readOnlyHint": False,
         "destructiveHint": False,
         "idempotentHint": True,
@@ -67,12 +92,19 @@ mcp.tool(
 mcp.tool(
     name="morgen_list_events",
     tags={"events", "read"},
-    annotations={"readOnlyHint": True, "openWorldHint": True},
+    timeout=120.0,
+    annotations={
+        "title": "List Events",
+        "readOnlyHint": True,
+        "openWorldHint": True,
+    },
 )(list_events)
 mcp.tool(
     name="morgen_create_event",
     tags={"events", "write"},
+    timeout=30.0,
     annotations={
+        "title": "Create Event",
         "readOnlyHint": False,
         "destructiveHint": False,
         "openWorldHint": True,
@@ -81,7 +113,9 @@ mcp.tool(
 mcp.tool(
     name="morgen_update_event",
     tags={"events", "write"},
+    timeout=30.0,
     annotations={
+        "title": "Update Event",
         "readOnlyHint": False,
         "destructiveHint": False,
         "idempotentHint": True,
@@ -91,7 +125,9 @@ mcp.tool(
 mcp.tool(
     name="morgen_delete_event",
     tags={"events", "delete"},
+    timeout=30.0,
     annotations={
+        "title": "Delete Event",
         "readOnlyHint": False,
         "destructiveHint": True,
         "openWorldHint": True,
@@ -100,7 +136,9 @@ mcp.tool(
 mcp.tool(
     name="morgen_batch_delete_events",
     tags={"events", "delete", "batch"},
+    timeout=120.0,
     annotations={
+        "title": "Batch Delete Events",
         "readOnlyHint": False,
         "destructiveHint": True,
         "openWorldHint": True,
@@ -109,7 +147,9 @@ mcp.tool(
 mcp.tool(
     name="morgen_batch_update_events",
     tags={"events", "write", "batch"},
+    timeout=120.0,
     annotations={
+        "title": "Batch Update Events",
         "readOnlyHint": False,
         "destructiveHint": False,
         "idempotentHint": False,

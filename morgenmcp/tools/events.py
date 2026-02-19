@@ -5,6 +5,7 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Any, Literal
 
+from fastmcp import Context
 from fastmcp.exceptions import ToolError
 
 from morgenmcp.client import get_client
@@ -44,7 +45,7 @@ def _format_compact_event(event: Event) -> str:
         try:
             dt = datetime.fromisoformat(event.start)
             date_str = dt.strftime("%b %d")
-        except ValueError, TypeError:
+        except (ValueError, TypeError):
             date_str = event.start
         return f"{date_str} (all-day): {title} [{virtual_id}]"
     else:
@@ -72,7 +73,7 @@ def _format_compact_event(event: Event) -> str:
             end_dt = start_dt + timedelta(hours=hours, minutes=minutes)
             end_str = end_dt.strftime("%H:%M")
             return f"{start_str}-{end_str}: {title} [{virtual_id}]"
-        except ValueError, TypeError:
+        except (ValueError, TypeError):
             return f"{event.start}: {title} [{virtual_id}]"
 
 
@@ -123,6 +124,7 @@ async def list_events(
     end: str,
     calendar_ids: list[str] | None = None,
     compact: bool = False,
+    ctx: Context | None = None,
 ) -> dict:
     """List events from calendars within a time window.
 
@@ -185,9 +187,15 @@ async def list_events(
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        for result in results:
+        account_ids = list(calendars_by_account.keys())
+        for i, result in enumerate(results):
+            if ctx:
+                await ctx.report_progress(i + 1, len(results))
             if isinstance(result, BaseException):
-                # Skip failed accounts, continue with others
+                if ctx:
+                    await ctx.warning(
+                        f"Failed to fetch events for account {account_ids[i]}: {result}"
+                    )
                 continue
             all_events.extend(result)
 
@@ -403,6 +411,7 @@ async def delete_event(
 async def batch_delete_events(
     event_ids: list[str],
     series_update_mode: Literal["single", "future", "all"] = "single",
+    ctx: Context | None = None,
 ) -> dict:
     """Delete multiple calendar events in a single tool call.
 
@@ -454,6 +463,10 @@ async def batch_delete_events(
     for i, result in enumerate(results):
         virtual_event_id = to_delete[i][0]
         if isinstance(result, Exception):
+            if ctx:
+                await ctx.warning(
+                    f"Failed to delete event {virtual_event_id}: {result}"
+                )
             failed.append({"id": virtual_event_id, "error": str(result)})
         else:
             deleted.append(virtual_event_id)
@@ -469,6 +482,7 @@ async def batch_delete_events(
 async def batch_update_events(
     updates: list[dict[str, Any]],
     series_update_mode: Literal["single", "future", "all"] = "single",
+    ctx: Context | None = None,
 ) -> dict:
     """Update multiple calendar events in a single tool call.
 
@@ -566,6 +580,10 @@ async def batch_update_events(
     for i, result in enumerate(results):
         virtual_event_id = to_update[i][0]
         if isinstance(result, Exception):
+            if ctx:
+                await ctx.warning(
+                    f"Failed to update event {virtual_event_id}: {result}"
+                )
             failed.append({"id": virtual_event_id, "error": str(result)})
         else:
             updated.append(virtual_event_id)
