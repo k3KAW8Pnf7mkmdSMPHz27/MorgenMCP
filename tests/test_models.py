@@ -21,6 +21,13 @@ from morgenmcp.models import (
     ParticipantRoles,
     RateLimitInfo,
     RecurrenceRule,
+    Tag,
+    Task,
+    TaskCreateRequest,
+    TaskCreateResponse,
+    TaskMoveRequest,
+    TasksListResponse,
+    TaskUpdateRequest,
 )
 
 
@@ -413,3 +420,165 @@ class TestModelEdgeCases:
 
         assert "participants" in data
         assert data["participants"]["remove@example.com"] is None
+
+
+class TestTaskModel:
+    """Tests for Task model."""
+
+    def test_task_from_api_json(self):
+        """Task model validates full API response."""
+        data = {
+            "@type": "Task",
+            "id": "WyJBUU1rQURaa1lXWXpOel",
+            "accountId": "640a62c9aa5b7e06cf420000",
+            "integrationId": "morgen",
+            "taskListId": "default",
+            "created": "2023-02-28T11:50:57",
+            "updated": "2023-02-28T17:56:44",
+            "title": "Review quarterly report",
+            "description": "Review and provide feedback",
+            "descriptionContentType": "text/plain",
+            "due": "2023-03-15T17:00:00",
+            "timeZone": "Europe/Berlin",
+            "estimatedDuration": "PT2H",
+            "priority": 1,
+            "progress": "needs-action",
+            "position": 0,
+            "relatedTo": {
+                "parent-task-id": {
+                    "@type": "Relation",
+                    "relation": {"parent": True},
+                }
+            },
+            "tags": ["550e8400-e29b-41d4-a716-446655440000"],
+            "morgen.so:derived": {"scheduled": True},
+        }
+        task = Task.model_validate(data)
+        assert task.id == "WyJBUU1rQURaa1lXWXpOel"
+        assert task.account_id == "640a62c9aa5b7e06cf420000"
+        assert task.task_list_id == "default"
+        assert task.title == "Review quarterly report"
+        assert task.due == "2023-03-15T17:00:00"
+        assert task.priority == 1
+        assert task.progress == "needs-action"
+        assert task.tags == ["550e8400-e29b-41d4-a716-446655440000"]
+        assert task.derived is not None
+        assert task.derived.scheduled is True
+        assert task.related_to is not None
+
+    def test_task_minimal(self):
+        """Task model works with only required fields."""
+        task = Task(id="task123")
+        assert task.id == "task123"
+        assert task.title is None
+        assert task.tags is None
+
+    def test_task_serialization_by_alias(self):
+        """Task serializes with camelCase aliases."""
+        task = Task(id="t1", task_list_id="default", time_zone="UTC")
+        dumped = task.model_dump(by_alias=True, exclude_none=True)
+        assert dumped["taskListId"] == "default"
+        assert dumped["timeZone"] == "UTC"
+        assert "@type" in dumped
+
+
+class TestTaskCreateRequest:
+    """Tests for TaskCreateRequest model."""
+
+    def test_create_request_serialization(self):
+        """TaskCreateRequest serializes correctly for API."""
+        req = TaskCreateRequest(
+            title="New task",
+            due="2023-03-15T17:00:00",
+            time_zone="Europe/Berlin",
+            estimated_duration="PT2H",
+            task_list_id="default",
+            priority=1,
+            tags=["tag-uuid-1"],
+        )
+        dumped = req.model_dump(by_alias=True, exclude_none=True)
+        assert dumped["title"] == "New task"
+        assert dumped["taskListId"] == "default"
+        assert dumped["estimatedDuration"] == "PT2H"
+        assert dumped["timeZone"] == "Europe/Berlin"
+        assert dumped["tags"] == ["tag-uuid-1"]
+
+    def test_create_request_with_subtask(self):
+        """TaskCreateRequest serializes relatedTo for subtasks."""
+        req = TaskCreateRequest(
+            title="Subtask",
+            related_to={
+                "parent-id": {
+                    "@type": "Relation",
+                    "relation": {"parent": True},
+                }
+            },
+        )
+        dumped = req.model_dump(by_alias=True, exclude_none=True)
+        assert "relatedTo" in dumped
+        assert "parent-id" in dumped["relatedTo"]
+
+
+class TestTaskUpdateRequest:
+    """Tests for TaskUpdateRequest model."""
+
+    def test_update_request_partial(self):
+        """TaskUpdateRequest only includes provided fields."""
+        req = TaskUpdateRequest(id="task1", title="Updated")
+        dumped = req.model_dump(by_alias=True, exclude_none=True)
+        assert dumped == {"id": "task1", "title": "Updated"}
+
+
+class TestTaskMoveRequest:
+    """Tests for TaskMoveRequest model."""
+
+    def test_move_request_serialization(self):
+        """TaskMoveRequest serializes with aliases."""
+        req = TaskMoveRequest(id="task1", previous_id="task0", parent_id="parent1")
+        dumped = req.model_dump(by_alias=True, exclude_none=True)
+        assert dumped["previousId"] == "task0"
+        assert dumped["parentId"] == "parent1"
+
+
+class TestTasksListResponse:
+    """Tests for TasksListResponse model."""
+
+    def test_tasks_list_response(self):
+        """TasksListResponse parses task list."""
+        data = {
+            "tasks": [
+                {"@type": "Task", "id": "t1", "title": "Task 1"},
+                {"@type": "Task", "id": "t2", "title": "Task 2"},
+            ]
+        }
+        resp = TasksListResponse.model_validate(data)
+        assert len(resp.tasks) == 2
+        assert resp.tasks[0].title == "Task 1"
+
+
+class TestTagModel:
+    """Tests for Tag model."""
+
+    def test_tag_from_api_json(self):
+        """Tag model validates API response."""
+        data = {
+            "id": "550e8400-e29b-41d4-a716-446655440000",
+            "name": "Work",
+            "color": "#A8D5BA",
+            "updated": "2024-01-15T10:30:00Z",
+        }
+        tag = Tag.model_validate(data)
+        assert tag.id == "550e8400-e29b-41d4-a716-446655440000"
+        assert tag.name == "Work"
+        assert tag.color == "#A8D5BA"
+
+    def test_tag_with_deleted(self):
+        """Tag model handles deleted flag from sync responses."""
+        tag = Tag(id="uuid", name="Old", deleted=True)
+        assert tag.deleted is True
+
+    def test_tag_serialization(self):
+        """Tag serializes correctly."""
+        tag = Tag(id="uuid", name="Work", color="#FF0000")
+        dumped = tag.model_dump(by_alias=True, exclude_none=True)
+        assert dumped == {"id": "uuid", "name": "Work", "color": "#FF0000"}

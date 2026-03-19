@@ -4,7 +4,7 @@ Based on JSCalendar-inspired schema from Morgen documentation.
 See: https://docs.morgen.so
 """
 
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -267,6 +267,113 @@ class EventDeleteRequest(MorgenModel):
     id: str
     account_id: Annotated[str, Field(alias="accountId")]
     calendar_id: Annotated[str, Field(alias="calendarId")]
+
+
+# --- Task Models ---
+
+
+class TaskDerived(MorgenModel):
+    """Morgen-derived task fields (read-only)."""
+
+    scheduled: bool | None = None
+
+
+class Task(MorgenModel):
+    """Morgen task model."""
+
+    type: Annotated[Literal["Task"], Field(alias="@type")] = "Task"
+    id: str
+    account_id: Annotated[str | None, Field(alias="accountId")] = None
+    integration_id: Annotated[str | None, Field(alias="integrationId")] = None
+    task_list_id: Annotated[str | None, Field(alias="taskListId")] = None
+    created: str | None = None
+    updated: str | None = None
+    title: str | None = None
+    description: str | None = None
+    description_content_type: Annotated[
+        str | None, Field(alias="descriptionContentType")
+    ] = None
+    due: str | None = None
+    time_zone: Annotated[str | None, Field(alias="timeZone")] = None
+    estimated_duration: Annotated[
+        str | None, Field(alias="estimatedDuration")
+    ] = None
+    priority: int | None = None
+    progress: str | None = None
+    position: int | None = None
+    related_to: Annotated[dict[str, Any] | None, Field(alias="relatedTo")] = None
+    tags: list[str] | None = None
+    derived: Annotated[TaskDerived | None, Field(alias="morgen.so:derived")] = None
+
+
+class TaskCreateRequest(MorgenModel):
+    """Request to create a new task."""
+
+    title: str
+    description: str | None = None
+    description_content_type: Annotated[
+        str | None, Field(alias="descriptionContentType")
+    ] = None
+    due: str | None = None
+    time_zone: Annotated[str | None, Field(alias="timeZone")] = None
+    estimated_duration: Annotated[
+        str | None, Field(alias="estimatedDuration")
+    ] = None
+    task_list_id: Annotated[str | None, Field(alias="taskListId")] = None
+    priority: int | None = None
+    progress: str | None = None
+    related_to: Annotated[dict | None, Field(alias="relatedTo")] = None
+    tags: list[str] | None = None
+
+
+class TaskCreateResponse(MorgenModel):
+    """Response from task create endpoint."""
+
+    id: str
+
+
+class TaskUpdateRequest(MorgenModel):
+    """Request to update a task."""
+
+    id: str
+    title: str | None = None
+    description: str | None = None
+    due: str | None = None
+    time_zone: Annotated[str | None, Field(alias="timeZone")] = None
+    estimated_duration: Annotated[
+        str | None, Field(alias="estimatedDuration")
+    ] = None
+    task_list_id: Annotated[str | None, Field(alias="taskListId")] = None
+    priority: int | None = None
+    progress: str | None = None
+    tags: list[str] | None = None
+
+
+class TaskMoveRequest(MorgenModel):
+    """Request to reorder/reparent a task."""
+
+    id: str
+    previous_id: Annotated[str | None, Field(alias="previousId")] = None
+    parent_id: Annotated[str | None, Field(alias="parentId")] = None
+
+
+class TasksListResponse(BaseModel):
+    """Response from tasks list endpoint."""
+
+    tasks: list[Task]
+
+
+# --- Tag Models ---
+
+
+class Tag(MorgenModel):
+    """Morgen tag model."""
+
+    id: str
+    name: str | None = None
+    color: str | None = None
+    updated: str | None = None
+    deleted: bool | None = None
 
 
 class Account(MorgenModel):
