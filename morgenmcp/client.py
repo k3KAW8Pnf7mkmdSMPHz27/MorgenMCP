@@ -93,7 +93,7 @@ class MorgenClient:
                     remaining=int(remaining),
                     reset_seconds=int(reset),
                 )
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             pass
         return None
 
@@ -307,8 +307,12 @@ class MorgenClient:
         self,
         limit: int = 100,
         updated_after: str | None = None,
-    ) -> list[Task]:
-        """List tasks with optional filters."""
+    ) -> TasksListResponse:
+        """List tasks with optional filters.
+
+        Returns:
+            TasksListResponse containing tasks list plus spaces/labelDefs metadata.
+        """
         params: dict[str, Any] = {}
         if limit != 100:
             params["limit"] = str(limit)
@@ -319,7 +323,7 @@ class MorgenClient:
         self._handle_error(response)
         data = response.json()
         api_response = APIResponse[TasksListResponse].model_validate(data)
-        return api_response.data.tasks
+        return api_response.data
 
     async def get_task(self, task_id: str) -> Task:
         """Get a single task by ID."""

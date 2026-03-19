@@ -351,10 +351,21 @@ class TaskMoveRequest(MorgenModel):
     parent_id: Annotated[str | None, Field(alias="parentId")] = None
 
 
-class TasksListResponse(BaseModel):
+class Space(MorgenModel):
+    """Task list / space metadata from the tasks list response."""
+
+    id: str
+    name: str | None = None
+    account_id: Annotated[str | None, Field(alias="accountId")] = None
+    integration_id: Annotated[str | None, Field(alias="integrationId")] = None
+
+
+class TasksListResponse(MorgenModel):
     """Response from tasks list endpoint."""
 
     tasks: list[Task]
+    spaces: list[Space] = []
+    label_defs: Annotated[list[Any], Field(alias="labelDefs")] = []
 
 
 # --- Tag Models ---

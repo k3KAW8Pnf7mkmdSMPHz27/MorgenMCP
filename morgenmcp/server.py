@@ -30,6 +30,7 @@ from morgenmcp.tools.tasks import (
     create_task,
     delete_task,
     get_task,
+    list_task_lists,
     list_tasks,
     move_task,
     reopen_task,
@@ -104,10 +105,11 @@ mcp = FastMCP(
     4. Use batch_delete_events or batch_update_events for bulk operations
 
     Task Workflow:
-    1. Use list_tasks to get all tasks (compact=True for fewer tokens)
-    2. Use create_task to add tasks; use parent_task_id for subtasks
-    3. Use close_task/reopen_task to toggle completion
-    4. Use move_task to reorder or reparent tasks
+    1. Use list_task_lists to discover available task lists
+    2. Use list_tasks to get all tasks (compact=True for fewer tokens, task_list_id to filter)
+    3. Use create_task to add tasks; use parent_task_id for subtasks
+    4. Use close_task/reopen_task to toggle completion
+    5. Use move_task to reorder or reparent tasks
 
     Tag Workflow:
     1. Use list_tags to see available tags
@@ -233,6 +235,16 @@ mcp.tool(
         "openWorldHint": True,
     },
 )(list_tasks)
+mcp.tool(
+    name="morgen_list_task_lists",
+    tags={"tasks", "read"},
+    timeout=60.0,
+    annotations={
+        "title": "List Task Lists",
+        "readOnlyHint": True,
+        "openWorldHint": True,
+    },
+)(list_task_lists)
 mcp.tool(
     name="morgen_get_task",
     tags={"tasks", "read"},

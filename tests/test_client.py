@@ -501,11 +501,12 @@ class TestTaskEndpoints:
         )
 
         async with MorgenClient(api_key="test_key") as client:
-            tasks = await client.list_tasks()
+            response = await client.list_tasks()
 
-        assert len(tasks) == 1
-        assert tasks[0].id == "task123"
-        assert tasks[0].title == "Review report"
+        assert len(response.tasks) == 1
+        assert response.tasks[0].id == "task123"
+        assert response.tasks[0].title == "Review report"
+        assert response.spaces == []
 
     @respx.mock
     async def test_list_tasks_with_params(self):

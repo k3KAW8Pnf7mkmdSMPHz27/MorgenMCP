@@ -7,6 +7,7 @@ from fastmcp.exceptions import ToolError
 
 from morgenmcp.client import get_client
 from morgenmcp.models import (
+    Space,
     Task,
     TaskCreateRequest,
     TaskMoveRequest,
@@ -17,7 +18,7 @@ from morgenmcp.tools.utils import filter_none_values, handle_tool_errors
 from morgenmcp.validators import validate_duration, validate_local_datetime
 
 
-def _format_compact_task(task: Task) -> str:
+def _format_compact_task(task: Task, spaces: dict[str, str] | None = None) -> str:
     """Format a task in compact one-liner format with virtual ID."""
     virtual_id = register_id(task.id)
     title = task.title or "(No title)"
@@ -30,9 +31,12 @@ def _format_compact_task(task: Task) -> str:
 
             dt = datetime.fromisoformat(task.due)
             due_str = f" due:{dt.strftime('%b %d')}"
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             due_str = f" due:{task.due}"
-    return f"{status}{priority_str} {title}{due_str} [{virtual_id}]"
+    list_str = ""
+    if spaces and task.task_list_id and task.task_list_id in spaces:
+        list_str = f" @{spaces[task.task_list_id]}"
+    return f"{status}{priority_str} {title}{due_str}{list_str} [{virtual_id}]"
 
 
 def _format_full_task(task: Task) -> dict[str, Any]:
@@ -63,35 +67,94 @@ def _format_full_task(task: Task) -> dict[str, Any]:
     return result
 
 
+def _build_spaces_map(spaces: list[Space]) -> dict[str, str]:
+    """Build a mapping from space ID to space name."""
+    return {s.id: s.name or s.id for s in spaces}
+
+
 @handle_tool_errors
 async def list_tasks(
     updated_after: str | None = None,
+    task_list_id: str | None = None,
     compact: bool = False,
     ctx: Context | None = None,
 ) -> dict:
-    """List all Morgen tasks.
+    """List all Morgen tasks across all task lists.
 
     Note: This endpoint costs 10 rate limit points per request.
 
     Args:
         updated_after: Only return tasks updated after this ISO 8601 datetime.
+        task_list_id: Filter to only tasks from this task list ID. Use list_task_lists
+            to discover available list IDs (e.g., "inbox" or a UUID like
+            "9a4a64d0-980f-4f81-afde-3265bd85e56e@morgen.so").
         compact: If True, returns compact one-liner format to reduce tokens.
-            Format: "○ P1 Task title due:Mar 15 [task_id]"
+            Format: "○ P1 Task title due:Mar 15 @ListName [task_id]"
 
     Returns:
         Dictionary with 'tasks' key containing list of task objects (or strings if compact).
     """
     client = get_client()
-    tasks = await client.list_tasks(updated_after=updated_after)
+    response = await client.list_tasks(updated_after=updated_after)
+    tasks = response.tasks
+    spaces_map = _build_spaces_map(response.spaces)
+
+    # Client-side filter by task list ID
+    if task_list_id:
+        tasks = [t for t in tasks if t.task_list_id == task_list_id]
 
     if compact:
         return {
-            "tasks": [_format_compact_task(t) for t in tasks],
+            "tasks": [_format_compact_task(t, spaces_map) for t in tasks],
             "count": len(tasks),
         }
     return {
         "tasks": [_format_full_task(t) for t in tasks],
         "count": len(tasks),
+    }
+
+
+@handle_tool_errors
+async def list_task_lists(
+    ctx: Context | None = None,
+) -> dict:
+    """List all available task lists (spaces).
+
+    Discovers task lists by fetching tasks and examining the unique taskListId
+    values present. Also includes any space metadata returned by the API.
+
+    Note: This calls the tasks/list endpoint (10 rate limit points).
+
+    Returns:
+        Dictionary with 'taskLists' containing available lists with task counts.
+    """
+    client = get_client()
+    response = await client.list_tasks()
+    spaces_map = _build_spaces_map(response.spaces)
+
+    # Count tasks per list
+    list_counts: dict[str, int] = {}
+    for task in response.tasks:
+        lid = task.task_list_id or "unknown"
+        list_counts[lid] = list_counts.get(lid, 0) + 1
+
+    # Build result: merge space metadata with observed list IDs
+    all_list_ids = set(list_counts.keys()) | set(spaces_map.keys())
+    task_lists = []
+    for lid in sorted(all_list_ids):
+        task_lists.append(
+            filter_none_values(
+                {
+                    "id": lid,
+                    "name": spaces_map.get(lid),
+                    "taskCount": list_counts.get(lid, 0),
+                }
+            )
+        )
+
+    return {
+        "taskLists": task_lists,
+        "count": len(task_lists),
     }
 
 

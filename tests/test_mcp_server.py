@@ -44,6 +44,7 @@ class TestMCPServer:
                 "morgen_batch_update_events",
                 # Tasks
                 "morgen_list_tasks",
+                "morgen_list_task_lists",
                 "morgen_get_task",
                 "morgen_create_task",
                 "morgen_update_task",
@@ -70,6 +71,7 @@ class TestMCPServer:
                 "morgen_list_calendars",
                 "morgen_list_events",
                 "morgen_list_tasks",
+                "morgen_list_task_lists",
                 "morgen_get_task",
                 "morgen_list_tags",
                 "morgen_get_tag",

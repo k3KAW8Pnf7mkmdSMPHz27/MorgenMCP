@@ -20,9 +20,11 @@ from morgenmcp.models import (
     MorgenAPIError,
     Participant,
     ParticipantRoles,
+    Space,
     Tag,
     Task,
     TaskCreateResponse,
+    TasksListResponse,
     VirtualRoom,
 )
 from morgenmcp.tools.accounts import list_accounts
@@ -49,6 +51,7 @@ from morgenmcp.tools.tasks import (
     create_task,
     delete_task,
     get_task,
+    list_task_lists,
     list_tasks,
     move_task,
     reopen_task,
@@ -1154,12 +1157,20 @@ def sample_task():
     )
 
 
+def _make_tasks_response(
+    tasks: list[Task],
+    spaces: list[Space] | None = None,
+) -> TasksListResponse:
+    """Helper to create a TasksListResponse for mocking."""
+    return TasksListResponse(tasks=tasks, spaces=spaces or [])
+
+
 class TestListTasks:
     """Tests for list_tasks tool."""
 
     async def test_list_tasks_success(self, mock_morgen_client, sample_task):
         """Test successful task listing."""
-        mock_morgen_client.list_tasks.return_value = [sample_task]
+        mock_morgen_client.list_tasks.return_value = _make_tasks_response([sample_task])
 
         result = await list_tasks()
 
@@ -1173,7 +1184,7 @@ class TestListTasks:
 
     async def test_list_tasks_compact(self, mock_morgen_client, sample_task):
         """Test compact task listing format."""
-        mock_morgen_client.list_tasks.return_value = [sample_task]
+        mock_morgen_client.list_tasks.return_value = _make_tasks_response([sample_task])
 
         result = await list_tasks(compact=True)
 
@@ -1185,10 +1196,22 @@ class TestListTasks:
         assert "Review quarterly report" in line
         assert "Mar 15" in line  # Due date
 
+    async def test_list_tasks_compact_with_spaces(self, mock_morgen_client):
+        """Test compact format includes list name from spaces."""
+        task = Task(id="t1", title="My task", task_list_id="list-uuid@morgen.so")
+        spaces = [Space(id="list-uuid@morgen.so", name="Work")]
+        mock_morgen_client.list_tasks.return_value = _make_tasks_response(
+            [task], spaces
+        )
+
+        result = await list_tasks(compact=True)
+
+        assert "@Work" in result["tasks"][0]
+
     async def test_list_tasks_compact_completed(self, mock_morgen_client):
         """Test compact format shows checkmark for completed tasks."""
         task = Task(id="t1", title="Done task", progress="completed")
-        mock_morgen_client.list_tasks.return_value = [task]
+        mock_morgen_client.list_tasks.return_value = _make_tasks_response([task])
 
         result = await list_tasks(compact=True)
 
@@ -1196,7 +1219,7 @@ class TestListTasks:
 
     async def test_list_tasks_empty(self, mock_morgen_client):
         """Test empty task listing."""
-        mock_morgen_client.list_tasks.return_value = []
+        mock_morgen_client.list_tasks.return_value = _make_tasks_response([])
 
         result = await list_tasks()
 
@@ -1205,13 +1228,36 @@ class TestListTasks:
 
     async def test_list_tasks_with_updated_after(self, mock_morgen_client):
         """Test task listing with updated_after filter."""
-        mock_morgen_client.list_tasks.return_value = []
+        mock_morgen_client.list_tasks.return_value = _make_tasks_response([])
 
         await list_tasks(updated_after="2023-01-01T00:00:00Z")
 
         mock_morgen_client.list_tasks.assert_awaited_once_with(
             updated_after="2023-01-01T00:00:00Z"
         )
+
+    async def test_list_tasks_filter_by_task_list_id(self, mock_morgen_client):
+        """Test filtering tasks by task_list_id."""
+        task1 = Task(id="t1", title="Work task", task_list_id="work-list")
+        task2 = Task(id="t2", title="Personal task", task_list_id="personal-list")
+        mock_morgen_client.list_tasks.return_value = _make_tasks_response(
+            [task1, task2]
+        )
+
+        result = await list_tasks(task_list_id="work-list")
+
+        assert result["count"] == 1
+        assert result["tasks"][0]["title"] == "Work task"
+
+    async def test_list_tasks_filter_no_match(self, mock_morgen_client):
+        """Test filtering with no matching task list."""
+        task = Task(id="t1", title="A task", task_list_id="some-list")
+        mock_morgen_client.list_tasks.return_value = _make_tasks_response([task])
+
+        result = await list_tasks(task_list_id="nonexistent")
+
+        assert result["count"] == 0
+        assert result["tasks"] == []
 
     async def test_list_tasks_api_error(self, mock_morgen_client):
         """Test task listing with API error."""
@@ -1221,6 +1267,57 @@ class TestListTasks:
 
         with pytest.raises(ToolError, match="API error.*429"):
             await list_tasks()
+
+
+class TestListTaskLists:
+    """Tests for list_task_lists tool."""
+
+    async def test_list_task_lists_with_spaces(self, mock_morgen_client):
+        """Test listing task lists with space metadata."""
+        tasks = [
+            Task(id="t1", title="Task 1", task_list_id="inbox"),
+            Task(id="t2", title="Task 2", task_list_id="work-uuid@morgen.so"),
+            Task(id="t3", title="Task 3", task_list_id="work-uuid@morgen.so"),
+        ]
+        spaces = [
+            Space(id="inbox", name="Inbox"),
+            Space(id="work-uuid@morgen.so", name="Work"),
+        ]
+        mock_morgen_client.list_tasks.return_value = _make_tasks_response(tasks, spaces)
+
+        result = await list_task_lists()
+
+        assert result["count"] == 2
+        lists_by_id = {tl["id"]: tl for tl in result["taskLists"]}
+        assert lists_by_id["inbox"]["name"] == "Inbox"
+        assert lists_by_id["inbox"]["taskCount"] == 1
+        assert lists_by_id["work-uuid@morgen.so"]["name"] == "Work"
+        assert lists_by_id["work-uuid@morgen.so"]["taskCount"] == 2
+
+    async def test_list_task_lists_no_spaces_metadata(self, mock_morgen_client):
+        """Test listing task lists when API returns empty spaces."""
+        tasks = [
+            Task(id="t1", title="Task 1", task_list_id="inbox"),
+            Task(id="t2", title="Task 2", task_list_id="list-uuid@morgen.so"),
+        ]
+        mock_morgen_client.list_tasks.return_value = _make_tasks_response(tasks)
+
+        result = await list_task_lists()
+
+        assert result["count"] == 2
+        # Without spaces metadata, name should not be present
+        lists_by_id = {tl["id"]: tl for tl in result["taskLists"]}
+        assert "name" not in lists_by_id["inbox"]
+        assert lists_by_id["inbox"]["taskCount"] == 1
+
+    async def test_list_task_lists_empty(self, mock_morgen_client):
+        """Test listing task lists when no tasks exist."""
+        mock_morgen_client.list_tasks.return_value = _make_tasks_response([])
+
+        result = await list_task_lists()
+
+        assert result["count"] == 0
+        assert result["taskLists"] == []
 
 
 class TestGetTask:
