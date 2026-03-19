@@ -295,9 +295,7 @@ class Task(MorgenModel):
     ] = None
     due: str | None = None
     time_zone: Annotated[str | None, Field(alias="timeZone")] = None
-    estimated_duration: Annotated[
-        str | None, Field(alias="estimatedDuration")
-    ] = None
+    estimated_duration: Annotated[str | None, Field(alias="estimatedDuration")] = None
     priority: int | None = None
     progress: str | None = None
     position: int | None = None
@@ -316,9 +314,7 @@ class TaskCreateRequest(MorgenModel):
     ] = None
     due: str | None = None
     time_zone: Annotated[str | None, Field(alias="timeZone")] = None
-    estimated_duration: Annotated[
-        str | None, Field(alias="estimatedDuration")
-    ] = None
+    estimated_duration: Annotated[str | None, Field(alias="estimatedDuration")] = None
     task_list_id: Annotated[str | None, Field(alias="taskListId")] = None
     priority: int | None = None
     progress: str | None = None
@@ -340,9 +336,7 @@ class TaskUpdateRequest(MorgenModel):
     description: str | None = None
     due: str | None = None
     time_zone: Annotated[str | None, Field(alias="timeZone")] = None
-    estimated_duration: Annotated[
-        str | None, Field(alias="estimatedDuration")
-    ] = None
+    estimated_duration: Annotated[str | None, Field(alias="estimatedDuration")] = None
     task_list_id: Annotated[str | None, Field(alias="taskListId")] = None
     priority: int | None = None
     progress: str | None = None

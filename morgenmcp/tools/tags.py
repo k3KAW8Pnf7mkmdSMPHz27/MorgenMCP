@@ -3,7 +3,6 @@
 from fastmcp.exceptions import ToolError
 
 from morgenmcp.client import get_client
-from morgenmcp.models import Tag
 from morgenmcp.tools.utils import filter_none_values, handle_tool_errors
 from morgenmcp.validators import validate_hex_color
 

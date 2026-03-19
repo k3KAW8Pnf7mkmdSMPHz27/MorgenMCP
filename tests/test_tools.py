@@ -1283,9 +1283,7 @@ class TestCreateTask:
         parent_virtual_id = register_id(parent_real_id)
         mock_morgen_client.create_task.return_value = TaskCreateResponse(id="sub1")
 
-        result = await create_task(
-            title="Subtask", parent_task_id=parent_virtual_id
-        )
+        result = await create_task(title="Subtask", parent_task_id=parent_virtual_id)
 
         assert result["success"] is True
         call_args = mock_morgen_client.create_task.call_args[0][0]
@@ -1372,9 +1370,7 @@ class TestCloseTask:
         virtual_id = register_id("real_task_id")
         mock_morgen_client.close_task.return_value = None
 
-        result = await close_task(
-            virtual_id, occurrence_start="2023-03-15T10:00:00"
-        )
+        result = await close_task(virtual_id, occurrence_start="2023-03-15T10:00:00")
 
         assert result["success"] is True
         mock_morgen_client.close_task.assert_awaited_once_with(
@@ -1474,9 +1470,7 @@ class TestCreateTag:
 
     async def test_create_tag_name_only(self, mock_morgen_client):
         """Test creating a tag with name only."""
-        mock_morgen_client.create_tag.return_value = Tag(
-            id="new-uuid", name="Simple"
-        )
+        mock_morgen_client.create_tag.return_value = Tag(id="new-uuid", name="Simple")
 
         result = await create_tag(name="Simple")
 

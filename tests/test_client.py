@@ -583,6 +583,7 @@ class TestTaskEndpoints:
             await client.create_task(request)
 
         import json as json_mod
+
         body = json_mod.loads(route.calls.last.request.content)
         assert body["title"] == "Test"
         assert body["due"] == "2023-03-15T17:00:00"
@@ -633,6 +634,7 @@ class TestTaskEndpoints:
             await client.close_task("task1")
 
         import json as json_mod
+
         body = json_mod.loads(route.calls.last.request.content)
         assert body == {"id": "task1"}
 
@@ -647,6 +649,7 @@ class TestTaskEndpoints:
             await client.close_task("task1", occurrence_start="2023-03-15T10:00:00")
 
         import json as json_mod
+
         body = json_mod.loads(route.calls.last.request.content)
         assert body["occurrenceStart"] == "2023-03-15T10:00:00"
 
@@ -760,6 +763,7 @@ class TestTagEndpoints:
             await client.update_tag(tag_id="uuid1", name="Updated", color="#B8D4FF")
 
         import json as json_mod
+
         body = json_mod.loads(route.calls.last.request.content)
         assert body["id"] == "uuid1"
         assert body["name"] == "Updated"
@@ -776,5 +780,6 @@ class TestTagEndpoints:
             await client.delete_tag("uuid1")
 
         import json as json_mod
+
         body = json_mod.loads(route.calls.last.request.content)
         assert body == {"id": "uuid1"}

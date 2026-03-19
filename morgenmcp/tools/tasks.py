@@ -30,7 +30,7 @@ def _format_compact_task(task: Task) -> str:
 
             dt = datetime.fromisoformat(task.due)
             due_str = f" due:{dt.strftime('%b %d')}"
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             due_str = f" due:{task.due}"
     return f"{status}{priority_str} {title}{due_str} [{virtual_id}]"
 
