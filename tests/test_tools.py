@@ -20,6 +20,8 @@ from morgenmcp.models import (
     MorgenAPIError,
     Participant,
     ParticipantRoles,
+    Task,
+    TaskCreateResponse,
     VirtualRoom,
 )
 from morgenmcp.tools.accounts import list_accounts
@@ -34,6 +36,16 @@ from morgenmcp.tools.events import (
     update_event,
 )
 from morgenmcp.tools.id_registry import clear_registry, register_id
+from morgenmcp.tools.tasks import (
+    close_task,
+    create_task,
+    delete_task,
+    get_task,
+    list_tasks,
+    move_task,
+    reopen_task,
+    update_task,
+)
 
 
 def make_calendar_id(account_id: str, calendar_email: str) -> str:
@@ -75,11 +87,15 @@ def mock_morgen_client():
         patch("morgenmcp.tools.accounts.get_client") as acc_mock,
         patch("morgenmcp.tools.calendars.get_client") as cal_mock,
         patch("morgenmcp.tools.events.get_client") as evt_mock,
+        patch("morgenmcp.tools.tasks.get_client") as task_mock,
+        patch("morgenmcp.tools.tags.get_client") as tag_mock,
     ):
         client = AsyncMock()
         acc_mock.return_value = client
         cal_mock.return_value = client
         evt_mock.return_value = client
+        task_mock.return_value = client
+        tag_mock.return_value = client
         yield client
 
 
@@ -1105,3 +1121,270 @@ class TestContextWarnings:
             end="2025-01-02T00:00:00",
         )
         assert result["count"] == 0
+
+
+# --- Task Tool Tests ---
+
+
+@pytest.fixture
+def sample_task():
+    """Create a sample task for testing."""
+    return Task(
+        id="WyJBUU1rQURaa1lXWXpOel",
+        account_id="640a62c9aa5b7e06cf420000",
+        integration_id="morgen",
+        task_list_id="default",
+        title="Review quarterly report",
+        description="Review and provide feedback",
+        due="2023-03-15T17:00:00",
+        time_zone="Europe/Berlin",
+        estimated_duration="PT2H",
+        priority=1,
+        progress="needs-action",
+        position=0,
+        tags=["550e8400-e29b-41d4-a716-446655440000"],
+    )
+
+
+class TestListTasks:
+    """Tests for list_tasks tool."""
+
+    async def test_list_tasks_success(self, mock_morgen_client, sample_task):
+        """Test successful task listing."""
+        mock_morgen_client.list_tasks.return_value = [sample_task]
+
+        result = await list_tasks()
+
+        assert "tasks" in result
+        assert result["count"] == 1
+        task = result["tasks"][0]
+        assert task["title"] == "Review quarterly report"
+        assert task["priority"] == 1
+        assert task["progress"] == "needs-action"
+        assert len(task["id"]) == 7  # Virtual ID
+
+    async def test_list_tasks_compact(self, mock_morgen_client, sample_task):
+        """Test compact task listing format."""
+        mock_morgen_client.list_tasks.return_value = [sample_task]
+
+        result = await list_tasks(compact=True)
+
+        assert result["count"] == 1
+        line = result["tasks"][0]
+        assert isinstance(line, str)
+        assert "○" in line  # Not completed
+        assert "P1" in line  # Priority 1
+        assert "Review quarterly report" in line
+        assert "Mar 15" in line  # Due date
+
+    async def test_list_tasks_compact_completed(self, mock_morgen_client):
+        """Test compact format shows checkmark for completed tasks."""
+        task = Task(id="t1", title="Done task", progress="completed")
+        mock_morgen_client.list_tasks.return_value = [task]
+
+        result = await list_tasks(compact=True)
+
+        assert "✓" in result["tasks"][0]
+
+    async def test_list_tasks_empty(self, mock_morgen_client):
+        """Test empty task listing."""
+        mock_morgen_client.list_tasks.return_value = []
+
+        result = await list_tasks()
+
+        assert result["tasks"] == []
+        assert result["count"] == 0
+
+    async def test_list_tasks_with_updated_after(self, mock_morgen_client):
+        """Test task listing with updated_after filter."""
+        mock_morgen_client.list_tasks.return_value = []
+
+        await list_tasks(updated_after="2023-01-01T00:00:00Z")
+
+        mock_morgen_client.list_tasks.assert_awaited_once_with(
+            updated_after="2023-01-01T00:00:00Z"
+        )
+
+    async def test_list_tasks_api_error(self, mock_morgen_client):
+        """Test task listing with API error."""
+        mock_morgen_client.list_tasks.side_effect = MorgenAPIError(
+            "Rate limit exceeded", status_code=429
+        )
+
+        with pytest.raises(ToolError, match="API error.*429"):
+            await list_tasks()
+
+
+class TestGetTask:
+    """Tests for get_task tool."""
+
+    async def test_get_task_success(self, mock_morgen_client, sample_task):
+        """Test getting a single task."""
+        mock_morgen_client.get_task.return_value = sample_task
+        virtual_id = register_id(sample_task.id)
+
+        result = await get_task(virtual_id)
+
+        assert result["title"] == "Review quarterly report"
+        assert result["id"] == virtual_id
+
+    async def test_get_task_unknown_id(self, mock_morgen_client):
+        """Test get_task with unknown virtual ID."""
+        with pytest.raises(ToolError, match="not found"):
+            await get_task("unknown")
+
+
+class TestCreateTask:
+    """Tests for create_task tool."""
+
+    async def test_create_basic_task(self, mock_morgen_client):
+        """Test creating a basic task."""
+        mock_morgen_client.create_task.return_value = TaskCreateResponse(
+            id="new_task_id"
+        )
+
+        result = await create_task(title="New task")
+
+        assert result["success"] is True
+        assert len(result["taskId"]) == 7
+        mock_morgen_client.create_task.assert_awaited_once()
+
+    async def test_create_task_with_all_fields(self, mock_morgen_client):
+        """Test creating a task with all optional fields."""
+        mock_morgen_client.create_task.return_value = TaskCreateResponse(id="t1")
+
+        result = await create_task(
+            title="Full task",
+            description="Description",
+            due="2023-03-15T17:00:00",
+            time_zone="Europe/Berlin",
+            estimated_duration="PT2H",
+            priority=1,
+            progress="needs-action",
+            tags=["tag-uuid"],
+        )
+
+        assert result["success"] is True
+        call_args = mock_morgen_client.create_task.call_args[0][0]
+        assert call_args.title == "Full task"
+        assert call_args.due == "2023-03-15T17:00:00"
+
+    async def test_create_subtask(self, mock_morgen_client):
+        """Test creating a subtask with parent reference."""
+        parent_real_id = "parent_real_id_123"
+        parent_virtual_id = register_id(parent_real_id)
+        mock_morgen_client.create_task.return_value = TaskCreateResponse(id="sub1")
+
+        result = await create_task(
+            title="Subtask", parent_task_id=parent_virtual_id
+        )
+
+        assert result["success"] is True
+        call_args = mock_morgen_client.create_task.call_args[0][0]
+        assert parent_real_id in call_args.related_to
+
+    async def test_create_task_invalid_due(self, mock_morgen_client):
+        """Test creating a task with invalid due date."""
+        with pytest.raises(ToolError, match="Validation error"):
+            await create_task(title="Bad", due="2023-03-15T17:00:00Z")
+
+    async def test_create_task_invalid_priority(self, mock_morgen_client):
+        """Test creating a task with out-of-range priority."""
+        with pytest.raises(ToolError, match="Priority must be between 0 and 9"):
+            await create_task(title="Bad", priority=10)
+
+
+class TestUpdateTask:
+    """Tests for update_task tool."""
+
+    async def test_update_task_title(self, mock_morgen_client):
+        """Test updating a task title."""
+        real_id = "real_task_id"
+        virtual_id = register_id(real_id)
+        mock_morgen_client.update_task.return_value = None
+
+        result = await update_task(task_id=virtual_id, title="Updated title")
+
+        assert result["success"] is True
+        assert result["taskId"] == virtual_id
+
+    async def test_update_task_invalid_priority(self, mock_morgen_client):
+        """Test update with invalid priority."""
+        virtual_id = register_id("real_id")
+
+        with pytest.raises(ToolError, match="Priority must be between 0 and 9"):
+            await update_task(task_id=virtual_id, priority=-1)
+
+
+class TestMoveTask:
+    """Tests for move_task tool."""
+
+    async def test_move_task_success(self, mock_morgen_client):
+        """Test moving a task."""
+        vid1 = register_id("real_task_1")
+        vid2 = register_id("real_task_2")
+        mock_morgen_client.move_task.return_value = None
+
+        result = await move_task(task_id=vid1, previous_id=vid2)
+
+        assert result["success"] is True
+
+
+class TestDeleteTask:
+    """Tests for delete_task tool."""
+
+    async def test_delete_task_success(self, mock_morgen_client):
+        """Test deleting a task."""
+        virtual_id = register_id("real_task_id")
+        mock_morgen_client.delete_task.return_value = None
+
+        result = await delete_task(virtual_id)
+
+        assert result["success"] is True
+        mock_morgen_client.delete_task.assert_awaited_once_with("real_task_id")
+
+
+class TestCloseTask:
+    """Tests for close_task tool."""
+
+    async def test_close_task_success(self, mock_morgen_client):
+        """Test closing (completing) a task."""
+        virtual_id = register_id("real_task_id")
+        mock_morgen_client.close_task.return_value = None
+
+        result = await close_task(virtual_id)
+
+        assert result["success"] is True
+        mock_morgen_client.close_task.assert_awaited_once_with(
+            "real_task_id", occurrence_start=None
+        )
+
+    async def test_close_task_with_occurrence(self, mock_morgen_client):
+        """Test closing a recurring task occurrence."""
+        virtual_id = register_id("real_task_id")
+        mock_morgen_client.close_task.return_value = None
+
+        result = await close_task(
+            virtual_id, occurrence_start="2023-03-15T10:00:00"
+        )
+
+        assert result["success"] is True
+        mock_morgen_client.close_task.assert_awaited_once_with(
+            "real_task_id", occurrence_start="2023-03-15T10:00:00"
+        )
+
+
+class TestReopenTask:
+    """Tests for reopen_task tool."""
+
+    async def test_reopen_task_success(self, mock_morgen_client):
+        """Test reopening a task."""
+        virtual_id = register_id("real_task_id")
+        mock_morgen_client.reopen_task.return_value = None
+
+        result = await reopen_task(virtual_id)
+
+        assert result["success"] is True
+        mock_morgen_client.reopen_task.assert_awaited_once_with(
+            "real_task_id", occurrence_start=None
+        )
