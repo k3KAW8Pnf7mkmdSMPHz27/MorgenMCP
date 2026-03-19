@@ -9,6 +9,7 @@ dependencies = [
     "httpx>=0.28",
     "platformdirs>=4.0",
     "pydantic>=2.12",
+    "tzdata",
 ]
 
 [project.optional-dependencies]
