@@ -20,6 +20,7 @@ from morgenmcp.models import (
     MorgenAPIError,
     Participant,
     ParticipantRoles,
+    Tag,
     Task,
     TaskCreateResponse,
     VirtualRoom,
@@ -36,6 +37,13 @@ from morgenmcp.tools.events import (
     update_event,
 )
 from morgenmcp.tools.id_registry import clear_registry, register_id
+from morgenmcp.tools.tags import (
+    create_tag,
+    delete_tag,
+    get_tag,
+    list_tags,
+    update_tag,
+)
 from morgenmcp.tools.tasks import (
     close_task,
     create_task,
@@ -1388,3 +1396,130 @@ class TestReopenTask:
         mock_morgen_client.reopen_task.assert_awaited_once_with(
             "real_task_id", occurrence_start=None
         )
+
+
+class TestListTags:
+    """Tests for list_tags tool."""
+
+    async def test_list_tags_success(self, mock_morgen_client):
+        """Test successful tag listing."""
+        tags = [
+            Tag(id="uuid1", name="Work", color="#A8D5BA"),
+            Tag(id="uuid2", name="Personal", color="#FFD4B8"),
+        ]
+        mock_morgen_client.list_tags.return_value = tags
+
+        result = await list_tags()
+
+        assert result["count"] == 2
+        assert result["tags"][0]["name"] == "Work"
+        assert result["tags"][1]["color"] == "#FFD4B8"
+
+    async def test_list_tags_empty(self, mock_morgen_client):
+        """Test empty tag listing."""
+        mock_morgen_client.list_tags.return_value = []
+
+        result = await list_tags()
+
+        assert result["tags"] == []
+        assert result["count"] == 0
+
+    async def test_list_tags_with_deleted(self, mock_morgen_client):
+        """Test tags with deleted flag from sync."""
+        tags = [Tag(id="uuid1", name="Old", deleted=True)]
+        mock_morgen_client.list_tags.return_value = tags
+
+        result = await list_tags(updated_after="2024-01-01T00:00:00Z")
+
+        assert result["tags"][0]["deleted"] is True
+
+    async def test_list_tags_api_error(self, mock_morgen_client):
+        """Test tag listing with API error."""
+        mock_morgen_client.list_tags.side_effect = MorgenAPIError(
+            "Server error", status_code=500
+        )
+
+        with pytest.raises(ToolError, match="API error.*500"):
+            await list_tags()
+
+
+class TestGetTag:
+    """Tests for get_tag tool."""
+
+    async def test_get_tag_success(self, mock_morgen_client):
+        """Test getting a single tag."""
+        mock_morgen_client.get_tag.return_value = Tag(
+            id="uuid1", name="Work", color="#A8D5BA"
+        )
+
+        result = await get_tag("uuid1")
+
+        assert result["name"] == "Work"
+        assert result["color"] == "#A8D5BA"
+
+
+class TestCreateTag:
+    """Tests for create_tag tool."""
+
+    async def test_create_tag_success(self, mock_morgen_client):
+        """Test successful tag creation."""
+        mock_morgen_client.create_tag.return_value = Tag(
+            id="new-uuid", name="Project", color="#FF0000"
+        )
+
+        result = await create_tag(name="Project", color="#FF0000")
+
+        assert result["success"] is True
+        assert result["name"] == "Project"
+
+    async def test_create_tag_name_only(self, mock_morgen_client):
+        """Test creating a tag with name only."""
+        mock_morgen_client.create_tag.return_value = Tag(
+            id="new-uuid", name="Simple"
+        )
+
+        result = await create_tag(name="Simple")
+
+        assert result["success"] is True
+        assert result["name"] == "Simple"
+
+    async def test_create_tag_empty_name(self, mock_morgen_client):
+        """Test creating a tag with empty name fails."""
+        with pytest.raises(ToolError, match="at least 1 character"):
+            await create_tag(name="")
+
+    async def test_create_tag_invalid_color(self, mock_morgen_client):
+        """Test creating a tag with invalid color."""
+        with pytest.raises(ToolError, match="Validation error"):
+            await create_tag(name="Bad", color="red")
+
+
+class TestUpdateTag:
+    """Tests for update_tag tool."""
+
+    async def test_update_tag_success(self, mock_morgen_client):
+        """Test successful tag update."""
+        mock_morgen_client.update_tag.return_value = None
+
+        result = await update_tag(tag_id="uuid1", name="Updated")
+
+        assert result["success"] is True
+        assert result["tagId"] == "uuid1"
+
+    async def test_update_tag_invalid_color(self, mock_morgen_client):
+        """Test update tag with invalid color."""
+        with pytest.raises(ToolError, match="Validation error"):
+            await update_tag(tag_id="uuid1", color="#GGG")
+
+
+class TestDeleteTag:
+    """Tests for delete_tag tool."""
+
+    async def test_delete_tag_success(self, mock_morgen_client):
+        """Test successful tag deletion."""
+        mock_morgen_client.delete_tag.return_value = None
+
+        result = await delete_tag("uuid1")
+
+        assert result["success"] is True
+        mock_morgen_client.delete_tag.assert_awaited_once_with("uuid1")
