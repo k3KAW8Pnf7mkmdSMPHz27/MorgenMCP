@@ -20,6 +20,13 @@ from morgenmcp.models import (
     EventUpdateRequest,
     MorgenAPIError,
     RateLimitInfo,
+    Tag,
+    Task,
+    TaskCreateRequest,
+    TaskCreateResponse,
+    TaskMoveRequest,
+    TasksListResponse,
+    TaskUpdateRequest,
 )
 
 
@@ -292,6 +299,87 @@ class MorgenClient:
             params=params,
             json=request.model_dump(by_alias=True, exclude_none=True),
         )
+        self._handle_error(response)
+
+    # Task endpoints
+
+    async def list_tasks(
+        self,
+        limit: int = 100,
+        updated_after: str | None = None,
+    ) -> list[Task]:
+        """List tasks with optional filters."""
+        params: dict[str, Any] = {}
+        if limit != 100:
+            params["limit"] = str(limit)
+        if updated_after:
+            params["updatedAfter"] = updated_after
+
+        response = await self.client.get("/tasks/list", params=params)
+        self._handle_error(response)
+        data = response.json()
+        api_response = APIResponse[TasksListResponse].model_validate(data)
+        return api_response.data.tasks
+
+    async def get_task(self, task_id: str) -> Task:
+        """Get a single task by ID."""
+        response = await self.client.get("/tasks", params={"id": task_id})
+        self._handle_error(response)
+        data = response.json()
+        return Task.model_validate(data["data"]["task"])
+
+    async def create_task(self, request: TaskCreateRequest) -> TaskCreateResponse:
+        """Create a new task."""
+        response = await self.client.post(
+            "/tasks/create",
+            json=request.model_dump(by_alias=True, exclude_none=True),
+        )
+        self._handle_error(response)
+        data = response.json()
+        return APIResponse[TaskCreateResponse].model_validate(data).data
+
+    async def update_task(self, request: TaskUpdateRequest) -> None:
+        """Update a task. Returns 204 No Content."""
+        response = await self.client.post(
+            "/tasks/update",
+            json=request.model_dump(by_alias=True, exclude_none=True),
+        )
+        self._handle_error(response)
+
+    async def move_task(self, request: TaskMoveRequest) -> None:
+        """Move/reorder a task. Returns 204 No Content."""
+        response = await self.client.post(
+            "/tasks/move",
+            json=request.model_dump(by_alias=True, exclude_none=True),
+        )
+        self._handle_error(response)
+
+    async def delete_task(self, task_id: str) -> None:
+        """Delete a task. Returns 204 No Content."""
+        response = await self.client.post(
+            "/tasks/delete",
+            json={"id": task_id},
+        )
+        self._handle_error(response)
+
+    async def close_task(
+        self, task_id: str, occurrence_start: str | None = None
+    ) -> None:
+        """Mark task completed. Returns 204 No Content."""
+        body: dict[str, Any] = {"id": task_id}
+        if occurrence_start:
+            body["occurrenceStart"] = occurrence_start
+        response = await self.client.post("/tasks/close", json=body)
+        self._handle_error(response)
+
+    async def reopen_task(
+        self, task_id: str, occurrence_start: str | None = None
+    ) -> None:
+        """Reopen completed task. Returns 204 No Content."""
+        body: dict[str, Any] = {"id": task_id}
+        if occurrence_start:
+            body["occurrenceStart"] = occurrence_start
+        response = await self.client.post("/tasks/reopen", json=body)
         self._handle_error(response)
 
 

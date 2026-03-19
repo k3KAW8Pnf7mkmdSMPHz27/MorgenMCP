@@ -10,6 +10,9 @@ from morgenmcp.models import (
     EventDeleteRequest,
     EventUpdateRequest,
     MorgenAPIError,
+    TaskCreateRequest,
+    TaskMoveRequest,
+    TaskUpdateRequest,
 )
 
 
@@ -469,3 +472,190 @@ class TestClientContextManager:
         """Test that context manager returns the client."""
         async with MorgenClient(api_key="test_key") as client:
             assert isinstance(client, MorgenClient)
+
+
+class TestTaskEndpoints:
+    """Tests for task API endpoints."""
+
+    @respx.mock
+    async def test_list_tasks_success(self):
+        """Test successful task listing."""
+        respx.get("https://api.morgen.so/v3/tasks/list").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "tasks": [
+                            {
+                                "@type": "Task",
+                                "id": "task123",
+                                "title": "Review report",
+                                "progress": "needs-action",
+                            }
+                        ],
+                        "labelDefs": [],
+                        "spaces": [],
+                    }
+                },
+            )
+        )
+
+        async with MorgenClient(api_key="test_key") as client:
+            tasks = await client.list_tasks()
+
+        assert len(tasks) == 1
+        assert tasks[0].id == "task123"
+        assert tasks[0].title == "Review report"
+
+    @respx.mock
+    async def test_list_tasks_with_params(self):
+        """Test list_tasks sends correct query parameters."""
+        route = respx.get("https://api.morgen.so/v3/tasks/list").mock(
+            return_value=httpx.Response(
+                200,
+                json={"data": {"tasks": [], "labelDefs": [], "spaces": []}},
+            )
+        )
+
+        async with MorgenClient(api_key="test_key") as client:
+            await client.list_tasks(limit=50, updated_after="2023-01-01T00:00:00Z")
+
+        request = route.calls.last.request
+        assert "limit=50" in str(request.url)
+        assert "updatedAfter=2023-01-01T00" in str(request.url)
+
+    @respx.mock
+    async def test_get_task_success(self):
+        """Test getting a single task."""
+        respx.get("https://api.morgen.so/v3/tasks").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "task": {
+                            "@type": "Task",
+                            "id": "task456",
+                            "title": "Single task",
+                        },
+                        "labelDefs": [],
+                    }
+                },
+            )
+        )
+
+        async with MorgenClient(api_key="test_key") as client:
+            task = await client.get_task("task456")
+
+        assert task.id == "task456"
+        assert task.title == "Single task"
+
+    @respx.mock
+    async def test_create_task_success(self):
+        """Test successful task creation."""
+        respx.post("https://api.morgen.so/v3/tasks/create").mock(
+            return_value=httpx.Response(
+                200,
+                json={"data": {"id": "new_task_123"}},
+            )
+        )
+
+        async with MorgenClient(api_key="test_key") as client:
+            request = TaskCreateRequest(title="New task")
+            response = await client.create_task(request)
+
+        assert response.id == "new_task_123"
+
+    @respx.mock
+    async def test_create_task_sends_body(self):
+        """Test that create_task sends correct request body."""
+        route = respx.post("https://api.morgen.so/v3/tasks/create").mock(
+            return_value=httpx.Response(200, json={"data": {"id": "t1"}})
+        )
+
+        async with MorgenClient(api_key="test_key") as client:
+            request = TaskCreateRequest(
+                title="Test",
+                due="2023-03-15T17:00:00",
+                time_zone="Europe/Berlin",
+                priority=1,
+                tags=["tag-uuid"],
+            )
+            await client.create_task(request)
+
+        import json as json_mod
+        body = json_mod.loads(route.calls.last.request.content)
+        assert body["title"] == "Test"
+        assert body["due"] == "2023-03-15T17:00:00"
+        assert body["timeZone"] == "Europe/Berlin"
+        assert body["priority"] == 1
+        assert body["tags"] == ["tag-uuid"]
+
+    @respx.mock
+    async def test_update_task_success(self):
+        """Test successful task update (204 No Content)."""
+        respx.post("https://api.morgen.so/v3/tasks/update").mock(
+            return_value=httpx.Response(204)
+        )
+
+        async with MorgenClient(api_key="test_key") as client:
+            request = TaskUpdateRequest(id="task1", title="Updated")
+            await client.update_task(request)
+
+    @respx.mock
+    async def test_move_task_success(self):
+        """Test successful task move (204 No Content)."""
+        respx.post("https://api.morgen.so/v3/tasks/move").mock(
+            return_value=httpx.Response(204)
+        )
+
+        async with MorgenClient(api_key="test_key") as client:
+            request = TaskMoveRequest(id="task1", previous_id="task0")
+            await client.move_task(request)
+
+    @respx.mock
+    async def test_delete_task_success(self):
+        """Test successful task deletion (204 No Content)."""
+        respx.post("https://api.morgen.so/v3/tasks/delete").mock(
+            return_value=httpx.Response(204)
+        )
+
+        async with MorgenClient(api_key="test_key") as client:
+            await client.delete_task("task1")
+
+    @respx.mock
+    async def test_close_task_success(self):
+        """Test marking task as completed (204 No Content)."""
+        route = respx.post("https://api.morgen.so/v3/tasks/close").mock(
+            return_value=httpx.Response(204)
+        )
+
+        async with MorgenClient(api_key="test_key") as client:
+            await client.close_task("task1")
+
+        import json as json_mod
+        body = json_mod.loads(route.calls.last.request.content)
+        assert body == {"id": "task1"}
+
+    @respx.mock
+    async def test_close_task_with_occurrence(self):
+        """Test closing task with occurrence_start for recurring tasks."""
+        route = respx.post("https://api.morgen.so/v3/tasks/close").mock(
+            return_value=httpx.Response(204)
+        )
+
+        async with MorgenClient(api_key="test_key") as client:
+            await client.close_task("task1", occurrence_start="2023-03-15T10:00:00")
+
+        import json as json_mod
+        body = json_mod.loads(route.calls.last.request.content)
+        assert body["occurrenceStart"] == "2023-03-15T10:00:00"
+
+    @respx.mock
+    async def test_reopen_task_success(self):
+        """Test reopening a completed task (204 No Content)."""
+        respx.post("https://api.morgen.so/v3/tasks/reopen").mock(
+            return_value=httpx.Response(204)
+        )
+
+        async with MorgenClient(api_key="test_key") as client:
+            await client.reopen_task("task1")
