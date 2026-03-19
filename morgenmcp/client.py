@@ -368,9 +368,7 @@ class MorgenClient:
             logger.debug("Task cache hit (key=%s)", cache_key)
             return cached.data
 
-        params: dict[str, Any] = {}
-        if limit != 100:
-            params["limit"] = str(limit)
+        params: dict[str, Any] = {"limit": str(limit)}
         if updated_after:
             params["updatedAfter"] = updated_after
 
