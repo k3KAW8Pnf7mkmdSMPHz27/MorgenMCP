@@ -45,7 +45,7 @@ def _format_compact_event(event: Event) -> str:
         try:
             dt = datetime.fromisoformat(event.start)
             date_str = dt.strftime("%b %d")
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             date_str = event.start
         return f"{date_str} (all-day): {title} [{virtual_id}]"
     else:
@@ -73,7 +73,7 @@ def _format_compact_event(event: Event) -> str:
             end_dt = start_dt + timedelta(hours=hours, minutes=minutes)
             end_str = end_dt.strftime("%H:%M")
             return f"{start_str}-{end_str}: {title} [{virtual_id}]"
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             return f"{event.start}: {title} [{virtual_id}]"
 
 

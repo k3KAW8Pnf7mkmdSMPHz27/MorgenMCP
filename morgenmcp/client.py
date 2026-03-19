@@ -1,6 +1,8 @@
 """Async HTTP client for Morgen API."""
 
+import logging
 import os
+import time
 from typing import Any
 
 import httpx
@@ -20,13 +22,33 @@ from morgenmcp.models import (
     EventUpdateRequest,
     MorgenAPIError,
     RateLimitInfo,
+    Tag,
+    Task,
+    TaskCreateRequest,
+    TaskCreateResponse,
+    TaskMoveRequest,
+    TasksListResponse,
+    TaskUpdateRequest,
 )
+
+logger = logging.getLogger(__name__)
+
+
+class _CacheEntry:
+    """A cached response with timestamp."""
+
+    __slots__ = ("data", "timestamp")
+
+    def __init__(self, data: Any, timestamp: float):
+        self.data = data
+        self.timestamp = timestamp
 
 
 class MorgenClient:
     """Async client for interacting with the Morgen API."""
 
     BASE_URL = "https://api.morgen.so/v3"
+    TASK_CACHE_TTL = 300.0  # 5 minutes
 
     def __init__(self, api_key: str | None = None):
         """Initialize the Morgen client.
@@ -41,6 +63,7 @@ class MorgenClient:
                 "Pass it directly or set MORGEN_API_KEY environment variable."
             )
         self._client: httpx.AsyncClient | None = None
+        self._task_cache: dict[str, _CacheEntry] = {}
 
     @property
     def client(self) -> httpx.AsyncClient:
@@ -86,7 +109,7 @@ class MorgenClient:
                     remaining=int(remaining),
                     reset_seconds=int(reset),
                 )
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             pass
         return None
 
@@ -128,6 +151,33 @@ class MorgenClient:
                 status_code=response.status_code,
                 rate_limit_info=rate_limit_info,
             )
+
+    # Cache helpers
+
+    def _task_cache_key(self, updated_after: str | None) -> str:
+        """Build a cache key for list_tasks."""
+        return f"list_tasks:{updated_after or ''}"
+
+    def _get_cached_tasks(self, key: str) -> _CacheEntry | None:
+        """Return a cache entry if it exists and is not expired."""
+        entry = self._task_cache.get(key)
+        if entry and (time.monotonic() - entry.timestamp) < self.TASK_CACHE_TTL:
+            return entry
+        return None
+
+    def _get_stale_cached_tasks(self, key: str) -> _CacheEntry | None:
+        """Return a cache entry even if expired (for 429 fallback)."""
+        return self._task_cache.get(key)
+
+    def _set_cached_tasks(self, key: str, data: Any) -> None:
+        """Store a response in the task cache."""
+        self._task_cache[key] = _CacheEntry(data=data, timestamp=time.monotonic())
+
+    def invalidate_task_cache(self) -> None:
+        """Clear all task cache entries. Called after any task write operation."""
+        if self._task_cache:
+            logger.debug("Invalidating task cache (%d entries)", len(self._task_cache))
+        self._task_cache.clear()
 
     # Account endpoints
 
@@ -292,6 +342,173 @@ class MorgenClient:
             params=params,
             json=request.model_dump(by_alias=True, exclude_none=True),
         )
+        self._handle_error(response)
+
+    # Task endpoints
+
+    async def list_tasks(
+        self,
+        limit: int = 100,
+        updated_after: str | None = None,
+    ) -> TasksListResponse:
+        """List tasks with optional filters. Uses in-memory cache (5min TTL).
+
+        Returns:
+            TasksListResponse containing tasks list plus spaces/labelDefs metadata.
+
+        Raises:
+            MorgenAPIError: On API errors. For 429s, falls back to stale cache
+                if available (caller receives data with no error).
+        """
+        cache_key = self._task_cache_key(updated_after)
+
+        # Check fresh cache first
+        cached = self._get_cached_tasks(cache_key)
+        if cached:
+            logger.debug("Task cache hit (key=%s)", cache_key)
+            return cached.data
+
+        params: dict[str, Any] = {"limit": str(limit)}
+        if updated_after:
+            params["updatedAfter"] = updated_after
+
+        try:
+            response = await self.client.get("/tasks/list", params=params)
+            self._handle_error(response)
+        except MorgenAPIError as e:
+            if e.status_code == 429:
+                stale = self._get_stale_cached_tasks(cache_key)
+                if stale:
+                    logger.info(
+                        "Rate limited on list_tasks, returning stale cache (age=%.0fs)",
+                        time.monotonic() - stale.timestamp,
+                    )
+                    return stale.data
+            raise
+
+        data = response.json()
+        api_response = APIResponse[TasksListResponse].model_validate(data)
+        result = api_response.data
+
+        self._set_cached_tasks(cache_key, result)
+        logger.debug(
+            "Task cache stored (key=%s, tasks=%d)", cache_key, len(result.tasks)
+        )
+        return result
+
+    async def get_task(self, task_id: str) -> Task:
+        """Get a single task by ID."""
+        response = await self.client.get("/tasks", params={"id": task_id})
+        self._handle_error(response)
+        data = response.json()
+        return Task.model_validate(data["data"]["task"])
+
+    async def create_task(self, request: TaskCreateRequest) -> TaskCreateResponse:
+        """Create a new task."""
+        response = await self.client.post(
+            "/tasks/create",
+            json=request.model_dump(by_alias=True, exclude_none=True),
+        )
+        self._handle_error(response)
+        self.invalidate_task_cache()
+        data = response.json()
+        return APIResponse[TaskCreateResponse].model_validate(data).data
+
+    async def update_task(self, request: TaskUpdateRequest) -> None:
+        """Update a task. Returns 204 No Content."""
+        response = await self.client.post(
+            "/tasks/update",
+            json=request.model_dump(by_alias=True, exclude_none=True),
+        )
+        self._handle_error(response)
+        self.invalidate_task_cache()
+
+    async def move_task(self, request: TaskMoveRequest) -> None:
+        """Move/reorder a task. Returns 204 No Content."""
+        response = await self.client.post(
+            "/tasks/move",
+            json=request.model_dump(by_alias=True, exclude_none=True),
+        )
+        self._handle_error(response)
+        self.invalidate_task_cache()
+
+    async def delete_task(self, task_id: str) -> None:
+        """Delete a task. Returns 204 No Content."""
+        response = await self.client.post(
+            "/tasks/delete",
+            json={"id": task_id},
+        )
+        self._handle_error(response)
+        self.invalidate_task_cache()
+
+    async def close_task(
+        self, task_id: str, occurrence_start: str | None = None
+    ) -> None:
+        """Mark task completed. Returns 204 No Content."""
+        body: dict[str, Any] = {"id": task_id}
+        if occurrence_start:
+            body["occurrenceStart"] = occurrence_start
+        response = await self.client.post("/tasks/close", json=body)
+        self._handle_error(response)
+        self.invalidate_task_cache()
+
+    async def reopen_task(
+        self, task_id: str, occurrence_start: str | None = None
+    ) -> None:
+        """Reopen completed task. Returns 204 No Content."""
+        body: dict[str, Any] = {"id": task_id}
+        if occurrence_start:
+            body["occurrenceStart"] = occurrence_start
+        response = await self.client.post("/tasks/reopen", json=body)
+        self._handle_error(response)
+        self.invalidate_task_cache()
+
+    # Tag endpoints
+
+    async def list_tags(self, updated_after: str | None = None) -> list[Tag]:
+        """List all tags."""
+        params: dict[str, str] = {}
+        if updated_after:
+            params["updatedAfter"] = updated_after
+        response = await self.client.get("/tags/list", params=params)
+        self._handle_error(response)
+        data = response.json()
+        if isinstance(data, list):
+            return [Tag.model_validate(t) for t in data]
+        elif "data" in data:
+            return [Tag.model_validate(t) for t in data["data"]]
+        return []
+
+    async def get_tag(self, tag_id: str) -> Tag:
+        """Get a single tag."""
+        response = await self.client.get("/tags", params={"id": tag_id})
+        self._handle_error(response)
+        return Tag.model_validate(response.json())
+
+    async def create_tag(self, name: str, color: str | None = None) -> Tag:
+        """Create a new tag."""
+        body: dict[str, Any] = {"name": name}
+        if color:
+            body["color"] = color
+        response = await self.client.post("/tags/create", json=body)
+        self._handle_error(response)
+        return Tag.model_validate(response.json())
+
+    async def update_tag(
+        self, tag_id: str, name: str | None = None, color: str | None = None
+    ) -> None:
+        """Update a tag. Returns 204 No Content."""
+        body: dict[str, Any] = {"id": tag_id}
+        if name is not None:
+            body["name"] = name
+        if color is not None:
+            body["color"] = color
+        response = await self.client.post("/tags/update", json=body)
+        self._handle_error(response)
+
+    async def delete_tag(self, tag_id: str) -> None:
+        """Delete a tag (soft delete). Returns 204 No Content."""
+        response = await self.client.post("/tags/delete", json={"id": tag_id})
         self._handle_error(response)
 
 

@@ -21,7 +21,7 @@ class IDNotFoundError(Exception):
     def __init__(self, virtual_id: str):
         self.virtual_id = virtual_id
         super().__init__(
-            f"ID '{virtual_id}' not found. Call list_accounts, list_calendars, or list_events first."
+            f"ID '{virtual_id}' not found. Call list_accounts, list_calendars, list_events, or list_tasks first."
         )
 
 
