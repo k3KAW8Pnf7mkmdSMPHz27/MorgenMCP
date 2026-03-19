@@ -81,10 +81,14 @@ async def list_tasks(
 ) -> dict:
     """List all Morgen tasks across all task lists.
 
-    Note: This endpoint costs 10 rate limit points per request.
+    Results are cached for 5 minutes to reduce API rate limit consumption (10 points
+    per request). Subsequent calls within the TTL return cached data instantly.
+    The cache is automatically invalidated when you create, update, delete, close,
+    reopen, or move a task.
 
     Args:
         updated_after: Only return tasks updated after this ISO 8601 datetime.
+            Prefer this when asking about recent changes to reduce token usage.
         task_list_id: Filter to only tasks from this task list ID. Use list_task_lists
             to discover available list IDs (e.g., "inbox" or a UUID like
             "9a4a64d0-980f-4f81-afde-3265bd85e56e@morgen.so").
@@ -123,7 +127,8 @@ async def list_task_lists(
     Discovers task lists by fetching tasks and examining the unique taskListId
     values present. Also includes any space metadata returned by the API.
 
-    Note: This calls the tasks/list endpoint (10 rate limit points).
+    Shares the same 5-minute cache as list_tasks, so calling this after list_tasks
+    is free (no additional API call).
 
     Returns:
         Dictionary with 'taskLists' containing available lists with task counts.

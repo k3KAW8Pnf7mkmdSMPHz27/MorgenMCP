@@ -784,3 +784,209 @@ class TestTagEndpoints:
 
         body = json_mod.loads(route.calls.last.request.content)
         assert body == {"id": "uuid1"}
+
+
+class TestTaskCache:
+    """Tests for task list caching behavior."""
+
+    _TASKS_URL = "https://api.morgen.so/v3/tasks/list"
+    _TASK_RESPONSE = {
+        "data": {
+            "tasks": [{"id": "t1", "title": "Cached task", "progress": "needs-action"}],
+            "labelDefs": [],
+            "spaces": [],
+        }
+    }
+
+    @respx.mock
+    async def test_second_call_uses_cache(self):
+        """Second list_tasks call within TTL returns cached data, no API call."""
+        route = respx.get(self._TASKS_URL).mock(
+            return_value=httpx.Response(200, json=self._TASK_RESPONSE)
+        )
+
+        async with MorgenClient(api_key="test_key") as client:
+            result1 = await client.list_tasks()
+            result2 = await client.list_tasks()
+
+        assert len(route.calls) == 1  # Only one API call
+        assert result1.tasks[0].id == "t1"
+        assert result2.tasks[0].id == "t1"
+
+    @respx.mock
+    async def test_different_updated_after_separate_cache(self):
+        """Different updated_after values use separate cache entries."""
+        route = respx.get(self._TASKS_URL).mock(
+            return_value=httpx.Response(200, json=self._TASK_RESPONSE)
+        )
+
+        async with MorgenClient(api_key="test_key") as client:
+            await client.list_tasks()
+            await client.list_tasks(updated_after="2023-01-01T00:00:00Z")
+
+        assert len(route.calls) == 2  # Two different cache keys
+
+    @respx.mock
+    async def test_cache_invalidated_by_create(self):
+        """Creating a task invalidates the cache."""
+        respx.get(self._TASKS_URL).mock(
+            return_value=httpx.Response(200, json=self._TASK_RESPONSE)
+        )
+        respx.post("https://api.morgen.so/v3/tasks/create").mock(
+            return_value=httpx.Response(200, json={"data": {"id": "new_task"}})
+        )
+
+        async with MorgenClient(api_key="test_key") as client:
+            await client.list_tasks()  # Populates cache
+            assert client._task_cache  # Cache has entries
+
+            await client.create_task(TaskCreateRequest(title="New task"))
+            assert not client._task_cache  # Cache cleared
+
+    @respx.mock
+    async def test_cache_invalidated_by_close(self):
+        """Closing a task invalidates the cache."""
+        respx.get(self._TASKS_URL).mock(
+            return_value=httpx.Response(200, json=self._TASK_RESPONSE)
+        )
+        respx.post("https://api.morgen.so/v3/tasks/close").mock(
+            return_value=httpx.Response(204)
+        )
+
+        async with MorgenClient(api_key="test_key") as client:
+            await client.list_tasks()
+            assert client._task_cache
+
+            await client.close_task("t1")
+            assert not client._task_cache
+
+    @respx.mock
+    async def test_cache_invalidated_by_delete(self):
+        """Deleting a task invalidates the cache."""
+        respx.get(self._TASKS_URL).mock(
+            return_value=httpx.Response(200, json=self._TASK_RESPONSE)
+        )
+        respx.post("https://api.morgen.so/v3/tasks/delete").mock(
+            return_value=httpx.Response(204)
+        )
+
+        async with MorgenClient(api_key="test_key") as client:
+            await client.list_tasks()
+            assert client._task_cache
+
+            await client.delete_task("t1")
+            assert not client._task_cache
+
+    @respx.mock
+    async def test_cache_invalidated_by_update(self):
+        """Updating a task invalidates the cache."""
+        respx.get(self._TASKS_URL).mock(
+            return_value=httpx.Response(200, json=self._TASK_RESPONSE)
+        )
+        respx.post("https://api.morgen.so/v3/tasks/update").mock(
+            return_value=httpx.Response(204)
+        )
+
+        async with MorgenClient(api_key="test_key") as client:
+            await client.list_tasks()
+            assert client._task_cache
+
+            await client.update_task(TaskUpdateRequest(id="t1", title="Updated"))
+            assert not client._task_cache
+
+    @respx.mock
+    async def test_cache_invalidated_by_move(self):
+        """Moving a task invalidates the cache."""
+        respx.get(self._TASKS_URL).mock(
+            return_value=httpx.Response(200, json=self._TASK_RESPONSE)
+        )
+        respx.post("https://api.morgen.so/v3/tasks/move").mock(
+            return_value=httpx.Response(204)
+        )
+
+        async with MorgenClient(api_key="test_key") as client:
+            await client.list_tasks()
+            assert client._task_cache
+
+            from morgenmcp.models import TaskMoveRequest
+
+            await client.move_task(TaskMoveRequest(id="t1", position=1))
+            assert not client._task_cache
+
+    @respx.mock
+    async def test_cache_invalidated_by_reopen(self):
+        """Reopening a task invalidates the cache."""
+        respx.get(self._TASKS_URL).mock(
+            return_value=httpx.Response(200, json=self._TASK_RESPONSE)
+        )
+        respx.post("https://api.morgen.so/v3/tasks/reopen").mock(
+            return_value=httpx.Response(204)
+        )
+
+        async with MorgenClient(api_key="test_key") as client:
+            await client.list_tasks()
+            assert client._task_cache
+
+            await client.reopen_task("t1")
+            assert not client._task_cache
+
+    @respx.mock
+    async def test_cache_expires_after_ttl(self):
+        """Cache entries expire after TTL."""
+        import time
+        from unittest.mock import patch
+
+        route = respx.get(self._TASKS_URL).mock(
+            return_value=httpx.Response(200, json=self._TASK_RESPONSE)
+        )
+
+        async with MorgenClient(api_key="test_key") as client:
+            await client.list_tasks()  # First call, populates cache
+            assert len(route.calls) == 1
+
+            # Fast-forward time past TTL
+            with patch("morgenmcp.client.time") as mock_time:
+                mock_time.monotonic.return_value = (
+                    time.monotonic() + client.TASK_CACHE_TTL + 1
+                )
+                await client.list_tasks()  # Should miss cache
+
+            assert len(route.calls) == 2
+
+    @respx.mock
+    async def test_429_returns_stale_cache(self):
+        """On 429 rate limit, stale cached data is returned instead of error."""
+        import time
+        from unittest.mock import patch
+
+        # First call succeeds
+        route = respx.get(self._TASKS_URL).mock(
+            return_value=httpx.Response(200, json=self._TASK_RESPONSE)
+        )
+
+        async with MorgenClient(api_key="test_key") as client:
+            result1 = await client.list_tasks()
+            assert result1.tasks[0].title == "Cached task"
+
+            # Expire the cache, then make API return 429
+            route.mock(return_value=httpx.Response(429, headers={"Retry-After": "60"}))
+
+            with patch("morgenmcp.client.time") as mock_time:
+                mock_time.monotonic.return_value = (
+                    time.monotonic() + client.TASK_CACHE_TTL + 1
+                )
+                # Should fall back to stale cache instead of raising
+                result2 = await client.list_tasks()
+
+            assert result2.tasks[0].title == "Cached task"
+
+    @respx.mock
+    async def test_429_raises_without_cache(self):
+        """On 429 with no cached data, MorgenAPIError is raised."""
+        respx.get(self._TASKS_URL).mock(
+            return_value=httpx.Response(429, headers={"Retry-After": "60"})
+        )
+
+        async with MorgenClient(api_key="test_key") as client:
+            with pytest.raises(MorgenAPIError, match="Rate limit exceeded"):
+                await client.list_tasks()

@@ -1,6 +1,8 @@
 """Async HTTP client for Morgen API."""
 
+import logging
 import os
+import time
 from typing import Any
 
 import httpx
@@ -29,11 +31,24 @@ from morgenmcp.models import (
     TaskUpdateRequest,
 )
 
+logger = logging.getLogger(__name__)
+
+
+class _CacheEntry:
+    """A cached response with timestamp."""
+
+    __slots__ = ("data", "timestamp")
+
+    def __init__(self, data: Any, timestamp: float):
+        self.data = data
+        self.timestamp = timestamp
+
 
 class MorgenClient:
     """Async client for interacting with the Morgen API."""
 
     BASE_URL = "https://api.morgen.so/v3"
+    TASK_CACHE_TTL = 300.0  # 5 minutes
 
     def __init__(self, api_key: str | None = None):
         """Initialize the Morgen client.
@@ -48,6 +63,7 @@ class MorgenClient:
                 "Pass it directly or set MORGEN_API_KEY environment variable."
             )
         self._client: httpx.AsyncClient | None = None
+        self._task_cache: dict[str, _CacheEntry] = {}
 
     @property
     def client(self) -> httpx.AsyncClient:
@@ -135,6 +151,33 @@ class MorgenClient:
                 status_code=response.status_code,
                 rate_limit_info=rate_limit_info,
             )
+
+    # Cache helpers
+
+    def _task_cache_key(self, updated_after: str | None) -> str:
+        """Build a cache key for list_tasks."""
+        return f"list_tasks:{updated_after or ''}"
+
+    def _get_cached_tasks(self, key: str) -> _CacheEntry | None:
+        """Return a cache entry if it exists and is not expired."""
+        entry = self._task_cache.get(key)
+        if entry and (time.monotonic() - entry.timestamp) < self.TASK_CACHE_TTL:
+            return entry
+        return None
+
+    def _get_stale_cached_tasks(self, key: str) -> _CacheEntry | None:
+        """Return a cache entry even if expired (for 429 fallback)."""
+        return self._task_cache.get(key)
+
+    def _set_cached_tasks(self, key: str, data: Any) -> None:
+        """Store a response in the task cache."""
+        self._task_cache[key] = _CacheEntry(data=data, timestamp=time.monotonic())
+
+    def invalidate_task_cache(self) -> None:
+        """Clear all task cache entries. Called after any task write operation."""
+        if self._task_cache:
+            logger.debug("Invalidating task cache (%d entries)", len(self._task_cache))
+        self._task_cache.clear()
 
     # Account endpoints
 
@@ -308,22 +351,52 @@ class MorgenClient:
         limit: int = 100,
         updated_after: str | None = None,
     ) -> TasksListResponse:
-        """List tasks with optional filters.
+        """List tasks with optional filters. Uses in-memory cache (5min TTL).
 
         Returns:
             TasksListResponse containing tasks list plus spaces/labelDefs metadata.
+
+        Raises:
+            MorgenAPIError: On API errors. For 429s, falls back to stale cache
+                if available (caller receives data with no error).
         """
+        cache_key = self._task_cache_key(updated_after)
+
+        # Check fresh cache first
+        cached = self._get_cached_tasks(cache_key)
+        if cached:
+            logger.debug("Task cache hit (key=%s)", cache_key)
+            return cached.data
+
         params: dict[str, Any] = {}
         if limit != 100:
             params["limit"] = str(limit)
         if updated_after:
             params["updatedAfter"] = updated_after
 
-        response = await self.client.get("/tasks/list", params=params)
-        self._handle_error(response)
+        try:
+            response = await self.client.get("/tasks/list", params=params)
+            self._handle_error(response)
+        except MorgenAPIError as e:
+            if e.status_code == 429:
+                stale = self._get_stale_cached_tasks(cache_key)
+                if stale:
+                    logger.info(
+                        "Rate limited on list_tasks, returning stale cache (age=%.0fs)",
+                        time.monotonic() - stale.timestamp,
+                    )
+                    return stale.data
+            raise
+
         data = response.json()
         api_response = APIResponse[TasksListResponse].model_validate(data)
-        return api_response.data
+        result = api_response.data
+
+        self._set_cached_tasks(cache_key, result)
+        logger.debug(
+            "Task cache stored (key=%s, tasks=%d)", cache_key, len(result.tasks)
+        )
+        return result
 
     async def get_task(self, task_id: str) -> Task:
         """Get a single task by ID."""
@@ -339,6 +412,7 @@ class MorgenClient:
             json=request.model_dump(by_alias=True, exclude_none=True),
         )
         self._handle_error(response)
+        self.invalidate_task_cache()
         data = response.json()
         return APIResponse[TaskCreateResponse].model_validate(data).data
 
@@ -349,6 +423,7 @@ class MorgenClient:
             json=request.model_dump(by_alias=True, exclude_none=True),
         )
         self._handle_error(response)
+        self.invalidate_task_cache()
 
     async def move_task(self, request: TaskMoveRequest) -> None:
         """Move/reorder a task. Returns 204 No Content."""
@@ -357,6 +432,7 @@ class MorgenClient:
             json=request.model_dump(by_alias=True, exclude_none=True),
         )
         self._handle_error(response)
+        self.invalidate_task_cache()
 
     async def delete_task(self, task_id: str) -> None:
         """Delete a task. Returns 204 No Content."""
@@ -365,6 +441,7 @@ class MorgenClient:
             json={"id": task_id},
         )
         self._handle_error(response)
+        self.invalidate_task_cache()
 
     async def close_task(
         self, task_id: str, occurrence_start: str | None = None
@@ -375,6 +452,7 @@ class MorgenClient:
             body["occurrenceStart"] = occurrence_start
         response = await self.client.post("/tasks/close", json=body)
         self._handle_error(response)
+        self.invalidate_task_cache()
 
     async def reopen_task(
         self, task_id: str, occurrence_start: str | None = None
@@ -385,6 +463,7 @@ class MorgenClient:
             body["occurrenceStart"] = occurrence_start
         response = await self.client.post("/tasks/reopen", json=body)
         self._handle_error(response)
+        self.invalidate_task_cache()
 
     # Tag endpoints
 
