@@ -382,6 +382,54 @@ class MorgenClient:
         response = await self.client.post("/tasks/reopen", json=body)
         self._handle_error(response)
 
+    # Tag endpoints
+
+    async def list_tags(self, updated_after: str | None = None) -> list[Tag]:
+        """List all tags."""
+        params: dict[str, str] = {}
+        if updated_after:
+            params["updatedAfter"] = updated_after
+        response = await self.client.get("/tags/list", params=params)
+        self._handle_error(response)
+        data = response.json()
+        if isinstance(data, list):
+            return [Tag.model_validate(t) for t in data]
+        elif "data" in data:
+            return [Tag.model_validate(t) for t in data["data"]]
+        return []
+
+    async def get_tag(self, tag_id: str) -> Tag:
+        """Get a single tag."""
+        response = await self.client.get("/tags", params={"id": tag_id})
+        self._handle_error(response)
+        return Tag.model_validate(response.json())
+
+    async def create_tag(self, name: str, color: str | None = None) -> Tag:
+        """Create a new tag."""
+        body: dict[str, Any] = {"name": name}
+        if color:
+            body["color"] = color
+        response = await self.client.post("/tags/create", json=body)
+        self._handle_error(response)
+        return Tag.model_validate(response.json())
+
+    async def update_tag(
+        self, tag_id: str, name: str | None = None, color: str | None = None
+    ) -> None:
+        """Update a tag. Returns 204 No Content."""
+        body: dict[str, Any] = {"id": tag_id}
+        if name is not None:
+            body["name"] = name
+        if color is not None:
+            body["color"] = color
+        response = await self.client.post("/tags/update", json=body)
+        self._handle_error(response)
+
+    async def delete_tag(self, tag_id: str) -> None:
+        """Delete a tag (soft delete). Returns 204 No Content."""
+        response = await self.client.post("/tags/delete", json={"id": tag_id})
+        self._handle_error(response)
+
 
 # Global client instance for use in tools
 _client: MorgenClient | None = None

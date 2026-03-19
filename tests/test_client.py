@@ -659,3 +659,122 @@ class TestTaskEndpoints:
 
         async with MorgenClient(api_key="test_key") as client:
             await client.reopen_task("task1")
+
+
+class TestTagEndpoints:
+    """Tests for tag API endpoints."""
+
+    @respx.mock
+    async def test_list_tags_direct_array(self):
+        """Test list_tags when response is a direct JSON array (not wrapped)."""
+        respx.get("https://api.morgen.so/v3/tags/list").mock(
+            return_value=httpx.Response(
+                200,
+                json=[
+                    {"id": "uuid1", "name": "Work", "color": "#A8D5BA"},
+                    {"id": "uuid2", "name": "Personal", "color": "#FFD4B8"},
+                ],
+            )
+        )
+
+        async with MorgenClient(api_key="test_key") as client:
+            tags = await client.list_tags()
+
+        assert len(tags) == 2
+        assert tags[0].name == "Work"
+        assert tags[1].color == "#FFD4B8"
+
+    @respx.mock
+    async def test_list_tags_wrapped_response(self):
+        """Test list_tags when response is wrapped in data (defensive)."""
+        respx.get("https://api.morgen.so/v3/tags/list").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "data": [
+                        {"id": "uuid1", "name": "Work"},
+                    ]
+                },
+            )
+        )
+
+        async with MorgenClient(api_key="test_key") as client:
+            tags = await client.list_tags()
+
+        assert len(tags) == 1
+        assert tags[0].name == "Work"
+
+    @respx.mock
+    async def test_list_tags_with_updated_after(self):
+        """Test list_tags sends updatedAfter param."""
+        route = respx.get("https://api.morgen.so/v3/tags/list").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+
+        async with MorgenClient(api_key="test_key") as client:
+            await client.list_tags(updated_after="2024-01-01T00:00:00Z")
+
+        request = route.calls.last.request
+        assert "updatedAfter=2024-01-01T00" in str(request.url)
+
+    @respx.mock
+    async def test_get_tag_success(self):
+        """Test getting a single tag."""
+        respx.get("https://api.morgen.so/v3/tags").mock(
+            return_value=httpx.Response(
+                200,
+                json={"id": "uuid1", "name": "Work", "color": "#A8D5BA"},
+            )
+        )
+
+        async with MorgenClient(api_key="test_key") as client:
+            tag = await client.get_tag("uuid1")
+
+        assert tag.id == "uuid1"
+        assert tag.name == "Work"
+
+    @respx.mock
+    async def test_create_tag_success(self):
+        """Test successful tag creation."""
+        respx.post("https://api.morgen.so/v3/tags/create").mock(
+            return_value=httpx.Response(
+                200,
+                json={"id": "new-uuid", "name": "Personal", "color": "#FFD4B8"},
+            )
+        )
+
+        async with MorgenClient(api_key="test_key") as client:
+            tag = await client.create_tag(name="Personal", color="#FFD4B8")
+
+        assert tag.id == "new-uuid"
+        assert tag.name == "Personal"
+
+    @respx.mock
+    async def test_update_tag_success(self):
+        """Test successful tag update (204 No Content)."""
+        route = respx.post("https://api.morgen.so/v3/tags/update").mock(
+            return_value=httpx.Response(204)
+        )
+
+        async with MorgenClient(api_key="test_key") as client:
+            await client.update_tag(tag_id="uuid1", name="Updated", color="#B8D4FF")
+
+        import json as json_mod
+        body = json_mod.loads(route.calls.last.request.content)
+        assert body["id"] == "uuid1"
+        assert body["name"] == "Updated"
+        assert body["color"] == "#B8D4FF"
+
+    @respx.mock
+    async def test_delete_tag_success(self):
+        """Test successful tag deletion (204 No Content)."""
+        route = respx.post("https://api.morgen.so/v3/tags/delete").mock(
+            return_value=httpx.Response(204)
+        )
+
+        async with MorgenClient(api_key="test_key") as client:
+            await client.delete_tag("uuid1")
+
+        import json as json_mod
+        body = json_mod.loads(route.calls.last.request.content)
+        assert body == {"id": "uuid1"}
