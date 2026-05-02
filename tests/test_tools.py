@@ -1105,3 +1105,262 @@ class TestContextWarnings:
             end="2025-01-02T00:00:00",
         )
         assert result["count"] == 0
+
+
+class TestEventRecurrenceAndAlerts:
+    """Tests for the new recurrence_rules / alerts / google_color_id params."""
+
+    async def test_create_event_with_recurrence(
+        self, mock_morgen_client, sample_calendar_id, sample_account_id
+    ):
+        new_event_id = make_event_id("test@example.com", "rec_evt", sample_account_id)
+        mock_morgen_client.create_event.return_value = EventCreateResponse(
+            event=CreatedEventInfo(
+                id=new_event_id,
+                calendar_id=sample_calendar_id,
+                account_id=sample_account_id,
+            )
+        )
+        virtual_cal = register_id(sample_calendar_id)
+
+        await create_event(
+            calendar_id=virtual_cal,
+            title="Standup",
+            start="2023-03-15T09:00:00",
+            duration="PT15M",
+            time_zone="Europe/Berlin",
+            recurrence_rules=[
+                {"frequency": "weekly", "interval": 1, "by_day": ["mo", "we", "fr"]}
+            ],
+        )
+
+        sent_request = mock_morgen_client.create_event.call_args.args[0]
+        assert sent_request.recurrence_rules is not None
+        rule = sent_request.recurrence_rules[0]
+        assert rule.frequency == "weekly"
+        assert rule.interval == 1
+        assert [d.day for d in rule.by_day] == ["mo", "we", "fr"]
+
+    async def test_create_event_with_alerts(
+        self, mock_morgen_client, sample_calendar_id, sample_account_id
+    ):
+        new_event_id = make_event_id("test@example.com", "alert_evt", sample_account_id)
+        mock_morgen_client.create_event.return_value = EventCreateResponse(
+            event=CreatedEventInfo(
+                id=new_event_id,
+                calendar_id=sample_calendar_id,
+                account_id=sample_account_id,
+            )
+        )
+        virtual_cal = register_id(sample_calendar_id)
+
+        await create_event(
+            calendar_id=virtual_cal,
+            title="Reminder me",
+            start="2023-03-15T09:00:00",
+            duration="PT30M",
+            time_zone="Europe/Berlin",
+            alerts=["-PT15M", "-PT1H"],
+        )
+
+        sent_request = mock_morgen_client.create_event.call_args.args[0]
+        assert sent_request.alerts is not None
+        assert len(sent_request.alerts) == 2
+        offsets = {a.trigger.offset for a in sent_request.alerts.values()}
+        assert offsets == {"-PT15M", "-PT1H"}
+
+    async def test_create_event_alerts_and_default_alerts_conflict(
+        self, mock_morgen_client, sample_calendar_id
+    ):
+        virtual_cal = register_id(sample_calendar_id)
+        with pytest.raises(ToolError, match="mutually exclusive"):
+            await create_event(
+                calendar_id=virtual_cal,
+                title="Conflict",
+                start="2023-03-15T09:00:00",
+                duration="PT15M",
+                time_zone="Europe/Berlin",
+                alerts=["-PT15M"],
+                use_default_alerts=True,
+            )
+
+    async def test_create_event_invalid_alert_offset(
+        self, mock_morgen_client, sample_calendar_id
+    ):
+        virtual_cal = register_id(sample_calendar_id)
+        with pytest.raises(ToolError, match="Validation error.*offset"):
+            await create_event(
+                calendar_id=virtual_cal,
+                title="X",
+                start="2023-03-15T09:00:00",
+                duration="PT15M",
+                time_zone="Europe/Berlin",
+                alerts=["PT15M"],  # missing minus sign
+            )
+
+    async def test_create_event_invalid_recurrence_frequency(
+        self, mock_morgen_client, sample_calendar_id
+    ):
+        virtual_cal = register_id(sample_calendar_id)
+        with pytest.raises(ToolError, match="Validation error"):
+            await create_event(
+                calendar_id=virtual_cal,
+                title="X",
+                start="2023-03-15T09:00:00",
+                duration="PT15M",
+                time_zone="Europe/Berlin",
+                recurrence_rules=[{"frequency": "fortnightly"}],
+            )
+
+    async def test_create_event_invalid_google_color(
+        self, mock_morgen_client, sample_calendar_id
+    ):
+        virtual_cal = register_id(sample_calendar_id)
+        with pytest.raises(ToolError, match="google_color_id"):
+            await create_event(
+                calendar_id=virtual_cal,
+                title="X",
+                start="2023-03-15T09:00:00",
+                duration="PT15M",
+                time_zone="Europe/Berlin",
+                google_color_id="99",
+            )
+
+    async def test_update_event_with_alerts(self, mock_morgen_client, sample_event_id):
+        virtual_evt = register_id(sample_event_id)
+        await update_event(
+            event_id=virtual_evt,
+            alerts=["-PT5M"],
+        )
+        sent_request = mock_morgen_client.update_event.call_args.args[0]
+        assert sent_request.alerts is not None
+        assert len(sent_request.alerts) == 1
+
+    async def test_update_event_with_use_default_alerts(
+        self, mock_morgen_client, sample_event_id
+    ):
+        virtual_evt = register_id(sample_event_id)
+        await update_event(
+            event_id=virtual_evt,
+            use_default_alerts=True,
+        )
+        sent_request = mock_morgen_client.update_event.call_args.args[0]
+        assert sent_request.use_default_alerts is True
+
+    async def test_update_event_recurrence_replaces(
+        self, mock_morgen_client, sample_event_id
+    ):
+        virtual_evt = register_id(sample_event_id)
+        await update_event(
+            event_id=virtual_evt,
+            recurrence_rules=[{"frequency": "daily"}],
+        )
+        sent_request = mock_morgen_client.update_event.call_args.args[0]
+        assert sent_request.recurrence_rules is not None
+        assert sent_request.recurrence_rules[0].frequency == "daily"
+
+
+class TestFormatFullEventExposesMetadata:
+    """The full-format event output should expose metadata, recurrence, alerts."""
+
+    async def test_full_format_surfaces_category_and_task(
+        self, mock_morgen_client, sample_calendar_id, sample_account_id
+    ):
+        from morgenmcp.models import EventMetadata
+
+        evt_id = make_event_id("a@b.com", "uid_meta", sample_account_id)
+        evt = Event(
+            id=evt_id,
+            calendar_id=sample_calendar_id,
+            account_id=sample_account_id,
+            integration_id="google",
+            title="Meta",
+            start="2025-01-01T10:00:00",
+            duration="PT1H",
+            metadata=EventMetadata(
+                category_id="cat-uuid",
+                category_name="Deep Work",
+                category_color="#CCEACD",
+                task_id="task-uuid",
+                progress="needs-action",
+            ),
+        )
+        mock_morgen_client.list_events.return_value = [evt]
+        virtual_cal = register_id(sample_calendar_id)
+
+        result = await list_events(
+            start="2025-01-01T00:00:00",
+            end="2025-01-02T00:00:00",
+            calendar_ids=[virtual_cal],
+        )
+        ev_out = result["events"][0]
+        assert ev_out["categoryId"] == "cat-uuid"
+        assert ev_out["categoryName"] == "Deep Work"
+        assert ev_out["categoryColor"] == "#CCEACD"
+        # taskId is virtualized
+        assert len(ev_out["taskId"]) == 7
+
+    async def test_full_format_surfaces_recurrence_rules(
+        self, mock_morgen_client, sample_calendar_id, sample_account_id
+    ):
+        from morgenmcp.models import NDay, RecurrenceRule
+
+        evt_id = make_event_id("a@b.com", "uid_rec", sample_account_id)
+        evt = Event(
+            id=evt_id,
+            calendar_id=sample_calendar_id,
+            account_id=sample_account_id,
+            integration_id="google",
+            title="Rec",
+            start="2025-01-01T10:00:00",
+            duration="PT1H",
+            recurrence_rules=[
+                RecurrenceRule(
+                    frequency="weekly",
+                    interval=2,
+                    by_day=[NDay(day="mo"), NDay(day="we")],
+                )
+            ],
+        )
+        mock_morgen_client.list_events.return_value = [evt]
+        virtual_cal = register_id(sample_calendar_id)
+
+        result = await list_events(
+            start="2025-01-01T00:00:00",
+            end="2025-01-02T00:00:00",
+            calendar_ids=[virtual_cal],
+        )
+        ev_out = result["events"][0]
+        assert ev_out["isRecurring"] is True
+        assert ev_out["recurrenceRules"][0]["frequency"] == "weekly"
+        assert ev_out["recurrenceRules"][0]["interval"] == 2
+        assert ev_out["recurrenceRules"][0]["byDay"] == ["mo", "we"]
+
+    async def test_full_format_surfaces_alerts(
+        self, mock_morgen_client, sample_calendar_id, sample_account_id
+    ):
+        from morgenmcp.models import Alert, OffsetTrigger
+
+        evt_id = make_event_id("a@b.com", "uid_alert", sample_account_id)
+        evt = Event(
+            id=evt_id,
+            calendar_id=sample_calendar_id,
+            account_id=sample_account_id,
+            integration_id="google",
+            title="Alerted",
+            start="2025-01-01T10:00:00",
+            duration="PT1H",
+            alerts={
+                "id1": Alert(trigger=OffsetTrigger(offset="-PT15M")),
+            },
+        )
+        mock_morgen_client.list_events.return_value = [evt]
+        virtual_cal = register_id(sample_calendar_id)
+
+        result = await list_events(
+            start="2025-01-01T00:00:00",
+            end="2025-01-02T00:00:00",
+            calendar_ids=[virtual_cal],
+        )
+        ev_out = result["events"][0]
+        assert ev_out["alerts"] == [{"offset": "-PT15M", "action": "display"}]

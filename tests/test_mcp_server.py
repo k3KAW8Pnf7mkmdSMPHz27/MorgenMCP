@@ -26,20 +26,38 @@ class TestMCPServer:
     """Tests verifying tools through the MCP protocol layer."""
 
     async def test_all_tools_registered(self):
-        """All 9 tools appear with correct names."""
+        """All tools appear with correct names."""
         async with Client(mcp) as client:
             tools = await client.list_tools()
             names = {t.name for t in tools}
             expected = {
+                # Accounts
                 "morgen_list_accounts",
+                # Calendars
                 "morgen_list_calendars",
                 "morgen_update_calendar_metadata",
+                # Events
                 "morgen_list_events",
                 "morgen_create_event",
                 "morgen_update_event",
                 "morgen_delete_event",
                 "morgen_batch_delete_events",
                 "morgen_batch_update_events",
+                # Tasks
+                "morgen_list_tasks",
+                "morgen_get_task",
+                "morgen_create_task",
+                "morgen_update_task",
+                "morgen_move_task",
+                "morgen_complete_task",
+                "morgen_reopen_task",
+                "morgen_delete_task",
+                "morgen_batch_delete_tasks",
+                # Tags
+                "morgen_list_tags",
+                "morgen_create_tag",
+                "morgen_update_tag",
+                "morgen_delete_tag",
             }
             assert names == expected
 
@@ -52,6 +70,9 @@ class TestMCPServer:
                 "morgen_list_accounts",
                 "morgen_list_calendars",
                 "morgen_list_events",
+                "morgen_list_tasks",
+                "morgen_get_task",
+                "morgen_list_tags",
             ]:
                 assert by_name[name].annotations.readOnlyHint is True
 
@@ -60,7 +81,13 @@ class TestMCPServer:
         async with Client(mcp) as client:
             tools = await client.list_tools()
             by_name = {t.name: t for t in tools}
-            for name in ["morgen_delete_event", "morgen_batch_delete_events"]:
+            for name in [
+                "morgen_delete_event",
+                "morgen_batch_delete_events",
+                "morgen_delete_task",
+                "morgen_batch_delete_tasks",
+                "morgen_delete_tag",
+            ]:
                 assert by_name[name].annotations.destructiveHint is True
 
     async def test_write_tools_not_readonly(self):
@@ -73,6 +100,13 @@ class TestMCPServer:
                 "morgen_update_event",
                 "morgen_update_calendar_metadata",
                 "morgen_batch_update_events",
+                "morgen_create_task",
+                "morgen_update_task",
+                "morgen_complete_task",
+                "morgen_reopen_task",
+                "morgen_move_task",
+                "morgen_create_tag",
+                "morgen_update_tag",
             ]:
                 assert by_name[name].annotations.readOnlyHint is False
 

@@ -20,6 +20,20 @@ from morgenmcp.models import (
     EventUpdateRequest,
     MorgenAPIError,
     RateLimitInfo,
+    Tag,
+    TagCreateRequest,
+    TagDeleteRequest,
+    TagUpdateRequest,
+    Task,
+    TaskCloseRequest,
+    TaskCreateRequest,
+    TaskCreateResponse,
+    TaskDeleteRequest,
+    TaskGetResponse,
+    TaskMoveRequest,
+    TaskReopenRequest,
+    TasksListResponse,
+    TaskUpdateRequest,
 )
 
 
@@ -290,6 +304,179 @@ class MorgenClient:
         response = await self.client.post(
             "/events/delete",
             params=params,
+            json=request.model_dump(by_alias=True, exclude_none=True),
+        )
+        self._handle_error(response)
+
+    # Task endpoints
+
+    async def list_tasks(
+        self,
+        limit: int | None = None,
+        updated_after: str | None = None,
+    ) -> list[Task]:
+        """List tasks, optionally filtered by update time.
+
+        Args:
+            limit: Maximum tasks to return (max 100, default 100).
+            updated_after: ISO 8601 datetime to filter for incremental sync.
+
+        Returns:
+            List of Task objects.
+        """
+        params: dict[str, str | int] = {}
+        if limit is not None:
+            params["limit"] = limit
+        if updated_after is not None:
+            params["updatedAfter"] = updated_after
+
+        response = await self.client.get("/tasks/list", params=params)
+        self._handle_error(response)
+
+        data = response.json()
+        api_response = APIResponse[TasksListResponse].model_validate(data)
+        return api_response.data.tasks
+
+    async def get_task(self, task_id: str) -> Task:
+        """Retrieve a single task by ID.
+
+        Args:
+            task_id: The Morgen ID of the task.
+
+        Returns:
+            The Task object.
+        """
+        response = await self.client.get("/tasks", params={"id": task_id})
+        self._handle_error(response)
+
+        data = response.json()
+        api_response = APIResponse[TaskGetResponse].model_validate(data)
+        return api_response.data.task
+
+    async def create_task(self, request: TaskCreateRequest) -> str:
+        """Create a new task.
+
+        Args:
+            request: Task creation payload.
+
+        Returns:
+            The new task's Morgen ID.
+        """
+        response = await self.client.post(
+            "/tasks/create",
+            json=request.model_dump(by_alias=True, exclude_none=True),
+        )
+        self._handle_error(response)
+
+        data = response.json()
+        return APIResponse[TaskCreateResponse].model_validate(data).data.id
+
+    async def update_task(self, request: TaskUpdateRequest) -> None:
+        """Update a task. Patch semantics — only provided fields change."""
+        response = await self.client.post(
+            "/tasks/update",
+            json=request.model_dump(by_alias=True, exclude_none=True),
+        )
+        self._handle_error(response)
+
+    async def move_task(self, request: TaskMoveRequest) -> None:
+        """Reorder a task within its list or change its parent."""
+        response = await self.client.post(
+            "/tasks/move",
+            json=request.model_dump(by_alias=True, exclude_none=True),
+        )
+        self._handle_error(response)
+
+    async def close_task(self, request: TaskCloseRequest) -> None:
+        """Mark a task as completed."""
+        response = await self.client.post(
+            "/tasks/close",
+            json=request.model_dump(by_alias=True, exclude_none=True),
+        )
+        self._handle_error(response)
+
+    async def reopen_task(self, request: TaskReopenRequest) -> None:
+        """Mark a completed task as not completed."""
+        response = await self.client.post(
+            "/tasks/reopen",
+            json=request.model_dump(by_alias=True, exclude_none=True),
+        )
+        self._handle_error(response)
+
+    async def delete_task(self, request: TaskDeleteRequest) -> None:
+        """Permanently delete a task."""
+        response = await self.client.post(
+            "/tasks/delete",
+            json=request.model_dump(by_alias=True, exclude_none=True),
+        )
+        self._handle_error(response)
+
+    # Tag endpoints
+
+    async def list_tags(
+        self,
+        limit: int | None = None,
+        updated_after: str | None = None,
+    ) -> list[Tag]:
+        """List tags. With updated_after, also returns tags marked deleted.
+
+        Args:
+            limit: Maximum tags to return.
+            updated_after: ISO 8601 datetime for incremental sync.
+
+        Returns:
+            List of Tag objects (deleted ones have deleted=True).
+        """
+        params: dict[str, str | int] = {}
+        if limit is not None:
+            params["limit"] = limit
+        if updated_after is not None:
+            params["updatedAfter"] = updated_after
+
+        response = await self.client.get("/tags/list", params=params)
+        self._handle_error(response)
+
+        data = response.json()
+        # The tags endpoint returns a bare array, not wrapped in {data: ...}
+        if isinstance(data, list):
+            return [Tag.model_validate(item) for item in data]
+        # Defensive: support {data: [...]} just in case
+        wrapped = data.get("data", []) if isinstance(data, dict) else []
+        return [Tag.model_validate(item) for item in wrapped]
+
+    async def get_tag(self, tag_id: str) -> Tag:
+        """Retrieve a single tag by ID."""
+        response = await self.client.get("/tags", params={"id": tag_id})
+        self._handle_error(response)
+
+        return Tag.model_validate(response.json())
+
+    async def create_tag(self, request: TagCreateRequest) -> Tag:
+        """Create a new tag.
+
+        Returns:
+            The created Tag object including the assigned ID.
+        """
+        response = await self.client.post(
+            "/tags/create",
+            json=request.model_dump(by_alias=True, exclude_none=True),
+        )
+        self._handle_error(response)
+
+        return Tag.model_validate(response.json())
+
+    async def update_tag(self, request: TagUpdateRequest) -> None:
+        """Update a tag's name or color."""
+        response = await self.client.post(
+            "/tags/update",
+            json=request.model_dump(by_alias=True, exclude_none=True),
+        )
+        self._handle_error(response)
+
+    async def delete_tag(self, request: TagDeleteRequest) -> None:
+        """Soft-delete a tag."""
+        response = await self.client.post(
+            "/tags/delete",
             json=request.model_dump(by_alias=True, exclude_none=True),
         )
         self._handle_error(response)

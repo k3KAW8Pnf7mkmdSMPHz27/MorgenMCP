@@ -18,6 +18,18 @@ from morgenmcp.tools.events import (
     list_events,
     update_event,
 )
+from morgenmcp.tools.tags import create_tag, delete_tag, list_tags, update_tag
+from morgenmcp.tools.tasks import (
+    batch_delete_tasks,
+    complete_task,
+    create_task,
+    delete_task,
+    get_task,
+    list_tasks,
+    move_task,
+    reopen_task,
+    update_task,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -76,15 +88,27 @@ mcp = FastMCP(
     "morgen-calendar",
     lifespan=lifespan,
     instructions="""
-    Morgen Calendar MCP Server provides access to Morgen's unified calendar API.
+    Morgen Calendar MCP Server provides access to Morgen's unified calendar,
+    task, and tag API.
 
     All IDs are 7-character virtual IDs (e.g., "aB-9xZ_") for token efficiency.
 
-    Workflow:
+    Calendar workflow:
     1. Use list_calendars to discover available calendars
     2. Use list_events with calendar_ids to get events (compact=True for fewer tokens)
     3. Use update_event or delete_event with just event_id
     4. Use batch_delete_events or batch_update_events for bulk operations
+
+    Task workflow:
+    1. Use list_tasks to enumerate tasks (paginate via limit + updated_after)
+    2. Use create_task / update_task / delete_task for CRUD
+    3. Use complete_task / reopen_task to toggle completion
+    4. Use move_task to reorder or change a task's parent
+
+    Tag workflow:
+    1. Use list_tags to enumerate user tags
+    2. Use create_tag / update_tag / delete_tag for CRUD
+    3. Pass tag virtual IDs to create_task or update_task via tag_ids
 
     Simplified signatures:
     - create_event: just calendar_id (account derived automatically)
@@ -94,7 +118,9 @@ mcp = FastMCP(
     Important notes:
     - Times are in LocalDateTime format (e.g., "2023-03-01T10:15:00") with separate timeZone
     - Durations use ISO 8601 format (e.g., "PT1H" for 1 hour, "PT30M" for 30 minutes)
+    - Alert offsets are negative durations (e.g., "-PT15M" = 15 min before)
     - For recurring events, use seriesUpdateMode to control how updates affect the series
+    - Recurring events: pass recurrence_rules=[{"frequency":"weekly","interval":1,"by_day":["mo"]}]
     """,
 )
 
@@ -198,6 +224,155 @@ mcp.tool(
         "openWorldHint": True,
     },
 )(batch_update_events)
+
+# Task tools
+mcp.tool(
+    name="morgen_list_tasks",
+    tags={"tasks", "read"},
+    timeout=30.0,
+    annotations={
+        "title": "List Tasks",
+        "readOnlyHint": True,
+        "openWorldHint": True,
+    },
+)(list_tasks)
+mcp.tool(
+    name="morgen_get_task",
+    tags={"tasks", "read"},
+    timeout=30.0,
+    annotations={
+        "title": "Get Task",
+        "readOnlyHint": True,
+        "openWorldHint": True,
+    },
+)(get_task)
+mcp.tool(
+    name="morgen_create_task",
+    tags={"tasks", "write"},
+    timeout=30.0,
+    annotations={
+        "title": "Create Task",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "openWorldHint": True,
+    },
+)(create_task)
+mcp.tool(
+    name="morgen_update_task",
+    tags={"tasks", "write"},
+    timeout=30.0,
+    annotations={
+        "title": "Update Task",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)(update_task)
+mcp.tool(
+    name="morgen_move_task",
+    tags={"tasks", "write"},
+    timeout=30.0,
+    annotations={
+        "title": "Move Task",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)(move_task)
+mcp.tool(
+    name="morgen_complete_task",
+    tags={"tasks", "write"},
+    timeout=30.0,
+    annotations={
+        "title": "Complete Task",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)(complete_task)
+mcp.tool(
+    name="morgen_reopen_task",
+    tags={"tasks", "write"},
+    timeout=30.0,
+    annotations={
+        "title": "Reopen Task",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)(reopen_task)
+mcp.tool(
+    name="morgen_delete_task",
+    tags={"tasks", "delete"},
+    timeout=30.0,
+    annotations={
+        "title": "Delete Task",
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "openWorldHint": True,
+    },
+)(delete_task)
+mcp.tool(
+    name="morgen_batch_delete_tasks",
+    tags={"tasks", "delete", "batch"},
+    timeout=120.0,
+    annotations={
+        "title": "Batch Delete Tasks",
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "openWorldHint": True,
+    },
+)(batch_delete_tasks)
+
+# Tag tools
+mcp.tool(
+    name="morgen_list_tags",
+    tags={"tags", "read"},
+    timeout=30.0,
+    annotations={
+        "title": "List Tags",
+        "readOnlyHint": True,
+        "openWorldHint": True,
+    },
+)(list_tags)
+mcp.tool(
+    name="morgen_create_tag",
+    tags={"tags", "write"},
+    timeout=30.0,
+    annotations={
+        "title": "Create Tag",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "openWorldHint": True,
+    },
+)(create_tag)
+mcp.tool(
+    name="morgen_update_tag",
+    tags={"tags", "write"},
+    timeout=30.0,
+    annotations={
+        "title": "Update Tag",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)(update_tag)
+mcp.tool(
+    name="morgen_delete_tag",
+    tags={"tags", "delete"},
+    timeout=30.0,
+    annotations={
+        "title": "Delete Tag",
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "openWorldHint": True,
+    },
+)(delete_tag)
 
 
 def main() -> None:

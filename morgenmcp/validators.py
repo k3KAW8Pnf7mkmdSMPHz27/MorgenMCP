@@ -210,6 +210,113 @@ def validate_hex_color(value: str) -> str:
     return value
 
 
+_VALID_TASK_PROGRESS = {
+    "needs-action",
+    "in-process",
+    "completed",
+    "failed",
+    "cancelled",
+}
+
+_VALID_RECURRENCE_FREQUENCIES = {"daily", "weekly", "monthly", "yearly"}
+_VALID_NDAYS = {"mo", "tu", "we", "th", "fr", "sa", "su"}
+
+NEGATIVE_OFFSET_PATTERN = re.compile(
+    r"^-P(?:\d+Y)?(?:\d+M)?(?:\d+W)?(?:\d+D)?(?:T(?:\d+H)?(?:\d+M)?(?:\d+(?:\.\d+)?S)?)?$"
+)
+
+
+def validate_priority(value: int) -> int:
+    """Validate task priority (0-9).
+
+    0 means undefined; 1 is highest; 9 is lowest.
+
+    Raises:
+        ValidationError: If outside 0-9.
+    """
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ValidationError(
+            f"priority must be an integer, got {type(value).__name__}"
+        )
+    if value < 0 or value > 9:
+        raise ValidationError(
+            f"priority must be between 0 and 9 (got {value}). "
+            "0 = undefined, 1 = highest, 9 = lowest."
+        )
+    return value
+
+
+def validate_progress(value: str) -> str:
+    """Validate task progress status string."""
+    if value not in _VALID_TASK_PROGRESS:
+        raise ValidationError(
+            f"Invalid progress '{value}'. "
+            f"Must be one of: {sorted(_VALID_TASK_PROGRESS)}"
+        )
+    return value
+
+
+def validate_alert_offset(value: str) -> str:
+    """Validate an alert offset like '-PT15M' (negative ISO 8601 duration).
+
+    Alerts fire before the event start, so offsets must be negative.
+    """
+    if not value:
+        raise ValidationError("alert offset cannot be empty")
+    if not NEGATIVE_OFFSET_PATTERN.match(value):
+        raise ValidationError(
+            f"Invalid alert offset: '{value}'. "
+            "Use a negative ISO 8601 duration (e.g., '-PT15M' for 15 minutes before, "
+            "'-PT1H' for 1 hour before, '-P1D' for 1 day before)."
+        )
+    return value
+
+
+def validate_recurrence_rule(rule: dict) -> None:
+    """Validate the shape of a single recurrence rule dict.
+
+    Expected keys: frequency (required), interval (optional, default 1),
+    by_day (optional list of two-letter weekday codes).
+    """
+    if not isinstance(rule, dict):
+        raise ValidationError(
+            f"recurrence rule must be a dict, got {type(rule).__name__}"
+        )
+
+    frequency = rule.get("frequency")
+    if not frequency:
+        raise ValidationError("recurrence rule is missing required 'frequency'")
+    if frequency not in _VALID_RECURRENCE_FREQUENCIES:
+        raise ValidationError(
+            f"Invalid recurrence frequency '{frequency}'. "
+            f"Must be one of: {sorted(_VALID_RECURRENCE_FREQUENCIES)}"
+        )
+
+    interval = rule.get("interval", 1)
+    if not isinstance(interval, int) or isinstance(interval, bool) or interval < 1:
+        raise ValidationError(
+            f"recurrence rule 'interval' must be a positive integer (got {interval!r})"
+        )
+
+    by_day = rule["by_day"] if "by_day" in rule else rule.get("byDay")
+    if by_day is not None:
+        if not isinstance(by_day, list) or not by_day:
+            raise ValidationError("'by_day' must be a non-empty list of weekday codes")
+        for day in by_day:
+            day_code = (
+                day
+                if isinstance(day, str)
+                else day.get("day")
+                if isinstance(day, dict)
+                else None
+            )
+            if day_code not in _VALID_NDAYS:
+                raise ValidationError(
+                    f"Invalid weekday code '{day_code}'. "
+                    f"Use two-letter lowercase codes: {sorted(_VALID_NDAYS)}"
+                )
+
+
 def validate_date_range(start: str, end: str, max_days: int = 180) -> None:
     """Validate that a date range is valid and within limits.
 

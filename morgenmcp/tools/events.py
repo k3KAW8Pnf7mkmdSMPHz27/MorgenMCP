@@ -21,8 +21,10 @@ from morgenmcp.tools.id_utils import (
     extract_ids_from_event,
 )
 from morgenmcp.tools.utils import (
+    build_alerts_dict,
     build_locations_dict,
     build_participants_dict,
+    build_recurrence_rules,
     filter_none_values,
     handle_tool_errors,
 )
@@ -77,8 +79,32 @@ def _format_compact_event(event: Event) -> str:
             return f"{event.start}: {title} [{virtual_id}]"
 
 
+def _format_recurrence_rule(rule: Any) -> dict[str, Any]:
+    """Compact representation of a recurrence rule."""
+    return filter_none_values(
+        {
+            "frequency": rule.frequency,
+            "interval": rule.interval,
+            "byDay": [d.day for d in (rule.by_day or [])] or None,
+        }
+    )
+
+
+def _format_alerts(event: Event) -> list[dict[str, str]] | None:
+    """Compact representation of an event's alerts as offset list."""
+    alerts = event.alerts or {}
+    if not alerts:
+        return None
+    out: list[dict[str, str]] = []
+    for alert in alerts.values():
+        if alert and alert.trigger:
+            out.append({"offset": alert.trigger.offset, "action": alert.action})
+    return out or None
+
+
 def _format_full_event(event: Event) -> dict[str, Any]:
     """Format an event in full format with all fields and virtual IDs."""
+    metadata = event.metadata
     return filter_none_values(
         {
             "id": register_id(event.id),
@@ -105,9 +131,22 @@ def _format_full_event(event: Event) -> dict[str, Any]:
                 for p in (event.participants or {}).values()
             ],
             "isRecurring": event.recurrence_rules is not None,
+            "recurrenceRules": [
+                _format_recurrence_rule(r) for r in (event.recurrence_rules or [])
+            ]
+            or None,
             "recurrenceId": event.recurrence_id,
             "masterEventId": register_id(event.master_event_id)
             if event.master_event_id
+            else None,
+            "alerts": _format_alerts(event),
+            "useDefaultAlerts": event.use_default_alerts or None,
+            "googleColorId": event.google_color_id,
+            "categoryId": metadata.category_id if metadata else None,
+            "categoryName": metadata.category_name if metadata else None,
+            "categoryColor": metadata.category_color if metadata else None,
+            "taskId": register_id(metadata.task_id)
+            if metadata and metadata.task_id
             else None,
             "virtualRoomUrl": (
                 event.derived.virtual_room.url
@@ -227,6 +266,10 @@ async def create_event(
     privacy: Literal["public", "private", "secret"] = "public",
     request_virtual_room: Literal["default", "googleMeet", "microsoftTeams"]
     | None = None,
+    recurrence_rules: list[dict[str, Any]] | None = None,
+    alerts: list[str] | None = None,
+    use_default_alerts: bool | None = None,
+    google_color_id: str | None = None,
 ) -> dict:
     """Create a new calendar event.
 
@@ -243,6 +286,16 @@ async def create_event(
         free_busy_status: "free" or "busy" (default: "busy").
         privacy: "public", "private", or "secret" (default: "public").
         request_virtual_room: Request automatic video room creation.
+        recurrence_rules: Optional list of recurrence dicts. Each dict needs
+            'frequency' (daily|weekly|monthly|yearly), optional 'interval' (default 1),
+            optional 'by_day' (list of two-letter codes: mo, tu, we, th, fr, sa, su).
+            Example: [{"frequency": "weekly", "interval": 1, "by_day": ["mo", "we"]}].
+        alerts: Optional list of negative ISO 8601 offsets (e.g., ['-PT15M', '-PT1H'])
+            for reminders before the event. Cannot be combined with use_default_alerts.
+        use_default_alerts: If True, use the calendar's default alert settings
+            instead of custom alerts. Cannot be combined with alerts.
+        google_color_id: Google Calendar color ID, "1" through "11"
+            (Google Calendar events only).
 
     Returns:
         Dictionary with created event ID and details.
@@ -254,6 +307,16 @@ async def create_event(
     if participants:
         for email in participants:
             validate_email(email)
+
+    if alerts and use_default_alerts:
+        raise ToolError(
+            "alerts and use_default_alerts are mutually exclusive — pick one."
+        )
+
+    if google_color_id is not None and google_color_id not in {
+        str(i) for i in range(1, 12)
+    }:
+        raise ToolError("google_color_id must be a string '1' through '11'")
 
     # Resolve virtual calendar ID and extract account ID
     real_calendar_id = resolve_id(calendar_id)
@@ -270,8 +333,12 @@ async def create_event(
         description=description,
         locations=build_locations_dict(location),
         participants=build_participants_dict(participants),
+        alerts=build_alerts_dict(alerts),
+        use_default_alerts=use_default_alerts,
         free_busy_status=free_busy_status,
         privacy=privacy,
+        recurrence_rules=build_recurrence_rules(recurrence_rules),
+        google_color_id=google_color_id,
         request_virtual_room=request_virtual_room,
     )
 
@@ -302,6 +369,10 @@ async def update_event(
     location: str | None = None,
     free_busy_status: Literal["free", "busy"] | None = None,
     privacy: Literal["public", "private", "secret"] | None = None,
+    recurrence_rules: list[dict[str, Any]] | None = None,
+    alerts: list[str] | None = None,
+    use_default_alerts: bool | None = None,
+    google_color_id: str | None = None,
     series_update_mode: Literal["single", "future", "all"] = "single",
 ) -> dict:
     """Update an existing calendar event.
@@ -320,6 +391,12 @@ async def update_event(
         location: New location name (set to empty string to remove).
         free_busy_status: New free/busy status.
         privacy: New privacy setting.
+        recurrence_rules: New recurrence rules. Pass an empty list to clear.
+            See create_event for the dict shape.
+        alerts: Replace alerts with these negative ISO 8601 offsets
+            (e.g., ['-PT15M']). Cannot be combined with use_default_alerts.
+        use_default_alerts: If True, switch to the calendar's default alerts.
+        google_color_id: Google Calendar color ID, "1" through "11".
         series_update_mode: For recurring events - "single", "future", or "all".
 
     Returns:
@@ -342,6 +419,16 @@ async def update_event(
     if time_zone is not None:
         validate_timezone(time_zone)
 
+    if alerts and use_default_alerts:
+        raise ToolError(
+            "alerts and use_default_alerts are mutually exclusive — pick one."
+        )
+
+    if google_color_id is not None and google_color_id not in {
+        str(i) for i in range(1, 12)
+    }:
+        raise ToolError("google_color_id must be a string '1' through '11'")
+
     # Resolve virtual event ID and extract account/calendar IDs
     real_event_id = resolve_id(event_id)
     real_account_id, real_calendar_id = extract_ids_from_event(real_event_id)
@@ -357,8 +444,12 @@ async def update_event(
         show_without_time=is_all_day,
         description=description,
         locations=build_locations_dict(location, allow_empty=True),
+        alerts=build_alerts_dict(alerts),
+        use_default_alerts=use_default_alerts,
         free_busy_status=free_busy_status,
         privacy=privacy,
+        recurrence_rules=build_recurrence_rules(recurrence_rules),
+        google_color_id=google_color_id,
     )
 
     client = get_client()
@@ -555,6 +646,13 @@ async def batch_update_events(
         if update.get("time_zone"):
             validate_timezone(update["time_zone"])
 
+        update_alerts = update.get("alerts")
+        update_default = update.get("use_default_alerts")
+        if update_alerts and update_default:
+            raise ToolError(
+                "alerts and use_default_alerts are mutually exclusive — pick one."
+            )
+
         request = EventUpdateRequest(
             id=real_event_id,
             account_id=real_account_id,
@@ -566,8 +664,12 @@ async def batch_update_events(
             show_without_time=update.get("is_all_day"),
             description=update.get("description"),
             locations=build_locations_dict(update.get("location"), allow_empty=True),
+            alerts=build_alerts_dict(update_alerts),
+            use_default_alerts=update_default,
             free_busy_status=update.get("free_busy_status"),
             privacy=update.get("privacy"),
+            recurrence_rules=build_recurrence_rules(update.get("recurrence_rules")),
+            google_color_id=update.get("google_color_id"),
         )
         await client.update_event(request, series_update_mode=series_update_mode)
 

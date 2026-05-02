@@ -4,11 +4,15 @@ import pytest
 
 from morgenmcp.validators import (
     ValidationError,
+    validate_alert_offset,
     validate_date_range,
     validate_duration,
     validate_email,
     validate_hex_color,
     validate_local_datetime,
+    validate_priority,
+    validate_progress,
+    validate_recurrence_rule,
     validate_timezone,
 )
 
@@ -267,3 +271,95 @@ class TestValidateDateRange:
 
         # But pass with max_days=60
         validate_date_range("2023-03-01T00:00:00", "2023-04-01T00:00:00", max_days=60)
+
+
+class TestValidatePriority:
+    def test_valid_range(self):
+        for p in range(0, 10):
+            assert validate_priority(p) == p
+
+    def test_too_low(self):
+        with pytest.raises(ValidationError):
+            validate_priority(-1)
+
+    def test_too_high(self):
+        with pytest.raises(ValidationError):
+            validate_priority(10)
+
+    def test_non_integer(self):
+        with pytest.raises(ValidationError):
+            validate_priority("3")  # type: ignore[arg-type]
+
+    def test_bool_rejected(self):
+        with pytest.raises(ValidationError):
+            validate_priority(True)  # type: ignore[arg-type]
+
+
+class TestValidateProgress:
+    def test_valid(self):
+        for p in ["needs-action", "in-process", "completed", "failed", "cancelled"]:
+            assert validate_progress(p) == p
+
+    def test_invalid(self):
+        with pytest.raises(ValidationError):
+            validate_progress("done")
+
+
+class TestValidateAlertOffset:
+    def test_valid_minutes(self):
+        assert validate_alert_offset("-PT15M") == "-PT15M"
+
+    def test_valid_hours(self):
+        assert validate_alert_offset("-PT1H") == "-PT1H"
+
+    def test_valid_day(self):
+        assert validate_alert_offset("-P1D") == "-P1D"
+
+    def test_rejects_positive(self):
+        with pytest.raises(ValidationError):
+            validate_alert_offset("PT15M")
+
+    def test_rejects_empty(self):
+        with pytest.raises(ValidationError):
+            validate_alert_offset("")
+
+    def test_rejects_garbage(self):
+        with pytest.raises(ValidationError):
+            validate_alert_offset("-15 minutes")
+
+
+class TestValidateRecurrenceRule:
+    def test_minimal(self):
+        validate_recurrence_rule({"frequency": "weekly"})
+
+    def test_with_interval_and_byday(self):
+        validate_recurrence_rule(
+            {"frequency": "weekly", "interval": 2, "by_day": ["mo", "we"]}
+        )
+
+    def test_camel_case_byday(self):
+        validate_recurrence_rule({"frequency": "weekly", "byDay": [{"day": "fr"}]})
+
+    def test_missing_frequency(self):
+        with pytest.raises(ValidationError, match="frequency"):
+            validate_recurrence_rule({})
+
+    def test_invalid_frequency(self):
+        with pytest.raises(ValidationError, match="frequency"):
+            validate_recurrence_rule({"frequency": "fortnightly"})
+
+    def test_invalid_interval(self):
+        with pytest.raises(ValidationError, match="interval"):
+            validate_recurrence_rule({"frequency": "daily", "interval": 0})
+
+    def test_invalid_byday(self):
+        with pytest.raises(ValidationError, match="weekday"):
+            validate_recurrence_rule({"frequency": "weekly", "by_day": ["xx"]})
+
+    def test_byday_must_be_list(self):
+        with pytest.raises(ValidationError, match="non-empty"):
+            validate_recurrence_rule({"frequency": "weekly", "by_day": []})
+
+    def test_non_dict(self):
+        with pytest.raises(ValidationError, match="dict"):
+            validate_recurrence_rule(["weekly"])  # type: ignore[arg-type]

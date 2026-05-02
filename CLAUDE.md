@@ -34,10 +34,10 @@ FastMCP-based MCP server wrapping the Morgen calendar API (https://api.morgen.so
 - **`models.py`** - Pydantic models using `Annotated[type, Field(alias="...")]` pattern. Base `MorgenModel` config: `validate_by_name=True, validate_by_alias=True`. Serialize with `model.model_dump(by_alias=True, exclude_none=True)`.
 - **`validators.py`** - Input validation (datetime, duration, timezone, email, color)
 - **`tools/`** - Tool implementations:
-  - `accounts.py`, `calendars.py`, `events.py` - MCP tool functions
+  - `accounts.py`, `calendars.py`, `events.py`, `tasks.py`, `tags.py` - MCP tool functions
   - `id_registry.py` - Virtual ID ↔ real ID bidirectional mapping with disk persistence
-  - `id_utils.py` - Extract account/calendar IDs from encoded Morgen IDs
-  - `utils.py` - Shared helpers (`filter_none_values`, `handle_tool_errors`)
+  - `id_utils.py` - Extract account/calendar IDs from encoded Morgen IDs (events/calendars only — task and tag IDs are opaque)
+  - `utils.py` - Shared helpers (`filter_none_values`, `handle_tool_errors`, `build_alerts_dict`, `build_recurrence_rules`)
 
 ### Patterns
 
@@ -48,10 +48,14 @@ FastMCP-based MCP server wrapping the Morgen calendar API (https://api.morgen.so
 - Datetime fields use LocalDateTime format (`2023-03-01T10:00:00`) - no Z suffix; timezone is separate
 - `EventCreateResponse` has nested structure: `response.event.id`, not `response.id`
 - **Timing fields constraint**: `update_event` and `batch_update_events` require all four timing fields (`start`, `duration`, `time_zone`, `is_all_day`) together or none — partial updates are rejected
+- **Alerts**: Tools accept negative ISO 8601 offsets (e.g., `'-PT15M'`) and convert them to Morgen's base64-encoded alert ID format (`base64(JSON({a:'display',to:offset}))`). `alerts` and `use_default_alerts` are mutually exclusive.
+- **Recurrence rules**: Accept simplified dicts `{frequency, interval, by_day}`; the `build_recurrence_rules` helper converts to JSCalendar `RecurrenceRule` objects.
+- **Tags endpoint quirk**: `/tags/list` returns a bare JSON array, not the standard `{data: ...}` envelope — the client handles both shapes.
+- **EventUpdateRequest.alerts** uses `dict[str, Alert | None]` to support patch-style removal (set entry to `None` to delete that alert). `EventCreateRequest.alerts` uses the same widened type for consistency at type-check time, even though create never accepts None values.
 
 ### Morgen API ID Structure
 
-IDs are base64-encoded JSON arrays with embedded relationships:
+Calendar/event IDs are base64-encoded JSON arrays with embedded relationships:
 
 - **Account ID**: MongoDB ObjectId (24 hex chars)
   - `"507f1f77bcf86cd799439011"`
@@ -66,6 +70,8 @@ IDs are base64-encoded JSON arrays with embedded relationships:
   - Calendar ID can be reconstructed: `base64([accountId, calendarEmail])`
 
 This allows deriving account_id and calendar_id from event_id without caching.
+
+**Tasks and tags use opaque IDs** — base64 strings (tasks) and UUIDs (tags) without embedded structure. They go through the same virtual-ID layer but require no extraction utilities.
 
 ### Virtual IDs
 
@@ -89,7 +95,7 @@ Virtual IDs are **deterministic** (`MD5(real_id)`) and **persisted to disk** via
 ### Environment
 
 - Python `>= 3.14` (set in `pyproject.toml`)
-- `fastmcp>=3.1,<3.2` — pinned to 3.1.x patch range
+- `fastmcp>=3.2,<3.3` — pinned to 3.2.x patch range
 
 ## Versioning & Release
 
@@ -116,7 +122,7 @@ When spawning Explore agents, **always include this instruction in the prompt**:
 | **FastMCP** | `docs/fastmcp/docs/` | `fastmcp-docs` | Server framework: tools, context, auth, testing, deployment |
 
 - **Morgen docs submodule**: `f977d08` (updated automatically by SessionStart hook)
-- **FastMCP docs submodule**: `v3.1.1` / `53dab031` — matches `fastmcp>=3.1,<3.2` pin (updated automatically by SessionStart hook)
+- **FastMCP docs submodule**: `v3.2.4` / `7d760747` — matches `fastmcp>=3.2,<3.3` pin (updated automatically by SessionStart hook)
 
 ### Online docs (fallback only)
 

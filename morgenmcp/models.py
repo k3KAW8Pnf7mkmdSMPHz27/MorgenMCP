@@ -213,7 +213,7 @@ class EventCreateRequest(MorgenModel):
     ] = None
     locations: dict[str, Location] | None = None
     participants: dict[str, Participant] | None = None
-    alerts: dict[str, Alert] | None = None
+    alerts: dict[str, Alert | None] | None = None
     use_default_alerts: Annotated[bool | None, Field(alias="useDefaultAlerts")] = None
     privacy: str | None = None
     free_busy_status: Annotated[str | None, Field(alias="freeBusyStatus")] = None
@@ -309,6 +309,162 @@ class EventCreateResponse(MorgenModel):
     """Response from event create endpoint."""
 
     event: CreatedEventInfo
+
+
+class TaskRelation(MorgenModel):
+    """Relation between a task and another task (e.g., parent/subtask)."""
+
+    type: Annotated[Literal["Relation"], Field(alias="@type")] = "Relation"
+    relation: dict[str, bool] = Field(default_factory=dict)
+
+
+class TaskDerived(MorgenModel):
+    """Morgen-derived task fields (read-only)."""
+
+    scheduled: bool | None = None
+
+
+class Task(MorgenModel):
+    """Morgen task model."""
+
+    type: Annotated[Literal["Task"], Field(alias="@type")] = "Task"
+    id: str
+    account_id: Annotated[str | None, Field(alias="accountId")] = None
+    integration_id: Annotated[str | None, Field(alias="integrationId")] = None
+    task_list_id: Annotated[str | None, Field(alias="taskListId")] = None
+    created: str | None = None
+    updated: str | None = None
+    title: str | None = None
+    description: str | None = None
+    description_content_type: Annotated[
+        str | None, Field(alias="descriptionContentType")
+    ] = None
+    due: str | None = None
+    time_zone: Annotated[str | None, Field(alias="timeZone")] = None
+    estimated_duration: Annotated[str | None, Field(alias="estimatedDuration")] = None
+    priority: int | None = None
+    progress: str | None = None
+    position: int | None = None
+    related_to: Annotated[dict[str, TaskRelation] | None, Field(alias="relatedTo")] = (
+        None
+    )
+    tags: list[str] | None = None
+    derived: Annotated[TaskDerived | None, Field(alias="morgen.so:derived")] = None
+
+
+class TaskCreateRequest(MorgenModel):
+    """Request to create a new task."""
+
+    title: str
+    description: str | None = None
+    description_content_type: Annotated[
+        str | None, Field(alias="descriptionContentType")
+    ] = None
+    due: str | None = None
+    time_zone: Annotated[str | None, Field(alias="timeZone")] = None
+    estimated_duration: Annotated[str | None, Field(alias="estimatedDuration")] = None
+    task_list_id: Annotated[str | None, Field(alias="taskListId")] = None
+    priority: int | None = None
+    progress: str | None = None
+    related_to: Annotated[dict[str, TaskRelation] | None, Field(alias="relatedTo")] = (
+        None
+    )
+    tags: list[str] | None = None
+
+
+class TaskUpdateRequest(MorgenModel):
+    """Request to update a task. Only provided fields are updated."""
+
+    id: str
+    title: str | None = None
+    description: str | None = None
+    description_content_type: Annotated[
+        str | None, Field(alias="descriptionContentType")
+    ] = None
+    due: str | None = None
+    time_zone: Annotated[str | None, Field(alias="timeZone")] = None
+    estimated_duration: Annotated[str | None, Field(alias="estimatedDuration")] = None
+    task_list_id: Annotated[str | None, Field(alias="taskListId")] = None
+    priority: int | None = None
+    progress: str | None = None
+    tags: list[str] | None = None
+
+
+class TaskMoveRequest(MorgenModel):
+    """Request to reorder a task or change its parent."""
+
+    id: str
+    previous_id: Annotated[str | None, Field(alias="previousId")] = None
+    parent_id: Annotated[str | None, Field(alias="parentId")] = None
+
+
+class TaskCloseRequest(MorgenModel):
+    """Request to close (complete) a task."""
+
+    id: str
+    occurrence_start: Annotated[str | None, Field(alias="occurrenceStart")] = None
+
+
+class TaskReopenRequest(MorgenModel):
+    """Request to reopen a completed task."""
+
+    id: str
+    occurrence_start: Annotated[str | None, Field(alias="occurrenceStart")] = None
+
+
+class TaskDeleteRequest(MorgenModel):
+    """Request to delete a task permanently."""
+
+    id: str
+
+
+class TasksListResponse(BaseModel):
+    """Response from tasks list endpoint."""
+
+    tasks: list[Task]
+
+
+class TaskGetResponse(BaseModel):
+    """Response from a single-task get endpoint."""
+
+    task: Task
+
+
+class TaskCreateResponse(BaseModel):
+    """Response from tasks create endpoint."""
+
+    id: str
+
+
+class Tag(MorgenModel):
+    """User-defined tag for tasks and events."""
+
+    id: str
+    name: str | None = None
+    color: str | None = None
+    updated: str | None = None
+    deleted: bool | None = None
+
+
+class TagCreateRequest(MorgenModel):
+    """Request to create a tag."""
+
+    name: str
+    color: str | None = None
+
+
+class TagUpdateRequest(MorgenModel):
+    """Request to update a tag."""
+
+    id: str
+    name: str | None = None
+    color: str | None = None
+
+
+class TagDeleteRequest(MorgenModel):
+    """Request to soft-delete a tag."""
+
+    id: str
 
 
 class APIResponse[T](BaseModel):

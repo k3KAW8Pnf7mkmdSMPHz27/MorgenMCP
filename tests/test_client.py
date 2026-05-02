@@ -10,6 +10,15 @@ from morgenmcp.models import (
     EventDeleteRequest,
     EventUpdateRequest,
     MorgenAPIError,
+    TagCreateRequest,
+    TagDeleteRequest,
+    TagUpdateRequest,
+    TaskCloseRequest,
+    TaskCreateRequest,
+    TaskDeleteRequest,
+    TaskMoveRequest,
+    TaskReopenRequest,
+    TaskUpdateRequest,
 )
 
 
@@ -469,3 +478,174 @@ class TestClientContextManager:
         """Test that context manager returns the client."""
         async with MorgenClient(api_key="test_key") as client:
             assert isinstance(client, MorgenClient)
+
+
+class TestTaskEndpoints:
+    """Tests for task API endpoints."""
+
+    @respx.mock
+    async def test_list_tasks(self):
+        respx.get("https://api.morgen.so/v3/tasks/list").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "tasks": [
+                            {
+                                "@type": "Task",
+                                "id": "task1",
+                                "accountId": "acc1",
+                                "title": "Hi",
+                            }
+                        ]
+                    }
+                },
+            )
+        )
+
+        async with MorgenClient(api_key="k") as client:
+            tasks = await client.list_tasks()
+
+        assert len(tasks) == 1
+        assert tasks[0].title == "Hi"
+
+    @respx.mock
+    async def test_list_tasks_passes_filters(self):
+        route = respx.get("https://api.morgen.so/v3/tasks/list").mock(
+            return_value=httpx.Response(200, json={"data": {"tasks": []}})
+        )
+
+        async with MorgenClient(api_key="k") as client:
+            await client.list_tasks(limit=10, updated_after="2026-01-01T00:00:00")
+
+        url = str(route.calls.last.request.url)
+        assert "limit=10" in url
+        assert "updatedAfter=2026-01-01T00%3A00%3A00" in url
+
+    @respx.mock
+    async def test_get_task(self):
+        respx.get("https://api.morgen.so/v3/tasks").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "task": {
+                            "@type": "Task",
+                            "id": "task1",
+                            "title": "Hello",
+                        }
+                    }
+                },
+            )
+        )
+        async with MorgenClient(api_key="k") as client:
+            task = await client.get_task("task1")
+        assert task.id == "task1"
+        assert task.title == "Hello"
+
+    @respx.mock
+    async def test_create_task(self):
+        respx.post("https://api.morgen.so/v3/tasks/create").mock(
+            return_value=httpx.Response(200, json={"data": {"id": "new_task_id"}})
+        )
+        async with MorgenClient(api_key="k") as client:
+            new_id = await client.create_task(TaskCreateRequest(title="New"))
+        assert new_id == "new_task_id"
+
+    @respx.mock
+    async def test_update_task_returns_204(self):
+        respx.post("https://api.morgen.so/v3/tasks/update").mock(
+            return_value=httpx.Response(204)
+        )
+        async with MorgenClient(api_key="k") as client:
+            await client.update_task(TaskUpdateRequest(id="t1", title="X"))
+
+    @respx.mock
+    async def test_move_task(self):
+        respx.post("https://api.morgen.so/v3/tasks/move").mock(
+            return_value=httpx.Response(204)
+        )
+        async with MorgenClient(api_key="k") as client:
+            await client.move_task(TaskMoveRequest(id="t1", previous_id=None))
+
+    @respx.mock
+    async def test_close_and_reopen(self):
+        respx.post("https://api.morgen.so/v3/tasks/close").mock(
+            return_value=httpx.Response(204)
+        )
+        respx.post("https://api.morgen.so/v3/tasks/reopen").mock(
+            return_value=httpx.Response(204)
+        )
+        async with MorgenClient(api_key="k") as client:
+            await client.close_task(TaskCloseRequest(id="t1"))
+            await client.reopen_task(TaskReopenRequest(id="t1"))
+
+    @respx.mock
+    async def test_delete_task(self):
+        respx.post("https://api.morgen.so/v3/tasks/delete").mock(
+            return_value=httpx.Response(204)
+        )
+        async with MorgenClient(api_key="k") as client:
+            await client.delete_task(TaskDeleteRequest(id="t1"))
+
+
+class TestTagEndpoints:
+    """Tests for tag API endpoints."""
+
+    @respx.mock
+    async def test_list_tags_array_response(self):
+        """The tags list returns a bare JSON array, not {data: ...}."""
+        respx.get("https://api.morgen.so/v3/tags/list").mock(
+            return_value=httpx.Response(
+                200,
+                json=[{"id": "550e8400-e29b-41d4-a716-446655440000", "name": "Work"}],
+            )
+        )
+        async with MorgenClient(api_key="k") as client:
+            tags = await client.list_tags()
+        assert len(tags) == 1
+        assert tags[0].name == "Work"
+
+    @respx.mock
+    async def test_get_tag(self):
+        respx.get("https://api.morgen.so/v3/tags").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "id": "550e8400-e29b-41d4-a716-446655440000",
+                    "name": "Personal",
+                    "color": "#FFD4B8",
+                },
+            )
+        )
+        async with MorgenClient(api_key="k") as client:
+            tag = await client.get_tag("550e8400-e29b-41d4-a716-446655440000")
+        assert tag.name == "Personal"
+
+    @respx.mock
+    async def test_create_tag(self):
+        respx.post("https://api.morgen.so/v3/tags/create").mock(
+            return_value=httpx.Response(
+                200,
+                json={"id": "new-tag", "name": "P", "color": "#FF0000"},
+            )
+        )
+        async with MorgenClient(api_key="k") as client:
+            tag = await client.create_tag(TagCreateRequest(name="P", color="#FF0000"))
+        assert tag.id == "new-tag"
+
+    @respx.mock
+    async def test_update_tag(self):
+        respx.post("https://api.morgen.so/v3/tags/update").mock(
+            return_value=httpx.Response(204)
+        )
+        async with MorgenClient(api_key="k") as client:
+            await client.update_tag(TagUpdateRequest(id="t1", name="New"))
+
+    @respx.mock
+    async def test_delete_tag(self):
+        respx.post("https://api.morgen.so/v3/tags/delete").mock(
+            return_value=httpx.Response(204)
+        )
+        async with MorgenClient(api_key="k") as client:
+            await client.delete_tag(TagDeleteRequest(id="t1"))
