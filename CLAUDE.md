@@ -29,10 +29,11 @@ Opens Inspector UI at http://localhost:6274 for testing tools.
 
 FastMCP-based MCP server wrapping the Morgen calendar API (https://api.morgen.so/v3/).
 
-- **`server.py`** - Entry point registering tools from tools modules. Tools are **not** decorated with `@mcp.tool()` on the function; instead, `server.py` uses `mcp.tool(name=..., tags=..., annotations=...)(func)` as a call expression. This decoupling means tool functions remain plain async functions importable for unit testing.
+- **`server.py`** - Entry point registering tools and resources. Tools and resources are **not** decorated on the function; instead, `server.py` uses `mcp.tool(name=..., ...)(func)` and `mcp.resource(uri, ...)(func)` as call expressions. This decoupling means tool/resource functions remain plain async functions importable for unit testing.
 - **`client.py`** - Async HTTP client; global instance via `get_client()`. Auth header: `"Authorization": f"ApiKey {self.api_key}"` (not `Bearer`).
 - **`models.py`** - Pydantic models using `Annotated[type, Field(alias="...")]` pattern. Base `MorgenModel` config: `validate_by_name=True, validate_by_alias=True`. Serialize with `model.model_dump(by_alias=True, exclude_none=True)`.
 - **`validators.py`** - Input validation (datetime, duration, timezone, email, color)
+- **`resources.py`** - MCP resource handlers under the `morgen://` URI scheme. Read-only — writes still go through tools. Static URIs (`morgen://accounts`, `morgen://calendars`, `morgen://events/today`, `morgen://events/this-week`, `morgen://events/upcoming`, `morgen://tasks`, `morgen://tasks/today`, `morgen://tags`) and templates (`morgen://account/{account_id}`, `morgen://calendar/{calendar_id}`, `morgen://calendar/{calendar_id}/events`). All return `application/json` strings; IDs are virtual, identical to tool output. Renaming any URI is a breaking contract change for saved client chats.
 - **`tools/`** - Tool implementations:
   - `accounts.py`, `calendars.py`, `events.py`, `tasks.py`, `tags.py` - MCP tool functions
   - `id_registry.py` - Virtual ID ↔ real ID bidirectional mapping with disk persistence

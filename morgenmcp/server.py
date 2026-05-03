@@ -10,6 +10,19 @@ from pathlib import Path
 from fastmcp import FastMCP
 from fastmcp.utilities.logging import get_logger
 
+from morgenmcp.resources import (
+    res_account,
+    res_accounts,
+    res_calendar,
+    res_calendar_events,
+    res_calendars,
+    res_events_this_week,
+    res_events_today,
+    res_events_upcoming,
+    res_tags,
+    res_tasks,
+    res_tasks_today,
+)
 from morgenmcp.tools.accounts import list_accounts
 from morgenmcp.tools.calendars import list_calendars, update_calendar_metadata
 from morgenmcp.tools.events import (
@@ -414,6 +427,77 @@ mcp.tool(
         "openWorldHint": True,
     },
 )(delete_tag)
+
+
+# MCP resources — read-only data clients can fetch without invoking tools
+_RESOURCE_ANNOTATIONS = {"readOnlyHint": True, "idempotentHint": True}
+
+mcp.resource(
+    "morgen://accounts",
+    mime_type="application/json",
+    tags={"accounts", "read"},
+    annotations=_RESOURCE_ANNOTATIONS,
+)(res_accounts)
+mcp.resource(
+    "morgen://account/{account_id}",
+    mime_type="application/json",
+    tags={"accounts", "read"},
+    annotations=_RESOURCE_ANNOTATIONS,
+)(res_account)
+mcp.resource(
+    "morgen://calendars",
+    mime_type="application/json",
+    tags={"calendars", "read"},
+    annotations=_RESOURCE_ANNOTATIONS,
+)(res_calendars)
+mcp.resource(
+    "morgen://calendar/{calendar_id}",
+    mime_type="application/json",
+    tags={"calendars", "read"},
+    annotations=_RESOURCE_ANNOTATIONS,
+)(res_calendar)
+mcp.resource(
+    "morgen://calendar/{calendar_id}/events",
+    mime_type="application/json",
+    tags={"calendars", "events", "read"},
+    annotations=_RESOURCE_ANNOTATIONS,
+)(res_calendar_events)
+mcp.resource(
+    "morgen://events/today",
+    mime_type="application/json",
+    tags={"events", "read"},
+    annotations=_RESOURCE_ANNOTATIONS,
+)(res_events_today)
+mcp.resource(
+    "morgen://events/this-week",
+    mime_type="application/json",
+    tags={"events", "read"},
+    annotations=_RESOURCE_ANNOTATIONS,
+)(res_events_this_week)
+mcp.resource(
+    "morgen://events/upcoming",
+    mime_type="application/json",
+    tags={"events", "read"},
+    annotations=_RESOURCE_ANNOTATIONS,
+)(res_events_upcoming)
+mcp.resource(
+    "morgen://tasks",
+    mime_type="application/json",
+    tags={"tasks", "read"},
+    annotations=_RESOURCE_ANNOTATIONS,
+)(res_tasks)
+mcp.resource(
+    "morgen://tasks/today",
+    mime_type="application/json",
+    tags={"tasks", "read"},
+    annotations=_RESOURCE_ANNOTATIONS,
+)(res_tasks_today)
+mcp.resource(
+    "morgen://tags",
+    mime_type="application/json",
+    tags={"tags", "read"},
+    annotations=_RESOURCE_ANNOTATIONS,
+)(res_tags)
 
 
 def main() -> None:

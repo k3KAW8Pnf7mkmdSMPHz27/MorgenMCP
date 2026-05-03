@@ -234,3 +234,41 @@ class TestMCPServer:
                 pass
 
             client_mock.close.assert_awaited_once()
+
+    async def test_all_resources_registered(self):
+        """All resources and resource templates appear with the morgen:// scheme."""
+        async with Client(mcp) as client:
+            resources = await client.list_resources()
+            templates = await client.list_resource_templates()
+
+            static_uris = {str(r.uri) for r in resources}
+            template_uris = {t.uriTemplate for t in templates}
+
+            assert static_uris == {
+                "morgen://accounts",
+                "morgen://calendars",
+                "morgen://events/today",
+                "morgen://events/this-week",
+                "morgen://events/upcoming",
+                "morgen://tasks",
+                "morgen://tasks/today",
+                "morgen://tags",
+            }
+            assert template_uris == {
+                "morgen://account/{account_id}",
+                "morgen://calendar/{calendar_id}",
+                "morgen://calendar/{calendar_id}/events",
+            }
+
+    async def test_read_resource_through_protocol(self):
+        """A resource can be read through the full MCP protocol stack."""
+        with patch("morgenmcp.resources.get_client") as mock:
+            client_mock = AsyncMock()
+            client_mock.list_accounts.return_value = []
+            mock.return_value = client_mock
+
+            async with Client(mcp) as client:
+                contents = await client.read_resource("morgen://accounts")
+                assert len(contents) == 1
+                payload = json.loads(contents[0].text)
+                assert payload == {"accounts": [], "count": 0}
