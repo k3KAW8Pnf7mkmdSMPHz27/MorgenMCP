@@ -1,12 +1,14 @@
 """FastMCP server for Morgen calendar API."""
 
-import logging
+import asyncio
 import os
+import time
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from fastmcp import FastMCP
+from fastmcp.utilities.logging import get_logger
 
 from morgenmcp.tools.accounts import list_accounts
 from morgenmcp.tools.calendars import list_calendars, update_calendar_metadata
@@ -31,10 +33,13 @@ from morgenmcp.tools.tasks import (
     update_task,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _ID_STORE_DIR = "id_store"
 _ID_COLLECTION = "id_mappings"
+_HEARTBEAT_INTERVAL_S = (
+    300.0  # 5 minutes — long enough not to spam, short enough to detect wedges
+)
 
 
 def _get_data_dir() -> Path:
@@ -48,11 +53,33 @@ def _get_data_dir() -> Path:
     return Path(platformdirs.user_data_dir("morgenmcp"))
 
 
+async def _heartbeat(started_at: float) -> None:
+    """Periodically log liveness so a wedged event loop is detectable in logs.
+
+    Why: when Claude Desktop's stdio pipe to the server gets stuck, the process
+    looks alive (PID present, RAM stable) but no requests arrive. A heartbeat
+    that *does* keep firing means the loop is healthy and the wedge is in the
+    transport; a heartbeat that *stops* means the loop itself is stuck.
+    """
+    while True:
+        try:
+            await asyncio.sleep(_HEARTBEAT_INTERVAL_S)
+            uptime_s = int(time.monotonic() - started_at)
+            logger.info("heartbeat uptime=%ds", uptime_s)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("heartbeat error (continuing)")
+
+
 @asynccontextmanager
 async def lifespan(server: FastMCP) -> AsyncIterator[None]:
     """Initialize and clean up the Morgen HTTP client and persistent ID store."""
     from morgenmcp.client import get_client
-    from morgenmcp.tools.id_registry import load_from_store, set_store
+    from morgenmcp.tools.id_registry import flush_pending, load_from_store, set_store
+
+    started_at = time.monotonic()
+    logger.info("morgenmcp lifespan starting")
 
     # Initialize persistent ID store
     try:
@@ -66,8 +93,7 @@ async def lifespan(server: FastMCP) -> AsyncIterator[None]:
         await store.setup()
         set_store(store)
         count = await load_from_store(data_dir, _ID_COLLECTION)
-        if count:
-            logger.info("Loaded %d persisted ID mappings", count)
+        logger.info("ID store ready (%d persisted mappings loaded)", count)
     except Exception:
         logger.warning(
             "Failed to initialize persistent ID store, continuing without persistence",
@@ -75,12 +101,27 @@ async def lifespan(server: FastMCP) -> AsyncIterator[None]:
         )
         set_store(None)
 
+    heartbeat_task = asyncio.create_task(
+        _heartbeat(started_at), name="morgenmcp-heartbeat"
+    )
+    logger.info("morgenmcp ready (heartbeat every %ds)", int(_HEARTBEAT_INTERVAL_S))
+
     try:
         yield
     finally:
+        heartbeat_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await heartbeat_task
+        try:
+            await flush_pending()
+        except Exception:
+            logger.warning(
+                "Error flushing pending ID writes on shutdown", exc_info=True
+            )
         set_store(None)
         client = get_client()
         await client.close()
+        logger.info("morgenmcp lifespan stopped")
 
 
 # Create the MCP server
@@ -181,7 +222,7 @@ mcp.tool(
 mcp.tool(
     name="morgen_update_event",
     tags={"events", "write"},
-    timeout=30.0,
+    timeout=60.0,
     annotations={
         "title": "Update Event",
         "readOnlyHint": False,

@@ -5,14 +5,15 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
-import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from fastmcp.utilities.logging import get_logger
 
 if TYPE_CHECKING:
     from key_value.aio.stores.filetree import FileTreeStore
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class IDNotFoundError(Exception):
