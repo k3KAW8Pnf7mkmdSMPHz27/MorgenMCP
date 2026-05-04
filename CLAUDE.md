@@ -42,6 +42,7 @@ FastMCP-based MCP server wrapping the Morgen calendar API (https://api.morgen.so
 
 ### Patterns
 
+- **Response caching**: `server.py` registers a `ResponseCachingMiddleware` with a 60s in-memory TTL. It caches an explicit allowlist of read-only tools (`morgen_list_*`, `morgen_get_task`) and **all** resources. Writes are intentionally not cached — adding any write tool to `_CACHEABLE_READ_TOOLS` would silently turn duplicate creates into no-ops. Storage is in-memory (resets on server restart) — disk persistence would let stale `events/today` survive restarts. Cache keys are method+args only (no session identity), which is fine for single-user stdio.
 - Tools return `{"success": True, ...}` on success
 - Tools raise `ToolError` (from `fastmcp.exceptions`) on failure — messages are always visible to LLMs
 - `@handle_tool_errors` in `utils.py` converts ValidationError, MorgenAPIError, and unexpected exceptions to ToolError

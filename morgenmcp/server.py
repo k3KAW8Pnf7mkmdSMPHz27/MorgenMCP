@@ -8,6 +8,11 @@ from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from fastmcp import FastMCP
+from fastmcp.server.middleware.caching import (
+    CallToolSettings,
+    ReadResourceSettings,
+    ResponseCachingMiddleware,
+)
 from fastmcp.utilities.logging import get_logger
 
 from morgenmcp.resources import (
@@ -498,6 +503,42 @@ mcp.resource(
     tags={"tags", "read"},
     annotations=_RESOURCE_ANNOTATIONS,
 )(res_tags)
+
+
+# Response caching for read-only tools and all resources.
+#
+# Allowlist-only on tools — writes (create/update/delete/complete/reopen/move)
+# MUST never be cached: same args returning a cached "success" silently turns
+# duplicate writes into no-ops. The list below is conservative; everything not
+# listed bypasses the cache.
+#
+# 60s TTL is short enough that a write the user just made appears almost
+# immediately, and long enough to dedupe rapid repeat reads inside one
+# conversation. Storage is in-memory (FastMCP default) — disk persistence
+# would let stale "events/today" survive a server restart, which is worse
+# than re-fetching.
+_CACHEABLE_READ_TOOLS = [
+    "morgen_list_accounts",
+    "morgen_list_calendars",
+    "morgen_list_events",
+    "morgen_list_tasks",
+    "morgen_get_task",
+    "morgen_list_tags",
+]
+_CACHE_TTL_S = 60
+
+mcp.add_middleware(
+    ResponseCachingMiddleware(
+        call_tool_settings=CallToolSettings(
+            included_tools=_CACHEABLE_READ_TOOLS,
+            ttl=_CACHE_TTL_S,
+        ),
+        read_resource_settings=ReadResourceSettings(
+            enabled=True,
+            ttl=_CACHE_TTL_S,
+        ),
+    )
+)
 
 
 def main() -> None:

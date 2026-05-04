@@ -272,3 +272,165 @@ class TestMCPServer:
                 assert len(contents) == 1
                 payload = json.loads(contents[0].text)
                 assert payload == {"accounts": [], "count": 0}
+
+
+class TestResponseCaching:
+    """Tests for ResponseCachingMiddleware behavior — both that read-only
+    tools/resources are cached and that writes are NOT (the dangerous case).
+
+    Each test uses disjoint cache keys (distinct tool names / resource URIs /
+    arguments) so the shared in-memory cache doesn't cause cross-test leakage.
+    Don't add a setup/teardown that calls `_backend.destroy()` — that wipes
+    the collection-setup state, breaking subsequent puts in the same session.
+    """
+
+    async def test_caching_middleware_is_registered(self):
+        """The cache middleware is attached and configured for read-only tools."""
+        from fastmcp.server.middleware.caching import ResponseCachingMiddleware
+
+        cache_mws = [
+            m for m in mcp.middleware if isinstance(m, ResponseCachingMiddleware)
+        ]
+        assert len(cache_mws) == 1
+        cache_mw = cache_mws[0]
+        # Reads only — every other tool (writes, deletes, batch ops) bypasses
+        included = cache_mw._call_tool_settings.get("included_tools", [])
+        assert "morgen_list_accounts" in included
+        assert "morgen_list_calendars" in included
+        assert "morgen_list_events" in included
+        assert "morgen_list_tasks" in included
+        assert "morgen_list_tags" in included
+        assert "morgen_get_task" in included
+        # Writes must NOT be in the allowlist
+        for write_tool in (
+            "morgen_create_event",
+            "morgen_update_event",
+            "morgen_delete_event",
+            "morgen_batch_delete_events",
+            "morgen_batch_update_events",
+            "morgen_create_task",
+            "morgen_update_task",
+            "morgen_delete_task",
+            "morgen_complete_task",
+            "morgen_reopen_task",
+            "morgen_move_task",
+            "morgen_create_tag",
+            "morgen_update_tag",
+            "morgen_delete_tag",
+            "morgen_update_calendar_metadata",
+        ):
+            assert write_tool not in included, f"{write_tool} must not be cached"
+
+    async def test_read_tool_is_cached(self):
+        """Two identical calls to a read tool hit the underlying client once."""
+        with patch("morgenmcp.tools.calendars.get_client") as mock:
+            client_mock = AsyncMock()
+            client_mock.list_calendars.return_value = []
+            mock.return_value = client_mock
+
+            async with Client(mcp) as client:
+                await client.call_tool("morgen_list_calendars", {})
+                await client.call_tool("morgen_list_calendars", {})
+
+            assert client_mock.list_calendars.await_count == 1
+
+    async def test_write_tool_is_not_cached(self):
+        """Two identical calls to a write tool MUST hit the underlying client twice.
+
+        If a write were cached, duplicate creates would silently no-op.
+        """
+        from morgenmcp.models import CreatedEventInfo, EventCreateResponse
+
+        with patch("morgenmcp.tools.events.get_client") as mock:
+            client_mock = AsyncMock()
+            client_mock.create_event.return_value = EventCreateResponse(
+                event=CreatedEventInfo(
+                    id="evt-id",
+                    calendar_id="cal-id",
+                    account_id="acc-id",
+                )
+            )
+            # Pre-register the calendar virtual ID so the create call resolves
+            from morgenmcp.tools.id_registry import register_id
+
+            real_cal_id = (
+                base64.b64encode(
+                    json.dumps(
+                        ["a" * 24, "user@example.com"], separators=(",", ":")
+                    ).encode()
+                )
+                .decode()
+                .rstrip("=")
+            )
+            virtual_cal_id = register_id(real_cal_id)
+            mock.return_value = client_mock
+
+            args = {
+                "calendar_id": virtual_cal_id,
+                "title": "Same title",
+                "start": "2026-06-01T10:00:00",
+                "duration": "PT1H",
+                "time_zone": "America/Chicago",
+            }
+
+            async with Client(mcp) as client:
+                await client.call_tool("morgen_create_event", args)
+                await client.call_tool("morgen_create_event", args)
+
+            assert client_mock.create_event.await_count == 2
+
+    async def test_resource_read_is_cached(self):
+        """Two reads of the same resource URI hit the underlying client once."""
+        with patch("morgenmcp.resources.get_client") as mock:
+            client_mock = AsyncMock()
+            client_mock.list_tags.return_value = []
+            mock.return_value = client_mock
+
+            async with Client(mcp) as client:
+                await client.read_resource("morgen://tags")
+                await client.read_resource("morgen://tags")
+
+            assert client_mock.list_tags.await_count == 1
+
+    async def test_different_args_bypass_cache(self):
+        """Different arguments produce different cache keys (no false hits)."""
+        from morgenmcp.tools.id_registry import register_id
+
+        # Pre-register a calendar so we can target it directly and avoid the
+        # list_calendars fan-out (which would empty-shortcut on a [] mock).
+        real_cal_id = (
+            base64.b64encode(
+                json.dumps(
+                    ["c" * 24, "cache@example.com"], separators=(",", ":")
+                ).encode()
+            )
+            .decode()
+            .rstrip("=")
+        )
+        virtual_cal_id = register_id(real_cal_id)
+
+        with patch("morgenmcp.tools.events.get_client") as mock:
+            client_mock = AsyncMock()
+            client_mock.list_events.return_value = []
+            mock.return_value = client_mock
+
+            async with Client(mcp) as client:
+                await client.call_tool(
+                    "morgen_list_events",
+                    {
+                        "start": "2026-06-01T00:00:00",
+                        "end": "2026-06-02T00:00:00",
+                        "calendar_ids": [virtual_cal_id],
+                    },
+                )
+                await client.call_tool(
+                    "morgen_list_events",
+                    {
+                        "start": "2026-06-02T00:00:00",
+                        "end": "2026-06-03T00:00:00",
+                        "calendar_ids": [virtual_cal_id],
+                    },
+                )
+
+            # Different windows ⇒ two underlying fetches
+            assert client_mock.list_events.await_count == 2
