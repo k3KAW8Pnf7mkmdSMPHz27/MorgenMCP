@@ -25,14 +25,14 @@ from __future__ import annotations
 import asyncio
 import json
 from collections import defaultdict
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, tzinfo
 
 from fastmcp.exceptions import ResourceError
 
 from morgenmcp.client import get_client
 from morgenmcp.models import Event
 from morgenmcp.tools.calendars import _format_calendar
-from morgenmcp.tools.events import _format_compact_event
+from morgenmcp.tools.events import _format_compact_event, _resolve_display_tz
 from morgenmcp.tools.id_registry import register_id, resolve_id
 from morgenmcp.tools.id_utils import extract_account_from_calendar
 from morgenmcp.tools.tags import _format_tag
@@ -123,10 +123,12 @@ def _format_account(acc) -> dict:
     )
 
 
-def _events_payload(events: list[Event], window: tuple[str, str]) -> str:
+def _events_payload(
+    events: list[Event], window: tuple[str, str], display_tz: tzinfo
+) -> str:
     return json.dumps(
         {
-            "events": [_format_compact_event(e) for e in events],
+            "events": [_format_compact_event(e, display_tz) for e in events],
             "count": len(events),
             "window": {"start": window[0], "end": window[1]},
         }
@@ -190,7 +192,8 @@ async def res_calendar_events(calendar_id: str) -> str:
     real_id = resolve_id(calendar_id)
     start, end = _upcoming_range(days=7)
     events = await _fetch_events_in_window(start, end, calendar_ids=[real_id])
-    return _events_payload(events, (start, end))
+    display_tz = _resolve_display_tz(None)
+    return _events_payload(events, (start, end), display_tz)
 
 
 # --- Event window resources ---
@@ -200,21 +203,24 @@ async def res_events_today() -> str:
     """Events scheduled for today (local-midnight to local-midnight)."""
     start, end = _today_range()
     events = await _fetch_events_in_window(start, end)
-    return _events_payload(events, (start, end))
+    display_tz = _resolve_display_tz(None)
+    return _events_payload(events, (start, end), display_tz)
 
 
 async def res_events_this_week() -> str:
     """Events scheduled this ISO week (Monday through Sunday, local)."""
     start, end = _this_week_range()
     events = await _fetch_events_in_window(start, end)
-    return _events_payload(events, (start, end))
+    display_tz = _resolve_display_tz(None)
+    return _events_payload(events, (start, end), display_tz)
 
 
 async def res_events_upcoming() -> str:
     """Events from now through the next 7 days."""
     start, end = _upcoming_range(days=7)
     events = await _fetch_events_in_window(start, end)
-    return _events_payload(events, (start, end))
+    display_tz = _resolve_display_tz(None)
+    return _events_payload(events, (start, end), display_tz)
 
 
 # --- Task resources ---

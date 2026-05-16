@@ -54,6 +54,7 @@ FastMCP-based MCP server wrapping the Morgen calendar API (https://api.morgen.so
 - **Recurrence rules**: Accept simplified dicts `{frequency, interval, by_day}`; the `build_recurrence_rules` helper converts to JSCalendar `RecurrenceRule` objects.
 - **Tags endpoint quirk**: `/tags/list` returns a bare JSON array, not the standard `{data: ...}` envelope — the client handles both shapes.
 - **EventUpdateRequest.alerts** uses `dict[str, Alert | None]` to support patch-style removal (set entry to `None` to delete that alert). `EventCreateRequest.alerts` uses the same widened type for consistency at type-check time, even though create never accepts None values.
+- **Display timezone for compact events**: `_format_compact_event` converts event times into a display tz resolved by `_resolve_display_tz`: explicit `display_timezone` arg on `morgen_list_events` → `MORGENMCP_DISPLAY_TZ` env var → system local timezone. Rendered lines look like `"09:15-10:00 CDT (America/Chicago): Standup [abc123]"`. Floating events (`time_zone=None`) are tagged `(floating)` and not converted. Cross-midnight conversions get a date prefix on the end side. Resources have no per-call argument path — they rely on env/system fallback only.
 
 ### Morgen API ID Structure
 
@@ -86,6 +87,12 @@ Virtual IDs are **deterministic** (`MD5(real_id)`) and **persisted to disk** via
 - **Graceful degradation**: If the store fails to initialize, the server continues with in-memory-only IDs (session-scoped)
 - **Tests**: Persistence is disabled by an `autouse` conftest fixture (`set_store(None)`)
 
+### Environment variables
+
+- **`MORGEN_API_KEY`**: Required. Morgen API key.
+- **`MORGENMCP_DATA_DIR`**: Override the virtual-ID persistence directory.
+- **`MORGENMCP_DISPLAY_TZ`**: IANA timezone (e.g. `America/Chicago`) for rendering compact event times in `morgen_list_events` (when `compact=True`) and all `morgen://events/*` resources. Defaults to the system local timezone. Overridden per-call via the `display_timezone` arg on `morgen_list_events`.
+
 ### Testing
 
 - **Tool tests** (`test_tools.py`): Mock via `patch("morgenmcp.tools.*.get_client")`
@@ -97,7 +104,7 @@ Virtual IDs are **deterministic** (`MD5(real_id)`) and **persisted to disk** via
 ### Environment
 
 - Python `>= 3.14` (set in `pyproject.toml`)
-- `fastmcp>=3.2,<3.3` — pinned to 3.2.x patch range
+- `fastmcp>=3.3,<3.4` — pinned to 3.3.x patch range
 
 ## Versioning & Release
 
@@ -124,7 +131,7 @@ When spawning Explore agents, **always include this instruction in the prompt**:
 | **FastMCP** | `docs/fastmcp/docs/` | `fastmcp-docs` | Server framework: tools, context, auth, testing, deployment |
 
 - **Morgen docs submodule**: `f977d08` (updated automatically by SessionStart hook)
-- **FastMCP docs submodule**: `v3.2.4` / `7d760747` — matches `fastmcp>=3.2,<3.3` pin (updated automatically by SessionStart hook)
+- **FastMCP docs submodule**: `v3.3.1` / `d8dcc273` — matches `fastmcp>=3.3,<3.4` pin (updated automatically by SessionStart hook)
 
 ### Online docs (fallback only)
 

@@ -3,6 +3,7 @@
 import base64
 import json
 from unittest.mock import AsyncMock, patch
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastmcp.exceptions import ToolError
@@ -26,6 +27,7 @@ from morgenmcp.tools.accounts import list_accounts
 from morgenmcp.tools.calendars import list_calendars, update_calendar_metadata
 from morgenmcp.tools.events import (
     _format_compact_event,
+    _resolve_display_tz,
     batch_delete_events,
     batch_update_events,
     create_event,
@@ -209,7 +211,7 @@ class TestFormatCompactEvent:
             show_without_time=True,
         )
 
-        result = _format_compact_event(event)
+        result = _format_compact_event(event, ZoneInfo("UTC"))
 
         assert "(all-day)" in result
         assert "Bad Date" in result
@@ -232,11 +234,153 @@ class TestFormatCompactEvent:
             show_without_time=False,
         )
 
-        result = _format_compact_event(event)
+        result = _format_compact_event(event, ZoneInfo("UTC"))
 
         assert "Bad Time" in result
         # Falls back to raw start value
         assert "not-a-datetime" in result
+
+    def test_format_converts_berlin_to_chicago(
+        self, sample_calendar_id, sample_account_id
+    ):
+        """The bug scenario: 16:15 Europe/Berlin should render as 09:15 CDT."""
+        event_id = make_event_id("test@example.com", "stand_uid", sample_account_id)
+        event = Event(
+            id=event_id,
+            calendar_id=sample_calendar_id,
+            account_id=sample_account_id,
+            integration_id="google",
+            title="Daily Standup",
+            start="2026-07-15T16:15:00",
+            duration="PT45M",
+            time_zone="Europe/Berlin",
+            show_without_time=False,
+        )
+
+        result = _format_compact_event(event, ZoneInfo("America/Chicago"))
+
+        # July 15 → CDT (UTC-5), Berlin is CEST (UTC+2) → 7-hour shift
+        assert "09:15-10:00 CDT (America/Chicago)" in result
+        assert "Daily Standup" in result
+
+    def test_format_floating_event_no_conversion(
+        self, sample_calendar_id, sample_account_id
+    ):
+        """Floating events (time_zone=None) keep their times and get a (floating) tag."""
+        event_id = make_event_id("test@example.com", "float_uid", sample_account_id)
+        event = Event(
+            id=event_id,
+            calendar_id=sample_calendar_id,
+            account_id=sample_account_id,
+            integration_id="google",
+            title="Floating Block",
+            start="2026-07-15T16:15:00",
+            duration="PT45M",
+            time_zone=None,
+            show_without_time=False,
+        )
+
+        result = _format_compact_event(event, ZoneInfo("America/Chicago"))
+
+        assert "16:15-17:00 (floating)" in result
+        assert "Floating Block" in result
+        assert "CDT" not in result
+
+    def test_format_all_day_unchanged_by_display_tz(
+        self, sample_calendar_id, sample_account_id
+    ):
+        """All-day events have no time, so display_tz must not add a tz tag."""
+        event_id = make_event_id("test@example.com", "allday_uid", sample_account_id)
+        event = Event(
+            id=event_id,
+            calendar_id=sample_calendar_id,
+            account_id=sample_account_id,
+            integration_id="google",
+            title="Holiday",
+            start="2026-07-15T00:00:00",
+            duration="P1D",
+            time_zone="Europe/Berlin",
+            show_without_time=True,
+        )
+
+        result = _format_compact_event(event, ZoneInfo("America/Chicago"))
+
+        assert "(all-day)" in result
+        assert "Holiday" in result
+        assert "CDT" not in result
+        assert "(America/Chicago)" not in result
+        assert "(floating)" not in result
+
+    def test_format_cross_midnight_after_conversion(
+        self, sample_calendar_id, sample_account_id
+    ):
+        """A 23:00 start that runs 2h crosses midnight; end side shows the date."""
+        event_id = make_event_id("test@example.com", "cross_uid", sample_account_id)
+        event = Event(
+            id=event_id,
+            calendar_id=sample_calendar_id,
+            account_id=sample_account_id,
+            integration_id="google",
+            title="Late Night Sync",
+            start="2026-01-01T23:00:00",
+            duration="PT2H",
+            time_zone="America/Chicago",
+            show_without_time=False,
+        )
+
+        result = _format_compact_event(event, ZoneInfo("America/Chicago"))
+
+        assert "23:00-Jan 02 01:00 CST" in result
+        assert "Late Night Sync" in result
+
+    def test_format_unknown_timezone_string(
+        self, sample_calendar_id, sample_account_id
+    ):
+        """An invalid IANA zone falls back to raw start + raw zone, no crash."""
+        event_id = make_event_id("test@example.com", "weird_uid", sample_account_id)
+        event = Event(
+            id=event_id,
+            calendar_id=sample_calendar_id,
+            account_id=sample_account_id,
+            integration_id="google",
+            title="Mystery Meeting",
+            start="2026-07-15T10:00:00",
+            duration="PT1H",
+            time_zone="Mars/Olympus_Mons",
+            show_without_time=False,
+        )
+
+        result = _format_compact_event(event, ZoneInfo("America/Chicago"))
+
+        assert "Mars/Olympus_Mons" in result
+        assert "2026-07-15T10:00:00" in result
+        assert "Mystery Meeting" in result
+
+
+class TestResolveDisplayTz:
+    """Tests for _resolve_display_tz precedence."""
+
+    def test_explicit_arg_wins(self, monkeypatch):
+        monkeypatch.setenv("MORGENMCP_DISPLAY_TZ", "UTC")
+        result = _resolve_display_tz("Europe/London")
+        assert isinstance(result, ZoneInfo)
+        assert result.key == "Europe/London"
+
+    def test_env_var_when_no_arg(self, monkeypatch):
+        monkeypatch.setenv("MORGENMCP_DISPLAY_TZ", "Asia/Tokyo")
+        result = _resolve_display_tz(None)
+        assert isinstance(result, ZoneInfo)
+        assert result.key == "Asia/Tokyo"
+
+    def test_invalid_env_falls_back_to_system(self, monkeypatch):
+        monkeypatch.setenv("MORGENMCP_DISPLAY_TZ", "Mars/Phobos")
+        result = _resolve_display_tz(None)
+        assert result is not None  # falls through to system tz; don't pin its identity
+
+    def test_no_input_returns_system(self, monkeypatch):
+        monkeypatch.delenv("MORGENMCP_DISPLAY_TZ", raising=False)
+        result = _resolve_display_tz(None)
+        assert result is not None
 
 
 class TestListAccounts:
@@ -543,6 +687,83 @@ class TestListEvents:
 
         assert "(all-day)" in result["events"][0]
         assert "Holiday" in result["events"][0]
+
+    async def test_list_events_compact_uses_display_timezone(
+        self, mock_morgen_client, sample_calendar_id, sample_account_id
+    ):
+        """display_timezone kwarg shifts compact times into the target zone."""
+        event_id = make_event_id("test@example.com", "berlin_uid", sample_account_id)
+        berlin_event = Event(
+            id=event_id,
+            calendar_id=sample_calendar_id,
+            account_id=sample_account_id,
+            integration_id="google",
+            title="Berlin Meeting",
+            start="2026-07-15T16:15:00",
+            duration="PT45M",
+            time_zone="Europe/Berlin",
+            show_without_time=False,
+        )
+        mock_morgen_client.list_events.return_value = [berlin_event]
+        virtual_cal = register_id(sample_calendar_id)
+
+        result = await list_events(
+            start="2026-07-15T00:00:00",
+            end="2026-07-16T00:00:00",
+            calendar_ids=[virtual_cal],
+            compact=True,
+            display_timezone="America/Chicago",
+        )
+
+        assert "09:15-10:00 CDT (America/Chicago)" in result["events"][0]
+
+    async def test_list_events_compact_uses_env_var(
+        self,
+        monkeypatch,
+        mock_morgen_client,
+        sample_calendar_id,
+        sample_account_id,
+    ):
+        """MORGENMCP_DISPLAY_TZ is honored when no display_timezone kwarg is given."""
+        monkeypatch.setenv("MORGENMCP_DISPLAY_TZ", "UTC")
+        event_id = make_event_id("test@example.com", "env_uid", sample_account_id)
+        berlin_event = Event(
+            id=event_id,
+            calendar_id=sample_calendar_id,
+            account_id=sample_account_id,
+            integration_id="google",
+            title="Berlin Meeting",
+            start="2026-07-15T16:15:00",
+            duration="PT45M",
+            time_zone="Europe/Berlin",
+            show_without_time=False,
+        )
+        mock_morgen_client.list_events.return_value = [berlin_event]
+        virtual_cal = register_id(sample_calendar_id)
+
+        result = await list_events(
+            start="2026-07-15T00:00:00",
+            end="2026-07-16T00:00:00",
+            calendar_ids=[virtual_cal],
+            compact=True,
+        )
+
+        # Berlin in July is CEST (UTC+2), so 16:15 CEST = 14:15 UTC
+        assert "14:15-15:00 UTC" in result["events"][0]
+
+    async def test_list_events_compact_rejects_invalid_display_timezone(
+        self, mock_morgen_client, sample_calendar_id
+    ):
+        """Invalid IANA names are rejected at the validation layer."""
+        virtual_cal = register_id(sample_calendar_id)
+        with pytest.raises(ToolError):
+            await list_events(
+                start="2026-07-15T00:00:00",
+                end="2026-07-16T00:00:00",
+                calendar_ids=[virtual_cal],
+                compact=True,
+                display_timezone="Mars/Phobos",
+            )
 
 
 class TestCreateEvent:

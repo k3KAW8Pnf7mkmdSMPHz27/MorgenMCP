@@ -262,6 +262,24 @@ class TestEventWindowResources:
         assert start.weekday() == 0
 
     @pytest.mark.asyncio
+    async def test_res_events_today_honors_env_display_tz(
+        self,
+        monkeypatch,
+        mock_client,
+        sample_calendar,
+        sample_event,
+    ):
+        """MORGENMCP_DISPLAY_TZ shifts compact times in resource output."""
+        monkeypatch.setenv("MORGENMCP_DISPLAY_TZ", "UTC")
+        mock_client.list_calendars.return_value = [sample_calendar]
+        mock_client.list_events.return_value = [sample_event]
+        body = json.loads(await res_events_today())
+        # sample_event is 2026-05-03 09:00 America/Chicago (CDT, UTC-5) → 14:00 UTC
+        assert body["count"] == 1
+        line = body["events"][0]
+        assert "14:00-14:30 UTC" in line
+
+    @pytest.mark.asyncio
     async def test_res_events_upcoming_handles_per_account_failure(
         self, mock_client, sample_calendar, sample_event
     ):

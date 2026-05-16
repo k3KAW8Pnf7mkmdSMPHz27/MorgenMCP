@@ -1,9 +1,11 @@
 """MCP tools for Morgen event operations."""
 
 import asyncio
+import os
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta, tzinfo
 from typing import Any, Literal
+from zoneinfo import ZoneInfo
 
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
@@ -36,9 +38,41 @@ from morgenmcp.validators import (
     validate_timezone,
 )
 
+_DISPLAY_TZ_ENV = "MORGENMCP_DISPLAY_TZ"
 
-def _format_compact_event(event: Event) -> str:
-    """Format an event in compact one-liner format with virtual ID."""
+
+def _resolve_display_tz(explicit: str | None) -> tzinfo:
+    """Pick the display tz: explicit arg > MORGENMCP_DISPLAY_TZ > system local."""
+    if explicit:
+        return ZoneInfo(explicit)
+    env_value = os.environ.get(_DISPLAY_TZ_ENV)
+    if env_value:
+        try:
+            return ZoneInfo(env_value)
+        except Exception:
+            pass  # bad env var → silently fall through to system tz
+    sys_tz = datetime.now().astimezone().tzinfo
+    assert sys_tz is not None
+    return sys_tz
+
+
+def _tz_label(dt: datetime, tz: tzinfo) -> str:
+    """Render '<abbrev> (<IANA>)' or just '<label>' on fixed-offset fallbacks."""
+    iana = getattr(tz, "key", None) or str(tz)
+    abbrev = dt.tzname() or iana
+    if abbrev == iana:
+        return iana
+    return f"{abbrev} ({iana})"
+
+
+def _format_compact_event(event: Event, display_tz: tzinfo) -> str:
+    """Format an event in compact one-liner format with virtual ID.
+
+    Times are converted from the event's `time_zone` into `display_tz` and
+    tagged with the abbreviation plus IANA name. Floating events (no source
+    timezone) are tagged "(floating)" and not converted. All-day events keep
+    the existing "<MMM DD> (all-day)" form.
+    """
     virtual_id = register_id(event.id)
     title = event.title or "(No title)"
 
@@ -50,33 +84,49 @@ def _format_compact_event(event: Event) -> str:
         except ValueError, TypeError:
             date_str = event.start
         return f"{date_str} (all-day): {title} [{virtual_id}]"
-    else:
-        # Timed event: "10:00-11:00: Team standup [abc123]"
+
+    try:
+        start_naive = datetime.fromisoformat(event.start)
+
+        duration = event.duration or "PT0M"
+        hours = 0
+        minutes = 0
+        if "H" in duration:
+            h_part = duration.split("H")[0].replace("PT", "")
+            hours = int(h_part) if h_part else 0
+            remaining = duration.split("H")[1]
+        else:
+            remaining = duration.replace("PT", "")
+        if "M" in remaining:
+            m_part = remaining.replace("M", "")
+            minutes = int(m_part) if m_part else 0
+        end_naive = start_naive + timedelta(hours=hours, minutes=minutes)
+
+        if event.time_zone is None:
+            start_str = start_naive.strftime("%H:%M")
+            end_str = end_naive.strftime("%H:%M")
+            cross = end_naive.date() != start_naive.date()
+            end_label = f"{end_naive.strftime('%b %d')} {end_str}" if cross else end_str
+            return f"{start_str}-{end_label} (floating): {title} [{virtual_id}]"
+
         try:
-            start_dt = datetime.fromisoformat(event.start)
-            start_str = start_dt.strftime("%H:%M")
+            source_tz = ZoneInfo(event.time_zone)
+        except Exception:
+            return f"{event.start} {event.time_zone}: {title} [{virtual_id}]"
 
-            # Parse duration (e.g., PT1H, PT30M, PT1H30M)
-            duration = event.duration or "PT0M"
-            hours = 0
-            minutes = 0
-            if "H" in duration:
-                h_part = duration.split("H")[0].replace("PT", "")
-                hours = int(h_part) if h_part else 0
-                remaining = duration.split("H")[1] if "H" in duration else duration
-            else:
-                remaining = duration.replace("PT", "")
-            if "M" in remaining:
-                m_part = remaining.replace("M", "")
-                minutes = int(m_part) if m_part else 0
+        start_dt = start_naive.replace(tzinfo=source_tz).astimezone(display_tz)
+        end_dt = end_naive.replace(tzinfo=source_tz).astimezone(display_tz)
 
-            from datetime import timedelta
-
-            end_dt = start_dt + timedelta(hours=hours, minutes=minutes)
-            end_str = end_dt.strftime("%H:%M")
-            return f"{start_str}-{end_str}: {title} [{virtual_id}]"
-        except ValueError, TypeError:
-            return f"{event.start}: {title} [{virtual_id}]"
+        start_str = start_dt.strftime("%H:%M")
+        end_str = end_dt.strftime("%H:%M")
+        cross = end_dt.date() != start_dt.date()
+        end_label = f"{end_dt.strftime('%b %d')} {end_str}" if cross else end_str
+        return (
+            f"{start_str}-{end_label} {_tz_label(start_dt, display_tz)}: "
+            f"{title} [{virtual_id}]"
+        )
+    except ValueError, TypeError:
+        return f"{event.start}: {title} [{virtual_id}]"
 
 
 def _format_recurrence_rule(rule: Any) -> dict[str, Any]:
@@ -163,6 +213,7 @@ async def list_events(
     end: str,
     calendar_ids: list[str] | None = None,
     compact: bool = False,
+    display_timezone: str | None = None,
     ctx: Context | None = None,
 ) -> dict:
     """List events from calendars within a time window.
@@ -175,7 +226,11 @@ async def list_events(
         end: End of time window in LocalDateTime format. Max 6 months from start.
         calendar_ids: Optional list of virtual calendar IDs. If omitted, queries all calendars.
         compact: If True, returns compact one-liner format to reduce tokens.
-            Format: "10:00-11:00: Meeting title [event_id]"
+            Format: "09:15-10:00 CDT (America/Chicago): Meeting [event_id]"
+        display_timezone: Optional IANA timezone (e.g. "America/Chicago") used to
+            render compact times. Defaults to the MORGENMCP_DISPLAY_TZ env var,
+            or the system local timezone if unset. Only affects compact=True
+            output; floating events are tagged "(floating)".
 
     Returns:
         Dictionary with 'events' key containing list of event objects (or strings if compact).
@@ -183,6 +238,7 @@ async def list_events(
     validate_local_datetime(start, "start")
     validate_local_datetime(end, "end")
     validate_date_range(start, end)
+    validate_timezone(display_timezone)
 
     client = get_client()
     all_events: list[Event] = []
@@ -240,8 +296,11 @@ async def list_events(
 
     # Format output (IDs are registered during formatting)
     if compact:
+        display_tz = _resolve_display_tz(display_timezone)
         return {
-            "events": [_format_compact_event(event) for event in all_events],
+            "events": [
+                _format_compact_event(event, display_tz) for event in all_events
+            ],
             "count": len(all_events),
         }
     else:
