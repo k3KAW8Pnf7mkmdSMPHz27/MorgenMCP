@@ -23,6 +23,7 @@ from morgenmcp.resources import (
     res_events_this_week,
     res_events_today,
     res_events_upcoming,
+    res_server,
     res_tags,
     res_tasks,
     res_tasks_today,
@@ -350,3 +351,32 @@ class TestTagResources:
         body = json.loads(await res_tags())
         assert body["count"] == 2
         assert {t["name"] for t in body["tags"]} == {"errands", "reading"}
+
+
+# --- server resource ---
+
+
+class TestServerResource:
+    @pytest.mark.asyncio
+    async def test_res_server_publishes_hash_contract(self):
+        from morgenmcp.tools.id_registry import (
+            HASH_SCHEME_VERSION,
+            _generate_virtual_id,
+        )
+
+        body = json.loads(await res_server())
+        assert body["name"] == "morgen-calendar"
+        assert body["version"]  # non-empty string
+
+        spec = body["virtualIdHash"]
+        assert spec["scheme_version"] == HASH_SCHEME_VERSION
+        assert spec["algorithm"] == "md5"
+        assert spec["input_encoding"] == "utf-8"
+        assert spec["digest_bytes"] == 6
+        assert spec["output_length"] == 7
+        assert spec["padding"] == "stripped"
+        assert "reference_implementation" in spec
+        assert "test_vectors" in spec
+        # Every published vector must verify against the live implementation.
+        for real_id, expected in spec["test_vectors"].items():
+            assert _generate_virtual_id(real_id) == expected

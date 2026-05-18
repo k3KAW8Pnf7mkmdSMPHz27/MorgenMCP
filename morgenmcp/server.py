@@ -15,6 +15,7 @@ from fastmcp.server.middleware.caching import (
 )
 from fastmcp.utilities.logging import get_logger
 
+from morgenmcp import __version__
 from morgenmcp.resources import (
     res_account,
     res_accounts,
@@ -24,6 +25,7 @@ from morgenmcp.resources import (
     res_events_this_week,
     res_events_today,
     res_events_upcoming,
+    res_server,
     res_tags,
     res_tasks,
     res_tasks_today,
@@ -38,6 +40,7 @@ from morgenmcp.tools.events import (
     list_events,
     update_event,
 )
+from morgenmcp.tools.id_registry import HASH_SCHEME_VERSION
 from morgenmcp.tools.tags import create_tag, delete_tag, list_tags, update_tag
 from morgenmcp.tools.tasks import (
     batch_delete_tasks,
@@ -145,12 +148,17 @@ async def lifespan(server: FastMCP) -> AsyncIterator[None]:
 # Create the MCP server
 mcp = FastMCP(
     "morgen-calendar",
+    version=__version__,
     lifespan=lifespan,
-    instructions="""
+    instructions=f"""
     Morgen Calendar MCP Server provides access to Morgen's unified calendar,
     task, and tag API.
 
     All IDs are 7-character virtual IDs (e.g., "aB-9xZ_") for token efficiency.
+    Virtual IDs are deterministic — see the morgen://server resource for the
+    full hash contract (currently scheme version {HASH_SCHEME_VERSION}). A
+    bump in scheme_version means every previously-issued virtual ID is now
+    stale; re-list before using saved IDs.
 
     Calendar workflow:
     1. Use list_calendars to discover available calendars
@@ -179,7 +187,7 @@ mcp = FastMCP(
     - Durations use ISO 8601 format (e.g., "PT1H" for 1 hour, "PT30M" for 30 minutes)
     - Alert offsets are negative durations (e.g., "-PT15M" = 15 min before)
     - For recurring events, use seriesUpdateMode to control how updates affect the series
-    - Recurring events: pass recurrence_rules=[{"frequency":"weekly","interval":1,"by_day":["mo"]}]
+    - Recurring events: pass recurrence_rules=[{{"frequency":"weekly","interval":1,"by_day":["mo"]}}]
     """,
 )
 
@@ -437,6 +445,12 @@ mcp.tool(
 # MCP resources — read-only data clients can fetch without invoking tools
 _RESOURCE_ANNOTATIONS = {"readOnlyHint": True, "idempotentHint": True}
 
+mcp.resource(
+    "morgen://server",
+    mime_type="application/json",
+    tags={"server", "read"},
+    annotations=_RESOURCE_ANNOTATIONS,
+)(res_server)
 mcp.resource(
     "morgen://accounts",
     mime_type="application/json",

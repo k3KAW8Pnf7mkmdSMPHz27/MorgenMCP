@@ -41,11 +41,66 @@ def set_store(store: FileTreeStore | None) -> None:
     _store = store
 
 
+# --- Virtual-ID hash contract ---
+#
+# Stability rule: changing any value below invalidates every previously
+# persisted virtual ID under ~/Library/Application Support/morgenmcp/
+# id_store/. Bump HASH_SCHEME_VERSION in the same commit that breaks
+# the output, never separately. The golden-vector test in
+# tests/test_id_persistence.py guards this contract. The same contract
+# is published to MCP consumers via the morgen://server resource.
+
+HASH_SCHEME_VERSION = 1
+"""Monotonically increasing integer. Bump iff _generate_virtual_id's
+output changes for any pre-existing real_id. Never reuse a version."""
+
+_HASH_ALGORITHM = "md5"
+_HASH_INPUT_ENCODING = "utf-8"
+_HASH_DIGEST_BYTES = 6  # 48 bits of MD5 -> 8 b64url chars before truncation
+_HASH_OUTPUT_ALPHABET = "base64url-rfc4648-section5-no-padding"
+_VIRTUAL_ID_LENGTH = 7  # ~42 bits of entropy after final truncation
+
+HASH_SPEC: dict[str, Any] = {
+    "scheme_version": HASH_SCHEME_VERSION,
+    "algorithm": _HASH_ALGORITHM,
+    "input": "raw_real_id_string",
+    "input_encoding": _HASH_INPUT_ENCODING,
+    "digest_bytes": _HASH_DIGEST_BYTES,
+    "output_alphabet": _HASH_OUTPUT_ALPHABET,
+    "output_length": _VIRTUAL_ID_LENGTH,
+    "padding": "stripped",
+    "reference_implementation": (
+        "base64.urlsafe_b64encode("
+        "hashlib.md5(real_id.encode('utf-8'), usedforsecurity=False)"
+        ".digest()[:6]).decode('ascii').rstrip('=')[:7]"
+    ),
+    "test_vectors": {
+        "507f1f77bcf86cd799439011": "6bieWxP",
+        "640a62c9aa5b7e06cf420000": "pNWDB7P",
+        "aaaa00000000000000000001": "x5n3Afl",
+        "": "1B2M2Y8",
+        "café": "BxF_5KH",
+    },
+}
+
+
 def _generate_virtual_id(real_id: str) -> str:
-    """Generate a 7-char Base64url virtual ID from a real ID using MD5 hash."""
-    hash_bytes = hashlib.md5(real_id.encode()).digest()[:6]  # 6 bytes = 48 bits
-    # Base64url encode (no padding) and take first 7 chars for ~42 bits entropy
-    return base64.urlsafe_b64encode(hash_bytes).decode().rstrip("=")[:7]
+    """Generate a 7-char Base64url virtual ID from a real ID.
+
+    Inputs: the raw real-ID string exactly as Morgen returns it (a
+    24-hex MongoDB ObjectId for accounts, a base64-of-JSON for
+    calendars/events, an opaque base64 for tasks, a UUID for tags).
+    Not a Pydantic model, not a JSON-serialized envelope — the string
+    itself, byte-for-byte.
+
+    Stability contract: see HASH_SPEC above. Changes require bumping
+    HASH_SCHEME_VERSION and coordinating a consumer migration.
+    """
+    encoded = real_id.encode(_HASH_INPUT_ENCODING)
+    digest = hashlib.md5(encoded, usedforsecurity=False).digest()
+    truncated = digest[:_HASH_DIGEST_BYTES]
+    b64 = base64.urlsafe_b64encode(truncated).decode("ascii").rstrip("=")
+    return b64[:_VIRTUAL_ID_LENGTH]
 
 
 def _schedule_persist(virtual_id: str, real_id: str) -> None:

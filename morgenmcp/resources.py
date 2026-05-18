@@ -5,6 +5,7 @@ Resources are read-only; writes still go through tools. URIs use the
 chats that have @-mentioned them.
 
 URI scheme:
+    morgen://server                       — server version & virtual-ID hash contract
     morgen://accounts                     — list of all accounts
     morgen://account/{account_id}         — one account
     morgen://calendars                    — list of all calendars
@@ -29,11 +30,12 @@ from datetime import date, datetime, timedelta, tzinfo
 
 from fastmcp.exceptions import ResourceError
 
+from morgenmcp import __version__
 from morgenmcp.client import get_client
 from morgenmcp.models import Event
 from morgenmcp.tools.calendars import _format_calendar
 from morgenmcp.tools.events import _format_compact_event, _resolve_display_tz
-from morgenmcp.tools.id_registry import register_id, resolve_id
+from morgenmcp.tools.id_registry import HASH_SPEC, register_id, resolve_id
 from morgenmcp.tools.id_utils import extract_account_from_calendar
 from morgenmcp.tools.tags import _format_tag
 from morgenmcp.tools.tasks import _format_task
@@ -131,6 +133,30 @@ def _events_payload(
             "events": [_format_compact_event(e, display_tz) for e in events],
             "count": len(events),
             "window": {"start": window[0], "end": window[1]},
+        }
+    )
+
+
+# --- Server resource ---
+
+
+async def res_server() -> str:
+    """Server metadata: version and the virtual-ID hash contract.
+
+    Stable for the lifetime of HASH_SCHEME_VERSION. Consumers should
+    snapshot HASH_SPEC['scheme_version'] alongside any persisted virtual
+    ID; if the value changes between sessions, persisted IDs are stale
+    and must be re-resolved by calling the relevant list_* tool.
+
+    A downstream consumer can independently recompute virtual IDs from
+    the published `reference_implementation` and verify them against the
+    `test_vectors` entries — this is a self-describing contract.
+    """
+    return json.dumps(
+        {
+            "name": "morgen-calendar",
+            "version": __version__,
+            "virtualIdHash": HASH_SPEC,
         }
     )
 

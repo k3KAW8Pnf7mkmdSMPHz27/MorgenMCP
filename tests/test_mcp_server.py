@@ -129,6 +129,30 @@ class TestMCPServer:
                 result = await client.call_tool("morgen_list_accounts", {})
                 assert result is not None
 
+    async def test_initialize_advertises_morgenmcp_version(self):
+        """serverInfo on initialize carries morgenmcp's __version__, not FastMCP's."""
+        from morgenmcp import __version__
+
+        async with Client(mcp) as client:
+            assert client.initialize_result is not None
+            assert client.initialize_result.serverInfo.name == "morgen-calendar"
+            assert client.initialize_result.serverInfo.version == __version__
+
+    async def test_server_resource_published(self):
+        """morgen://server is registered and exposes the hash contract."""
+        from morgenmcp.tools.id_registry import HASH_SCHEME_VERSION
+
+        async with Client(mcp) as client:
+            resources = await client.list_resources()
+            uris = {str(r.uri) for r in resources}
+            assert "morgen://server" in uris
+
+            payload = await client.read_resource("morgen://server")
+            body = json.loads(payload[0].text)
+            assert body["name"] == "morgen-calendar"
+            assert body["virtualIdHash"]["scheme_version"] == HASH_SCHEME_VERSION
+            assert body["virtualIdHash"]["algorithm"] == "md5"
+
     async def test_list_events_partial_failure_returns_results(self):
         """list_events returns events from healthy accounts when one account fails.
 
@@ -245,6 +269,7 @@ class TestMCPServer:
             template_uris = {t.uriTemplate for t in templates}
 
             assert static_uris == {
+                "morgen://server",
                 "morgen://accounts",
                 "morgen://calendars",
                 "morgen://events/today",

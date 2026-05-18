@@ -87,6 +87,12 @@ Virtual IDs are **deterministic** (`MD5(real_id)`) and **persisted to disk** via
 - **Graceful degradation**: If the store fails to initialize, the server continues with in-memory-only IDs (session-scoped)
 - **Tests**: Persistence is disabled by an `autouse` conftest fixture (`set_store(None)`)
 
+**Stability contract**: The hash output is governed by `HASH_SPEC` in `id_registry.py` — algorithm (MD5), input encoding (UTF-8), digest slice (6 bytes), output length (7 chars Base64url, no padding). The contract is published to MCP consumers via the `morgen://server` resource and pinned by `tests/test_id_persistence.py::TestVirtualIdGoldenVectors`. The current scheme version is `HASH_SCHEME_VERSION = 1`.
+
+**What is hashed**: the raw `real_id` string exactly as Morgen returns it. Not a Pydantic model, not a JSON-serialized envelope. UTF-8 encoded. See the `reference_implementation` field in `HASH_SPEC` for the canonical one-line expression — a downstream consumer can reimplement it and verify against the `test_vectors` map.
+
+**When (and only when) it is OK to break the hash**: Bump `HASH_SCHEME_VERSION` in the same commit that changes the output. Never reuse a version. Consumers detect the change by re-reading `morgen://server` between sessions; a bumped `scheme_version` signals that any stored virtual ID is stale and must be re-resolved by calling the relevant `list_*` tool. The persisted store under `~/Library/Application Support/morgenmcp/id_store/` survives the bump (old IDs still resolve from disk), but *new* registrations for the same real ID will diverge — plan a migration (e.g. one-shot store wipe + re-list on startup) in the same PR.
+
 ### Environment variables
 
 - **`MORGEN_API_KEY`**: Required. Morgen API key.

@@ -159,3 +159,74 @@ class TestWithoutStore:
         set_store(store)
         count = await load_from_store(tmp_path, "nonexistent_collection")
         assert count == 0
+
+
+class TestVirtualIdGoldenVectors:
+    """Lock the virtual-ID hash output and the published HASH_SPEC.
+
+    Any failure here means a change to _generate_virtual_id has
+    invalidated every persisted virtual ID on disk. Do not update the
+    expected values to make this test pass — bump HASH_SCHEME_VERSION
+    and plan a consumer migration first.
+    """
+
+    @pytest.mark.parametrize(
+        ("real_id", "expected_virtual_id"),
+        [
+            ("507f1f77bcf86cd799439011", "6bieWxP"),
+            ("640a62c9aa5b7e06cf420000", "pNWDB7P"),
+            ("aaaa00000000000000000001", "x5n3Afl"),
+            (
+                "WyI1MDdmMWY3N2JjZjg2Y2Q3OTk0MzkwMTEiLCJ1c2VyQGV4YW1wbGUuY29tIl0",
+                "zd-btns",
+            ),
+            (
+                "WyJ1c2VyQGV4YW1wbGUuY29tIiwiZXZ0LXVpZC0xIiwiNTA3ZjFmNzdiY2Y4NmNkNzk5NDM5MDExIl0",
+                "ea1iUuG",
+            ),
+            ("café", "BxF_5KH"),
+            ("", "1B2M2Y8"),
+        ],
+    )
+    def test_known_vectors(self, real_id, expected_virtual_id):
+        from morgenmcp.tools.id_registry import _generate_virtual_id
+
+        assert _generate_virtual_id(real_id) == expected_virtual_id
+
+    def test_output_charset_is_base64url(self):
+        """Output must use only the Base64url alphabet (A-Za-z0-9-_)."""
+        import string
+
+        from morgenmcp.tools.id_registry import _generate_virtual_id
+
+        allowed = set(string.ascii_letters + string.digits + "-_")
+        for sample in ["507f1f77bcf86cd799439011", "x", "x" * 100, "/+=", "☃"]:
+            vid = _generate_virtual_id(sample)
+            assert set(vid) <= allowed, (
+                f"Virtual ID {vid!r} contains chars outside Base64url"
+            )
+
+    def test_output_length_is_fixed(self):
+        from morgenmcp.tools.id_registry import (
+            _VIRTUAL_ID_LENGTH,
+            _generate_virtual_id,
+        )
+
+        for sample in ["", "a", "x" * 1000, "café"]:
+            assert len(_generate_virtual_id(sample)) == _VIRTUAL_ID_LENGTH
+
+    def test_hash_spec_matches_implementation(self):
+        """HASH_SPEC's published test_vectors must all verify against the
+        actual function. Guards against the spec drifting from the code."""
+        from morgenmcp.tools.id_registry import HASH_SPEC, _generate_virtual_id
+
+        for real_id, expected in HASH_SPEC["test_vectors"].items():
+            assert _generate_virtual_id(real_id) == expected
+
+    def test_hash_scheme_version_is_one(self):
+        """HASH_SCHEME_VERSION must only be bumped intentionally. If you
+        bumped it, you should also be updating the golden vectors above
+        because the output has changed."""
+        from morgenmcp.tools.id_registry import HASH_SCHEME_VERSION
+
+        assert HASH_SCHEME_VERSION == 1
