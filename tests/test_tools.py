@@ -260,7 +260,7 @@ class TestFormatCompactEvent:
         result = _format_compact_event(event, ZoneInfo("America/Chicago"))
 
         # July 15 → CDT (UTC-5), Berlin is CEST (UTC+2) → 7-hour shift
-        assert "09:15-10:00 CDT (America/Chicago)" in result
+        assert "Jul 15 09:15-10:00 CDT (America/Chicago)" in result
         assert "Daily Standup" in result
 
     def test_format_floating_event_no_conversion(
@@ -282,7 +282,7 @@ class TestFormatCompactEvent:
 
         result = _format_compact_event(event, ZoneInfo("America/Chicago"))
 
-        assert "16:15-17:00 (floating)" in result
+        assert "Jul 15 16:15-17:00 (floating)" in result
         assert "Floating Block" in result
         assert "CDT" not in result
 
@@ -330,7 +330,7 @@ class TestFormatCompactEvent:
 
         result = _format_compact_event(event, ZoneInfo("America/Chicago"))
 
-        assert "23:00-Jan 02 01:00 CST" in result
+        assert "Jan 01 23:00-Jan 02 01:00 CST" in result
         assert "Late Night Sync" in result
 
     def test_format_unknown_timezone_string(
@@ -715,7 +715,7 @@ class TestListEvents:
             display_timezone="America/Chicago",
         )
 
-        assert "09:15-10:00 CDT (America/Chicago)" in result["events"][0]
+        assert "Jul 15 09:15-10:00 CDT (America/Chicago)" in result["events"][0]
 
     async def test_list_events_compact_uses_env_var(
         self,
@@ -749,7 +749,7 @@ class TestListEvents:
         )
 
         # Berlin in July is CEST (UTC+2), so 16:15 CEST = 14:15 UTC
-        assert "14:15-15:00 UTC" in result["events"][0]
+        assert "Jul 15 14:15-15:00 UTC" in result["events"][0]
 
     async def test_list_events_compact_rejects_invalid_display_timezone(
         self, mock_morgen_client, sample_calendar_id

@@ -66,18 +66,19 @@ def _tz_label(dt: datetime, tz: tzinfo) -> str:
 
 
 def _format_compact_event(event: Event, display_tz: tzinfo) -> str:
-    """Format an event in compact one-liner format with virtual ID.
+    """Format an event as a compact one-liner: ``"Jul 15 09:15-10:00 CDT (America/Chicago): Title [id]"``.
 
-    Times are converted from the event's `time_zone` into `display_tz` and
-    tagged with the abbreviation plus IANA name. Floating events (no source
-    timezone) are tagged "(floating)" and not converted. All-day events keep
-    the existing "<MMM DD> (all-day)" form.
+    Every line includes a ``MMM DD`` date prefix so multi-day listings remain
+    scannable. Times are converted from the event's `time_zone` into
+    `display_tz` and tagged with the abbreviation plus IANA name. Floating
+    events (no source timezone) are tagged "(floating)" and not converted.
+    All-day events use ``"MMM DD (all-day)"`` form.
     """
     virtual_id = register_id(event.id)
     title = event.title or "(No title)"
 
     if event.show_without_time:
-        # All-day event: "Mar 15 (all-day): Holiday [abc123]"
+        # All-day event: "Jul 15 (all-day): Holiday [abc123]"
         try:
             dt = datetime.fromisoformat(event.start)
             date_str = dt.strftime("%b %d")
@@ -103,11 +104,12 @@ def _format_compact_event(event: Event, display_tz: tzinfo) -> str:
         end_naive = start_naive + timedelta(hours=hours, minutes=minutes)
 
         if event.time_zone is None:
+            date_prefix = start_naive.strftime("%b %d")
             start_str = start_naive.strftime("%H:%M")
             end_str = end_naive.strftime("%H:%M")
             cross = end_naive.date() != start_naive.date()
             end_label = f"{end_naive.strftime('%b %d')} {end_str}" if cross else end_str
-            return f"{start_str}-{end_label} (floating): {title} [{virtual_id}]"
+            return f"{date_prefix} {start_str}-{end_label} (floating): {title} [{virtual_id}]"
 
         try:
             source_tz = ZoneInfo(event.time_zone)
@@ -117,12 +119,13 @@ def _format_compact_event(event: Event, display_tz: tzinfo) -> str:
         start_dt = start_naive.replace(tzinfo=source_tz).astimezone(display_tz)
         end_dt = end_naive.replace(tzinfo=source_tz).astimezone(display_tz)
 
+        date_prefix = start_dt.strftime("%b %d")
         start_str = start_dt.strftime("%H:%M")
         end_str = end_dt.strftime("%H:%M")
         cross = end_dt.date() != start_dt.date()
         end_label = f"{end_dt.strftime('%b %d')} {end_str}" if cross else end_str
         return (
-            f"{start_str}-{end_label} {_tz_label(start_dt, display_tz)}: "
+            f"{date_prefix} {start_str}-{end_label} {_tz_label(start_dt, display_tz)}: "
             f"{title} [{virtual_id}]"
         )
     except ValueError, TypeError:
