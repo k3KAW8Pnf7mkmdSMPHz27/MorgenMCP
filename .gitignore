@@ -50,6 +50,7 @@ htmlcov/
 .claude/*
 !.claude/settings.json
 !.claude/hooks
+!.claude/skills
 .env
 .env.local
 *.env
