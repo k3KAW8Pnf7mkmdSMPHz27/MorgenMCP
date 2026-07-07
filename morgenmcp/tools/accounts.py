@@ -1,12 +1,15 @@
 """MCP tools for Morgen account operations."""
 
+from typing import cast
+
 from morgenmcp.client import get_client
 from morgenmcp.tools.id_registry import register_id
+from morgenmcp.tools.outputs import AccountItem, ListAccountsResult
 from morgenmcp.tools.utils import filter_none_values, handle_tool_errors
 
 
 @handle_tool_errors
-async def list_accounts() -> dict:
+async def list_accounts() -> ListAccountsResult:
     """List all connected calendar accounts.
 
     Returns a list of accounts with their IDs, integration types, and user info.
@@ -20,13 +23,16 @@ async def list_accounts() -> dict:
 
     return {
         "accounts": [
-            filter_none_values(
-                {
-                    "id": register_id(acc.id),
-                    "integrationId": acc.integration_id,
-                    "email": acc.provider_user_id,
-                    "displayName": acc.provider_user_display_name,
-                }
+            cast(
+                "AccountItem",
+                filter_none_values(
+                    {
+                        "id": register_id(acc.id),
+                        "integrationId": acc.integration_id,
+                        "email": acc.provider_user_id,
+                        "displayName": acc.provider_user_display_name,
+                    }
+                ),
             )
             for acc in accounts
         ],

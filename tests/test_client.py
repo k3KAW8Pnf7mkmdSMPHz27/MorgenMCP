@@ -58,6 +58,12 @@ class TestClientInitialization:
         with pytest.raises(ValueError, match="Morgen API key is required"):
             MorgenClient()
 
+    def test_client_timeout_configuration(self, mock_client):
+        """The HTTP client uses a separate (shorter) connect timeout."""
+        http_client = mock_client.client
+        assert http_client.timeout.connect == 10.0
+        assert http_client.timeout.read == 30.0
+
     def test_client_headers(self, mock_client):
         """Test that client sets correct headers."""
         client = mock_client.client
@@ -213,6 +219,27 @@ class TestClientErrorHandling:
 
         assert exc_info.value.status_code == 500
 
+    def test_generic_error_body_is_truncated(self, mock_client):
+        """A huge upstream error body (e.g. a 5xx HTML page) is capped."""
+        response = httpx.Response(502, text="<html>" + "x" * 5000 + "</html>")
+
+        with pytest.raises(MorgenAPIError) as exc_info:
+            mock_client._handle_error(response)
+
+        message = str(exc_info.value)
+        assert len(message) < 400
+        assert "…[truncated]" in message
+
+    def test_short_error_body_not_truncated(self, mock_client):
+        """Short error bodies pass through unmodified."""
+        response = httpx.Response(400, json={"message": "Invalid calendar ID"})
+
+        with pytest.raises(MorgenAPIError) as exc_info:
+            mock_client._handle_error(response)
+
+        assert "Invalid calendar ID" in str(exc_info.value)
+        assert "truncated" not in str(exc_info.value)
+
     def test_no_error_on_success(self, mock_client):
         """Test that no error is raised on success responses."""
         response = httpx.Response(200)
@@ -221,6 +248,82 @@ class TestClientErrorHandling:
 
         response = httpx.Response(204)
         mock_client._handle_error(response)
+
+
+class TestRetryAfterTransport:
+    """Tests for the single-retry 429 Retry-After transport."""
+
+    _URL = "https://api.morgen.so/v3/calendars/list"
+    _OK = httpx.Response(200, json={"data": {"calendars": []}})
+
+    def test_parse_retry_after_forms(self):
+        from morgenmcp.client import _parse_retry_after
+
+        assert _parse_retry_after("5") == 5.0
+        assert _parse_retry_after("0") == 0.0
+        assert _parse_retry_after(None) is None
+        assert _parse_retry_after("-3") is None
+        # HTTP-date form is deliberately not honored
+        assert _parse_retry_after("Wed, 21 Oct 2026 07:28:00 GMT") is None
+
+    @respx.mock
+    async def test_429_with_short_retry_after_is_retried(self):
+        """A 429 with a short Retry-After is retried once and succeeds."""
+        route = respx.get(self._URL).mock(
+            side_effect=[
+                httpx.Response(429, headers={"Retry-After": "0"}),
+                self._OK,
+            ]
+        )
+
+        async with MorgenClient(api_key="test_key") as client:
+            calendars = await client.list_calendars()
+
+        assert calendars == []
+        assert route.call_count == 2
+
+    @respx.mock
+    async def test_429_with_long_retry_after_not_retried(self):
+        """A long Retry-After surfaces the 429 immediately — no blocking sleep."""
+        route = respx.get(self._URL).mock(
+            return_value=httpx.Response(429, headers={"Retry-After": "3600"})
+        )
+
+        async with MorgenClient(api_key="test_key") as client:
+            with pytest.raises(MorgenAPIError) as exc_info:
+                await client.list_calendars()
+
+        assert exc_info.value.status_code == 429
+        assert route.call_count == 1
+
+    @respx.mock
+    async def test_429_without_retry_after_not_retried(self):
+        """No Retry-After header means no retry."""
+        route = respx.get(self._URL).mock(return_value=httpx.Response(429))
+
+        async with MorgenClient(api_key="test_key") as client:
+            with pytest.raises(MorgenAPIError) as exc_info:
+                await client.list_calendars()
+
+        assert exc_info.value.status_code == 429
+        assert route.call_count == 1
+
+    @respx.mock
+    async def test_429_retried_at_most_once(self):
+        """Two consecutive 429s stop after the single retry."""
+        route = respx.get(self._URL).mock(
+            side_effect=[
+                httpx.Response(429, headers={"Retry-After": "0"}),
+                httpx.Response(429, headers={"Retry-After": "0"}),
+            ]
+        )
+
+        async with MorgenClient(api_key="test_key") as client:
+            with pytest.raises(MorgenAPIError) as exc_info:
+                await client.list_calendars()
+
+        assert exc_info.value.status_code == 429
+        assert route.call_count == 2
 
 
 class TestCalendarEndpoints:

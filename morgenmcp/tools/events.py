@@ -1,10 +1,9 @@
 """MCP tools for Morgen event operations."""
 
-import asyncio
 import os
 from collections import defaultdict
 from datetime import datetime, timedelta, tzinfo
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from zoneinfo import ZoneInfo
 
 from fastmcp import Context
@@ -22,12 +21,22 @@ from morgenmcp.tools.id_utils import (
     extract_account_from_calendar,
     extract_ids_from_event,
 )
+from morgenmcp.tools.outputs import (
+    BatchDeleteResult,
+    BatchUpdateResult,
+    CreateEventResult,
+    EventItem,
+    FailedItem,
+    ListEventsResult,
+    MutateEventResult,
+)
 from morgenmcp.tools.utils import (
     build_alerts_dict,
     build_locations_dict,
     build_participants_dict,
     build_recurrence_rules,
     filter_none_values,
+    gather_bounded,
     handle_tool_errors,
 )
 from morgenmcp.validators import (
@@ -155,58 +164,61 @@ def _format_alerts(event: Event) -> list[dict[str, str]] | None:
     return out or None
 
 
-def _format_full_event(event: Event) -> dict[str, Any]:
+def _format_full_event(event: Event) -> EventItem:
     """Format an event in full format with all fields and virtual IDs."""
     metadata = event.metadata
-    return filter_none_values(
-        {
-            "id": register_id(event.id),
-            "calendarId": register_id(event.calendar_id),
-            "accountId": register_id(event.account_id),
-            "title": event.title,
-            "description": event.description,
-            "start": event.start,
-            "duration": event.duration,
-            "timeZone": event.time_zone,
-            "isAllDay": event.show_without_time,
-            "status": event.free_busy_status,
-            "privacy": event.privacy,
-            "locations": [
-                {"name": loc.name} for loc in (event.locations or {}).values()
-            ],
-            "participants": [
-                {
-                    "name": p.name,
-                    "email": p.email,
-                    "status": p.participation_status,
-                    "isOrganizer": p.roles.owner if p.roles else False,
-                }
-                for p in (event.participants or {}).values()
-            ],
-            "isRecurring": event.recurrence_rules is not None,
-            "recurrenceRules": [
-                _format_recurrence_rule(r) for r in (event.recurrence_rules or [])
-            ]
-            or None,
-            "recurrenceId": event.recurrence_id,
-            "masterEventId": register_id(event.master_event_id)
-            if event.master_event_id
-            else None,
-            "alerts": _format_alerts(event),
-            "useDefaultAlerts": event.use_default_alerts or None,
-            "googleColorId": event.google_color_id,
-            "categoryId": metadata.category_id if metadata else None,
-            "categoryName": metadata.category_name if metadata else None,
-            "categoryColor": metadata.category_color if metadata else None,
-            "taskId": register_id(metadata.task_id)
-            if metadata and metadata.task_id
-            else None,
-            "virtualRoomUrl": (
-                event.derived.virtual_room.url
-                if event.derived and event.derived.virtual_room
-                else None
-            ),
-        }
+    return cast(
+        "EventItem",
+        filter_none_values(
+            {
+                "id": register_id(event.id),
+                "calendarId": register_id(event.calendar_id),
+                "accountId": register_id(event.account_id),
+                "title": event.title,
+                "description": event.description,
+                "start": event.start,
+                "duration": event.duration,
+                "timeZone": event.time_zone,
+                "isAllDay": event.show_without_time,
+                "status": event.free_busy_status,
+                "privacy": event.privacy,
+                "locations": [
+                    {"name": loc.name} for loc in (event.locations or {}).values()
+                ],
+                "participants": [
+                    {
+                        "name": p.name,
+                        "email": p.email,
+                        "status": p.participation_status,
+                        "isOrganizer": p.roles.owner if p.roles else False,
+                    }
+                    for p in (event.participants or {}).values()
+                ],
+                "isRecurring": event.recurrence_rules is not None,
+                "recurrenceRules": [
+                    _format_recurrence_rule(r) for r in (event.recurrence_rules or [])
+                ]
+                or None,
+                "recurrenceId": event.recurrence_id,
+                "masterEventId": register_id(event.master_event_id)
+                if event.master_event_id
+                else None,
+                "alerts": _format_alerts(event),
+                "useDefaultAlerts": event.use_default_alerts or None,
+                "googleColorId": event.google_color_id,
+                "categoryId": metadata.category_id if metadata else None,
+                "categoryName": metadata.category_name if metadata else None,
+                "categoryColor": metadata.category_color if metadata else None,
+                "taskId": register_id(metadata.task_id)
+                if metadata and metadata.task_id
+                else None,
+                "virtualRoomUrl": (
+                    event.derived.virtual_room.url
+                    if event.derived and event.derived.virtual_room
+                    else None
+                ),
+            }
+        ),
     )
 
 
@@ -218,7 +230,7 @@ async def list_events(
     compact: bool = False,
     display_timezone: str | None = None,
     ctx: Context | None = None,
-) -> dict:
+) -> ListEventsResult:
     """List events from calendars within a time window.
 
     Recurring events are automatically expanded to individual occurrences.
@@ -279,11 +291,10 @@ async def list_events(
                 end=end,
             )
 
-        tasks = [
+        results = await gather_bounded(
             fetch_account_events(acc_id, cal_ids)
             for acc_id, cal_ids in calendars_by_account.items()
-        ]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        )
 
         account_ids = list(calendars_by_account.keys())
         for i, result in enumerate(results):
@@ -291,8 +302,10 @@ async def list_events(
                 await ctx.report_progress(i + 1, len(results))
             if isinstance(result, BaseException):
                 if ctx:
+                    # register_id: surface the virtual ID, never a raw Morgen ID
                     await ctx.warning(
-                        f"Failed to fetch events for account {account_ids[i]}: {result}"
+                        f"Failed to fetch events for account "
+                        f"{register_id(account_ids[i])}: {result}"
                     )
                 continue
             all_events.extend(result)
@@ -332,7 +345,7 @@ async def create_event(
     alerts: list[str] | None = None,
     use_default_alerts: bool | None = None,
     google_color_id: str | None = None,
-) -> dict:
+) -> CreateEventResult:
     """Create a new calendar event.
 
     Args:
@@ -362,6 +375,9 @@ async def create_event(
     Returns:
         Dictionary with created event ID and details.
     """
+    if not title or not title.strip():
+        raise ToolError("title cannot be empty")
+
     validate_local_datetime(start, "start")
     validate_duration(duration)
     validate_timezone(time_zone)
@@ -436,7 +452,7 @@ async def update_event(
     use_default_alerts: bool | None = None,
     google_color_id: str | None = None,
     series_update_mode: Literal["single", "future", "all"] = "single",
-) -> dict:
+) -> MutateEventResult:
     """Update an existing calendar event.
 
     Only include fields you want to change. Note that when updating timing
@@ -529,7 +545,7 @@ async def update_event(
 async def delete_event(
     event_id: str,
     series_update_mode: Literal["single", "future", "all"] = "single",
-) -> dict:
+) -> MutateEventResult:
     """Delete a calendar event.
 
     Args:
@@ -565,7 +581,7 @@ async def batch_delete_events(
     event_ids: list[str],
     series_update_mode: Literal["single", "future", "all"] = "single",
     ctx: Context | None = None,
-) -> dict:
+) -> BatchDeleteResult:
     """Delete multiple calendar events in a single tool call.
 
     Args:
@@ -580,7 +596,7 @@ async def batch_delete_events(
 
     client = get_client()
     deleted: list[str] = []
-    failed: list[dict[str, str]] = []
+    failed: list[FailedItem] = []
 
     # Prepare delete operations
     to_delete: list[
@@ -607,11 +623,10 @@ async def batch_delete_events(
         )
         await client.delete_event(request, series_update_mode=series_update_mode)
 
-    tasks = [
+    results = await gather_bounded(
         delete_single(real_event_id, real_account_id, real_calendar_id)
         for virtual_event_id, real_event_id, real_account_id, real_calendar_id in to_delete
-    ]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+    )
 
     for i, result in enumerate(results):
         virtual_event_id = to_delete[i][0]
@@ -636,7 +651,7 @@ async def batch_update_events(
     updates: list[dict[str, Any]],
     series_update_mode: Literal["single", "future", "all"] = "single",
     ctx: Context | None = None,
-) -> dict:
+) -> BatchUpdateResult:
     """Update multiple calendar events in a single tool call.
 
     Args:
@@ -653,7 +668,7 @@ async def batch_update_events(
 
     client = get_client()
     updated: list[str] = []
-    failed: list[dict[str, str]] = []
+    failed: list[FailedItem] = []
 
     # Validate and prepare updates
     to_update: list[
@@ -735,11 +750,10 @@ async def batch_update_events(
         )
         await client.update_event(request, series_update_mode=series_update_mode)
 
-    tasks = [
+    results = await gather_bounded(
         update_single(real_event_id, real_account_id, real_calendar_id, update)
         for virtual_event_id, real_event_id, real_account_id, real_calendar_id, update in to_update
-    ]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+    )
 
     for i, result in enumerate(results):
         virtual_event_id = to_update[i][0]

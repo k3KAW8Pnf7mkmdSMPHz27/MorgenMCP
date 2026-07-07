@@ -1,5 +1,6 @@
 """FastMCP server for Morgen calendar API."""
 
+import argparse
 import asyncio
 import os
 import time
@@ -10,10 +11,14 @@ from pathlib import Path
 from fastmcp import FastMCP
 from fastmcp.server.middleware.caching import (
     CallToolSettings,
+    ListPromptsSettings,
+    ListResourcesSettings,
+    ListToolsSettings,
     ReadResourceSettings,
     ResponseCachingMiddleware,
 )
 from fastmcp.utilities.logging import get_logger
+from mcp.types import ToolAnnotations
 
 from morgenmcp import __version__
 from morgenmcp.resources import (
@@ -63,6 +68,19 @@ _HEARTBEAT_INTERVAL_S = (
 )
 
 
+def _require_api_key() -> None:
+    """Fail fast when MORGEN_API_KEY is missing.
+
+    Without this, a misconfigured server starts cleanly, advertises all 22
+    tools, and only errors on the first tool call — a confusing lazy failure.
+    """
+    if not os.environ.get("MORGEN_API_KEY", "").strip():
+        raise RuntimeError(
+            "MORGEN_API_KEY is not set. Export it (e.g. via .envrc) "
+            "before starting morgenmcp."
+        )
+
+
 def _get_data_dir() -> Path:
     """Return the data directory for persistent storage."""
     env_dir = os.environ.get("MORGENMCP_DATA_DIR")
@@ -102,6 +120,8 @@ async def lifespan(server: FastMCP) -> AsyncIterator[None]:
     started_at = time.monotonic()
     logger.info("morgenmcp lifespan starting")
 
+    _require_api_key()
+
     # Initialize persistent ID store
     try:
         from key_value.aio.stores.filetree import FileTreeStore
@@ -112,6 +132,9 @@ async def lifespan(server: FastMCP) -> AsyncIterator[None]:
             default_collection=_ID_COLLECTION,
         )
         await store.setup()
+        # Persisted entries hold raw Morgen IDs, which base64-decode to
+        # calendar email addresses — keep the directory owner-only.
+        os.chmod(data_dir, 0o700)
         set_store(store)
         count = await load_from_store(data_dir, _ID_COLLECTION)
         logger.info("ID store ready (%d persisted mappings loaded)", count)
@@ -150,6 +173,7 @@ mcp = FastMCP(
     "morgen-calendar",
     version=__version__,
     lifespan=lifespan,
+    on_duplicate="error",
     instructions=f"""
     Morgen Calendar MCP Server provides access to Morgen's unified calendar,
     task, and tag API.
@@ -196,100 +220,100 @@ mcp.tool(
     name="morgen_list_accounts",
     tags={"accounts", "read"},
     timeout=30.0,
-    annotations={
-        "title": "List Accounts",
-        "readOnlyHint": True,
-        "openWorldHint": True,
-    },
+    annotations=ToolAnnotations(
+        title="List Accounts",
+        readOnlyHint=True,
+        openWorldHint=True,
+    ),
 )(list_accounts)
 mcp.tool(
     name="morgen_list_calendars",
     tags={"calendars", "read"},
     timeout=30.0,
-    annotations={
-        "title": "List Calendars",
-        "readOnlyHint": True,
-        "openWorldHint": True,
-    },
+    annotations=ToolAnnotations(
+        title="List Calendars",
+        readOnlyHint=True,
+        openWorldHint=True,
+    ),
 )(list_calendars)
 mcp.tool(
     name="morgen_update_calendar_metadata",
     tags={"calendars", "write"},
     timeout=30.0,
-    annotations={
-        "title": "Update Calendar Metadata",
-        "readOnlyHint": False,
-        "destructiveHint": False,
-        "idempotentHint": True,
-        "openWorldHint": True,
-    },
+    annotations=ToolAnnotations(
+        title="Update Calendar Metadata",
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=True,
+    ),
 )(update_calendar_metadata)
 mcp.tool(
     name="morgen_list_events",
     tags={"events", "read"},
     timeout=120.0,
-    annotations={
-        "title": "List Events",
-        "readOnlyHint": True,
-        "openWorldHint": True,
-    },
+    annotations=ToolAnnotations(
+        title="List Events",
+        readOnlyHint=True,
+        openWorldHint=True,
+    ),
 )(list_events)
 mcp.tool(
     name="morgen_create_event",
     tags={"events", "write"},
     timeout=30.0,
-    annotations={
-        "title": "Create Event",
-        "readOnlyHint": False,
-        "destructiveHint": False,
-        "openWorldHint": True,
-    },
+    annotations=ToolAnnotations(
+        title="Create Event",
+        readOnlyHint=False,
+        destructiveHint=False,
+        openWorldHint=True,
+    ),
 )(create_event)
 mcp.tool(
     name="morgen_update_event",
     tags={"events", "write"},
     timeout=60.0,
-    annotations={
-        "title": "Update Event",
-        "readOnlyHint": False,
-        "destructiveHint": False,
-        "idempotentHint": True,
-        "openWorldHint": True,
-    },
+    annotations=ToolAnnotations(
+        title="Update Event",
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=True,
+    ),
 )(update_event)
 mcp.tool(
     name="morgen_delete_event",
     tags={"events", "delete"},
     timeout=30.0,
-    annotations={
-        "title": "Delete Event",
-        "readOnlyHint": False,
-        "destructiveHint": True,
-        "openWorldHint": True,
-    },
+    annotations=ToolAnnotations(
+        title="Delete Event",
+        readOnlyHint=False,
+        destructiveHint=True,
+        openWorldHint=True,
+    ),
 )(delete_event)
 mcp.tool(
     name="morgen_batch_delete_events",
     tags={"events", "delete", "batch"},
     timeout=120.0,
-    annotations={
-        "title": "Batch Delete Events",
-        "readOnlyHint": False,
-        "destructiveHint": True,
-        "openWorldHint": True,
-    },
+    annotations=ToolAnnotations(
+        title="Batch Delete Events",
+        readOnlyHint=False,
+        destructiveHint=True,
+        openWorldHint=True,
+    ),
 )(batch_delete_events)
 mcp.tool(
     name="morgen_batch_update_events",
     tags={"events", "write", "batch"},
     timeout=120.0,
-    annotations={
-        "title": "Batch Update Events",
-        "readOnlyHint": False,
-        "destructiveHint": False,
-        "idempotentHint": False,
-        "openWorldHint": True,
-    },
+    annotations=ToolAnnotations(
+        title="Batch Update Events",
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=False,
+        openWorldHint=True,
+    ),
 )(batch_update_events)
 
 # Task tools
@@ -297,102 +321,102 @@ mcp.tool(
     name="morgen_list_tasks",
     tags={"tasks", "read"},
     timeout=30.0,
-    annotations={
-        "title": "List Tasks",
-        "readOnlyHint": True,
-        "openWorldHint": True,
-    },
+    annotations=ToolAnnotations(
+        title="List Tasks",
+        readOnlyHint=True,
+        openWorldHint=True,
+    ),
 )(list_tasks)
 mcp.tool(
     name="morgen_get_task",
     tags={"tasks", "read"},
     timeout=30.0,
-    annotations={
-        "title": "Get Task",
-        "readOnlyHint": True,
-        "openWorldHint": True,
-    },
+    annotations=ToolAnnotations(
+        title="Get Task",
+        readOnlyHint=True,
+        openWorldHint=True,
+    ),
 )(get_task)
 mcp.tool(
     name="morgen_create_task",
     tags={"tasks", "write"},
     timeout=30.0,
-    annotations={
-        "title": "Create Task",
-        "readOnlyHint": False,
-        "destructiveHint": False,
-        "openWorldHint": True,
-    },
+    annotations=ToolAnnotations(
+        title="Create Task",
+        readOnlyHint=False,
+        destructiveHint=False,
+        openWorldHint=True,
+    ),
 )(create_task)
 mcp.tool(
     name="morgen_update_task",
     tags={"tasks", "write"},
     timeout=30.0,
-    annotations={
-        "title": "Update Task",
-        "readOnlyHint": False,
-        "destructiveHint": False,
-        "idempotentHint": True,
-        "openWorldHint": True,
-    },
+    annotations=ToolAnnotations(
+        title="Update Task",
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=True,
+    ),
 )(update_task)
 mcp.tool(
     name="morgen_move_task",
     tags={"tasks", "write"},
     timeout=30.0,
-    annotations={
-        "title": "Move Task",
-        "readOnlyHint": False,
-        "destructiveHint": False,
-        "idempotentHint": True,
-        "openWorldHint": True,
-    },
+    annotations=ToolAnnotations(
+        title="Move Task",
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=True,
+    ),
 )(move_task)
 mcp.tool(
     name="morgen_complete_task",
     tags={"tasks", "write"},
     timeout=30.0,
-    annotations={
-        "title": "Complete Task",
-        "readOnlyHint": False,
-        "destructiveHint": False,
-        "idempotentHint": True,
-        "openWorldHint": True,
-    },
+    annotations=ToolAnnotations(
+        title="Complete Task",
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=True,
+    ),
 )(complete_task)
 mcp.tool(
     name="morgen_reopen_task",
     tags={"tasks", "write"},
     timeout=30.0,
-    annotations={
-        "title": "Reopen Task",
-        "readOnlyHint": False,
-        "destructiveHint": False,
-        "idempotentHint": True,
-        "openWorldHint": True,
-    },
+    annotations=ToolAnnotations(
+        title="Reopen Task",
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=True,
+    ),
 )(reopen_task)
 mcp.tool(
     name="morgen_delete_task",
     tags={"tasks", "delete"},
     timeout=30.0,
-    annotations={
-        "title": "Delete Task",
-        "readOnlyHint": False,
-        "destructiveHint": True,
-        "openWorldHint": True,
-    },
+    annotations=ToolAnnotations(
+        title="Delete Task",
+        readOnlyHint=False,
+        destructiveHint=True,
+        openWorldHint=True,
+    ),
 )(delete_task)
 mcp.tool(
     name="morgen_batch_delete_tasks",
     tags={"tasks", "delete", "batch"},
     timeout=120.0,
-    annotations={
-        "title": "Batch Delete Tasks",
-        "readOnlyHint": False,
-        "destructiveHint": True,
-        "openWorldHint": True,
-    },
+    annotations=ToolAnnotations(
+        title="Batch Delete Tasks",
+        readOnlyHint=False,
+        destructiveHint=True,
+        openWorldHint=True,
+    ),
 )(batch_delete_tasks)
 
 # Tag tools
@@ -400,45 +424,45 @@ mcp.tool(
     name="morgen_list_tags",
     tags={"tags", "read"},
     timeout=30.0,
-    annotations={
-        "title": "List Tags",
-        "readOnlyHint": True,
-        "openWorldHint": True,
-    },
+    annotations=ToolAnnotations(
+        title="List Tags",
+        readOnlyHint=True,
+        openWorldHint=True,
+    ),
 )(list_tags)
 mcp.tool(
     name="morgen_create_tag",
     tags={"tags", "write"},
     timeout=30.0,
-    annotations={
-        "title": "Create Tag",
-        "readOnlyHint": False,
-        "destructiveHint": False,
-        "openWorldHint": True,
-    },
+    annotations=ToolAnnotations(
+        title="Create Tag",
+        readOnlyHint=False,
+        destructiveHint=False,
+        openWorldHint=True,
+    ),
 )(create_tag)
 mcp.tool(
     name="morgen_update_tag",
     tags={"tags", "write"},
     timeout=30.0,
-    annotations={
-        "title": "Update Tag",
-        "readOnlyHint": False,
-        "destructiveHint": False,
-        "idempotentHint": True,
-        "openWorldHint": True,
-    },
+    annotations=ToolAnnotations(
+        title="Update Tag",
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=True,
+    ),
 )(update_tag)
 mcp.tool(
     name="morgen_delete_tag",
     tags={"tags", "delete"},
     timeout=30.0,
-    annotations={
-        "title": "Delete Tag",
-        "readOnlyHint": False,
-        "destructiveHint": True,
-        "openWorldHint": True,
-    },
+    annotations=ToolAnnotations(
+        title="Delete Tag",
+        readOnlyHint=False,
+        destructiveHint=True,
+        openWorldHint=True,
+    ),
 )(delete_tag)
 
 
@@ -541,6 +565,15 @@ _CACHEABLE_READ_TOOLS = [
 ]
 _CACHE_TTL_S = 60
 
+# Listing caches are explicitly DISABLED. ResponseCachingMiddleware defaults to
+# caching tools/list, resources/list, and prompts/list with a 5-minute TTL — but
+# listing is a pure in-memory component enumeration (no Morgen API call), so the
+# cache saves no latency and only risks serving a stale set. Critically, read-only
+# mode (`_apply_read_only`) toggles tool visibility via `mcp.disable(...)`; a cached
+# tools/list would mask that change for up to 5 minutes. We cache only the reads
+# that actually hit the network (`call_tool` on the allowlist, and `read_resource`).
+_DISABLED = {"enabled": False}
+
 mcp.add_middleware(
     ResponseCachingMiddleware(
         call_tool_settings=CallToolSettings(
@@ -551,12 +584,68 @@ mcp.add_middleware(
             enabled=True,
             ttl=_CACHE_TTL_S,
         ),
+        list_tools_settings=ListToolsSettings(**_DISABLED),
+        list_resources_settings=ListResourcesSettings(**_DISABLED),
+        list_prompts_settings=ListPromptsSettings(**_DISABLED),
     )
 )
 
 
+# Tools that only read state stay available in read-only mode; everything tagged
+# "write" or "delete" is disabled. Every mutating tool carries one of these tags
+# (verified by the tag-taxonomy tests), so this is a complete gate.
+_MUTATING_TAGS = {"write", "delete"}
+
+_TRUTHY_ENV = {"1", "true", "yes", "on"}
+
+
+def _read_only_requested(cli_read_only: bool = False) -> bool:
+    """Return whether read-only mode is enabled via the CLI flag or env var.
+
+    Either the ``--read-only`` flag or a truthy ``MORGENMCP_READ_ONLY`` env var
+    (``1``/``true``/``yes``/``on``, case-insensitive) enables the mode.
+    """
+    if cli_read_only:
+        return True
+    env_val = os.environ.get("MORGENMCP_READ_ONLY", "").strip().lower()
+    return env_val in _TRUTHY_ENV
+
+
+def _apply_read_only(server: FastMCP) -> None:
+    """Disable all mutating (write/delete) tools on the server in place.
+
+    Applied once at startup, before ``mcp.run()`` — never mid-session — so the
+    disabled state is baked into the very first ``list_tools`` response and the
+    response cache never serves a pre-disable (full) tool list.
+    """
+    server.disable(tags=_MUTATING_TAGS)
+    logger.info("read-only mode: mutating tools (write/delete) disabled")
+
+
 def main() -> None:
     """Run the MCP server."""
+    parser = argparse.ArgumentParser(
+        prog="morgenmcp",
+        description="Morgen calendar MCP server.",
+    )
+    parser.add_argument(
+        "--read-only",
+        action="store_true",
+        help=(
+            "Disable all mutating (create/update/delete) tools; only read tools "
+            "are exposed. Also enabled via MORGENMCP_READ_ONLY=1."
+        ),
+    )
+    args = parser.parse_args()
+
+    try:
+        _require_api_key()
+    except RuntimeError as e:
+        parser.error(str(e))  # clean CLI message instead of a lifespan traceback
+
+    if _read_only_requested(cli_read_only=args.read_only):
+        _apply_read_only(mcp)
+
     mcp.run()
 
 

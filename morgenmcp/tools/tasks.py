@@ -1,7 +1,6 @@
 """MCP tools for Morgen task operations."""
 
-import asyncio
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
@@ -18,7 +17,20 @@ from morgenmcp.models import (
     TaskUpdateRequest,
 )
 from morgenmcp.tools.id_registry import register_id, resolve_id, resolve_ids
-from morgenmcp.tools.utils import filter_none_values, handle_tool_errors
+from morgenmcp.tools.outputs import (
+    BatchDeleteResult,
+    CreateTaskResult,
+    FailedItem,
+    GetTaskResult,
+    ListTasksResult,
+    MutateTaskResult,
+    TaskItem,
+)
+from morgenmcp.tools.utils import (
+    filter_none_values,
+    gather_bounded,
+    handle_tool_errors,
+)
 from morgenmcp.validators import (
     validate_duration,
     validate_local_datetime,
@@ -28,7 +40,7 @@ from morgenmcp.validators import (
 )
 
 
-def _format_task(task: Task) -> dict[str, Any]:
+def _format_task(task: Task) -> TaskItem:
     """Format a task for tool output, virtualizing IDs."""
     related = task.related_to or {}
     related_out = {
@@ -38,26 +50,29 @@ def _format_task(task: Task) -> dict[str, Any]:
         for parent_id, rel in related.items()
     }
 
-    return filter_none_values(
-        {
-            "id": register_id(task.id),
-            "accountId": register_id(task.account_id) if task.account_id else None,
-            "integrationId": task.integration_id,
-            "taskListId": task.task_list_id,
-            "title": task.title,
-            "description": task.description,
-            "due": task.due,
-            "timeZone": task.time_zone,
-            "estimatedDuration": task.estimated_duration,
-            "priority": task.priority,
-            "progress": task.progress,
-            "position": task.position,
-            "relatedTo": related_out or None,
-            "tags": [register_id(t) for t in (task.tags or [])] or None,
-            "scheduled": task.derived.scheduled if task.derived else None,
-            "created": task.created,
-            "updated": task.updated,
-        }
+    return cast(
+        "TaskItem",
+        filter_none_values(
+            {
+                "id": register_id(task.id),
+                "accountId": register_id(task.account_id) if task.account_id else None,
+                "integrationId": task.integration_id,
+                "taskListId": task.task_list_id,
+                "title": task.title,
+                "description": task.description,
+                "due": task.due,
+                "timeZone": task.time_zone,
+                "estimatedDuration": task.estimated_duration,
+                "priority": task.priority,
+                "progress": task.progress,
+                "position": task.position,
+                "relatedTo": related_out or None,
+                "tags": [register_id(t) for t in (task.tags or [])] or None,
+                "scheduled": task.derived.scheduled if task.derived else None,
+                "created": task.created,
+                "updated": task.updated,
+            }
+        ),
     )
 
 
@@ -73,7 +88,7 @@ def _build_related_to(parent_task_id: str | None) -> dict[str, TaskRelation] | N
 async def list_tasks(
     limit: int | None = None,
     updated_after: str | None = None,
-) -> dict:
+) -> ListTasksResult:
     """List Morgen tasks.
 
     Args:
@@ -99,7 +114,7 @@ async def list_tasks(
 
 
 @handle_tool_errors
-async def get_task(task_id: str) -> dict:
+async def get_task(task_id: str) -> GetTaskResult:
     """Retrieve a single task by virtual ID.
 
     Args:
@@ -126,7 +141,7 @@ async def create_task(
     progress: Literal["needs-action", "completed"] | None = None,
     parent_task_id: str | None = None,
     tag_ids: list[str] | None = None,
-) -> dict:
+) -> CreateTaskResult:
     """Create a new Morgen task.
 
     Args:
@@ -197,7 +212,7 @@ async def update_task(
     progress: Literal["needs-action", "in-process", "completed", "failed", "cancelled"]
     | None = None,
     tag_ids: list[str] | None = None,
-) -> dict:
+) -> MutateTaskResult:
     """Update a task. Patch semantics — only provided fields change.
 
     Args:
@@ -259,7 +274,7 @@ async def move_task(
     parent_task_id: str | None = None,
     move_to_first: bool = False,
     move_to_root: bool = False,
-) -> dict:
+) -> MutateTaskResult:
     """Reorder a task or change its parent.
 
     Args:
@@ -315,7 +330,7 @@ async def move_task(
 async def complete_task(
     task_id: str,
     occurrence_start: str | None = None,
-) -> dict:
+) -> MutateTaskResult:
     """Mark a task as completed.
 
     Args:
@@ -346,7 +361,7 @@ async def complete_task(
 async def reopen_task(
     task_id: str,
     occurrence_start: str | None = None,
-) -> dict:
+) -> MutateTaskResult:
     """Reopen a completed task.
 
     Args:
@@ -374,7 +389,7 @@ async def reopen_task(
 
 
 @handle_tool_errors
-async def delete_task(task_id: str) -> dict:
+async def delete_task(task_id: str) -> MutateTaskResult:
     """Permanently delete a task.
 
     Args:
@@ -400,7 +415,7 @@ async def delete_task(task_id: str) -> dict:
 async def batch_delete_tasks(
     task_ids: list[str],
     ctx: Context | None = None,
-) -> dict:
+) -> BatchDeleteResult:
     """Delete multiple tasks in a single tool call.
 
     Args:
@@ -415,7 +430,7 @@ async def batch_delete_tasks(
 
     client = get_client()
     deleted: list[str] = []
-    failed: list[dict[str, str]] = []
+    failed: list[FailedItem] = []
 
     to_delete: list[tuple[str, str]] = []  # (virtual_id, real_id)
     for virtual_id in task_ids:
@@ -428,10 +443,7 @@ async def batch_delete_tasks(
     async def _delete(real_id: str) -> None:
         await client.delete_task(TaskDeleteRequest(id=real_id))
 
-    results = await asyncio.gather(
-        *(_delete(real_id) for _, real_id in to_delete),
-        return_exceptions=True,
-    )
+    results = await gather_bounded(_delete(real_id) for _, real_id in to_delete)
 
     for i, result in enumerate(results):
         virtual_id = to_delete[i][0]

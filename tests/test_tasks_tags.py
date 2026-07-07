@@ -281,6 +281,31 @@ class TestDeleteTask:
         assert result["deleted"] == []
         assert result["failed"][0]["id"] == "xxxxxxx"
 
+    async def test_batch_delete_concurrency_is_bounded(self, mock_task_client):
+        """Batch fan-out never exceeds BATCH_CONCURRENCY simultaneous calls."""
+        import asyncio
+
+        from morgenmcp.tools.utils import BATCH_CONCURRENCY
+
+        in_flight = 0
+        max_in_flight = 0
+
+        async def _tracked_delete(req):
+            nonlocal in_flight, max_in_flight
+            in_flight += 1
+            max_in_flight = max(max_in_flight, in_flight)
+            await asyncio.sleep(0.01)
+            in_flight -= 1
+
+        mock_task_client.delete_task.side_effect = _tracked_delete
+        task_ids = [register_id(f"task_{i}") for i in range(BATCH_CONCURRENCY * 3)]
+
+        result = await batch_delete_tasks(task_ids)
+
+        assert len(result["deleted"]) == len(task_ids)
+        assert max_in_flight <= BATCH_CONCURRENCY
+        assert max_in_flight > 1  # still actually parallel
+
 
 class TestListTags:
     async def test_list_tags(self, mock_tag_client, sample_tag):

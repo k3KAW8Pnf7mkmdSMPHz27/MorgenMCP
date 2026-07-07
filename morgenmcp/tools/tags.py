@@ -1,5 +1,7 @@
 """MCP tools for Morgen tag operations."""
 
+from typing import cast
+
 from fastmcp.exceptions import ToolError
 
 from morgenmcp.client import get_client
@@ -10,19 +12,28 @@ from morgenmcp.models import (
     TagUpdateRequest,
 )
 from morgenmcp.tools.id_registry import register_id, resolve_id
+from morgenmcp.tools.outputs import (
+    CreateTagResult,
+    ListTagsResult,
+    MutateTagResult,
+    TagItem,
+)
 from morgenmcp.tools.utils import filter_none_values, handle_tool_errors
 from morgenmcp.validators import validate_hex_color
 
 
-def _format_tag(tag: Tag) -> dict:
-    return filter_none_values(
-        {
-            "id": register_id(tag.id),
-            "name": tag.name,
-            "color": tag.color,
-            "updated": tag.updated,
-            "deleted": tag.deleted,
-        }
+def _format_tag(tag: Tag) -> TagItem:
+    return cast(
+        "TagItem",
+        filter_none_values(
+            {
+                "id": register_id(tag.id),
+                "name": tag.name,
+                "color": tag.color,
+                "updated": tag.updated,
+                "deleted": tag.deleted,
+            }
+        ),
     )
 
 
@@ -30,7 +41,7 @@ def _format_tag(tag: Tag) -> dict:
 async def list_tags(
     updated_after: str | None = None,
     limit: int | None = None,
-) -> dict:
+) -> ListTagsResult:
     """List user tags.
 
     Args:
@@ -57,7 +68,7 @@ async def list_tags(
 async def create_tag(
     name: str,
     color: str | None = None,
-) -> dict:
+) -> CreateTagResult:
     """Create a new tag.
 
     Args:
@@ -88,7 +99,7 @@ async def update_tag(
     tag_id: str,
     name: str | None = None,
     color: str | None = None,
-) -> dict:
+) -> MutateTagResult:
     """Update a tag's name or color.
 
     Note: Morgen does not allow unsetting name or color once defined —
@@ -123,7 +134,7 @@ async def update_tag(
 
 
 @handle_tool_errors
-async def delete_tag(tag_id: str) -> dict:
+async def delete_tag(tag_id: str) -> MutateTagResult:
     """Soft-delete a tag.
 
     The tag will appear in subsequent sync responses (when using

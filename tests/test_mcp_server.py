@@ -299,6 +299,220 @@ class TestMCPServer:
                 assert payload == {"accounts": [], "count": 0}
 
 
+class TestTypedOutputSchemas:
+    """The typed TypedDict returns give each tool a shaped outputSchema, and
+    FastMCP validates every return against it at runtime.
+
+    These tests lock in the ``NotRequired`` decisions in ``tools/outputs.py``:
+    fields that ``filter_none_values`` can drop MUST stay optional, or a normal
+    sparse response would raise ``Output validation error`` in production. A
+    future change that over-tightens a field to *required* fails here instead.
+    """
+
+    @pytest.fixture(autouse=True)
+    async def _isolate_cache(self):
+        """Evict the shared response cache before each test in this class.
+
+        ``morgen_list_accounts`` takes no arguments, so its cache key (method +
+        args) is identical to the ``morgen_list_accounts`` call in
+        ``TestMCPServer`` — which mocks an *empty* account list. Without eviction
+        the sparse-account test below would be served that stale ``count: 0``
+        payload within the 60s TTL.
+
+        Uses the public ``keys()`` + ``delete()`` API, NOT ``_backend.destroy()``:
+        ``destroy`` tears down the collection-setup state and breaks every
+        subsequent ``put`` in the process (see ``TestResponseCaching``'s note).
+        """
+        from fastmcp.server.middleware.caching import ResponseCachingMiddleware
+
+        cache_mw = next(
+            m for m in mcp.middleware if isinstance(m, ResponseCachingMiddleware)
+        )
+        backend = cache_mw._backend
+        for collection in ("tools/call", "resources/read"):
+            for key in await backend.keys(collection=collection):
+                await backend.delete(collection=collection, key=key)
+        yield
+
+    async def test_list_accounts_output_schema_is_shaped(self):
+        """The tool advertises a real object schema, not the permissive default."""
+        async with Client(mcp) as client:
+            tools = await client.list_tools()
+            by_name = {t.name: t for t in tools}
+            schema = by_name["morgen_list_accounts"].outputSchema
+            assert schema is not None
+            assert set(schema.get("properties", {})) >= {"accounts", "count"}
+            # A shaped schema constrains keys; the permissive fallback would be
+            # {"type": "object", "additionalProperties": true} with no properties.
+            assert schema.get("properties")
+
+    async def test_sparse_account_passes_output_validation(self):
+        """An account missing displayName (filtered out) still validates.
+
+        ``displayName`` is ``NotRequired`` in ``AccountItem`` precisely because
+        ``filter_none_values`` drops it when the provider returns no display
+        name. If it were required, this normal payload would error.
+        """
+        from types import SimpleNamespace
+
+        account = SimpleNamespace(
+            id="507f1f77bcf86cd799439011",
+            integration_id="o365",
+            provider_user_id="user@example.com",
+            provider_user_display_name=None,  # -> "displayName" filtered out
+        )
+        with patch("morgenmcp.tools.accounts.get_client") as mock:
+            client_mock = AsyncMock()
+            client_mock.list_accounts.return_value = [account]
+            mock.return_value = client_mock
+
+            async with Client(mcp) as client:
+                result = await client.call_tool("morgen_list_accounts", {})
+
+        assert result.is_error is False
+        payload = result.structured_content
+        assert payload["count"] == 1
+        item = payload["accounts"][0]
+        assert item["email"] == "user@example.com"
+        assert "displayName" not in item  # filtered, and validation allowed it
+
+    async def test_busy_only_calendar_metadata_update_validates(self):
+        """A busy-only metadata update leaves overrideColor/overrideName null.
+
+        ``UpdatedCalendarMetadata`` types those values as ``str | None`` (keys
+        always present, values nullable). If they were non-nullable, this
+        common partial update would fail output validation.
+        """
+        real_cal_id = (
+            base64.b64encode(
+                json.dumps(
+                    ["d" * 24, "meta@example.com"], separators=(",", ":")
+                ).encode()
+            )
+            .decode()
+            .rstrip("=")
+        )
+        from morgenmcp.tools.id_registry import register_id
+
+        virtual_cal_id = register_id(real_cal_id)
+
+        with patch("morgenmcp.tools.calendars.get_client") as mock:
+            client_mock = AsyncMock()
+            client_mock.update_calendar_metadata.return_value = None
+            mock.return_value = client_mock
+
+            async with Client(mcp) as client:
+                result = await client.call_tool(
+                    "morgen_update_calendar_metadata",
+                    {"calendar_id": virtual_cal_id, "busy": False},
+                )
+
+        assert result.is_error is False
+        updated = result.structured_content["updated"]
+        assert updated["busy"] is False
+        assert updated["overrideColor"] is None
+        assert updated["overrideName"] is None
+
+
+class TestReadOnlyMode:
+    """Read-only launch mode disables every mutating (write/delete) tool.
+
+    ``_apply_read_only`` mutates the shared module-level ``mcp`` in place, so
+    each test restores the full tool set with ``mcp.enable(tags=...)`` in a
+    ``finally`` to avoid leaking the disabled state into other tests.
+    """
+
+    _READ_TOOLS = {
+        "morgen_list_accounts",
+        "morgen_list_calendars",
+        "morgen_list_events",
+        "morgen_list_tasks",
+        "morgen_get_task",
+        "morgen_list_tags",
+    }
+
+    def test_read_only_requested_env_parsing(self, monkeypatch):
+        """The env-var gate accepts truthy spellings and the CLI flag."""
+        from morgenmcp.server import _read_only_requested
+
+        monkeypatch.delenv("MORGENMCP_READ_ONLY", raising=False)
+        assert _read_only_requested() is False
+        assert _read_only_requested(cli_read_only=True) is True
+
+        for truthy in ("1", "true", "TRUE", "Yes", "on"):
+            monkeypatch.setenv("MORGENMCP_READ_ONLY", truthy)
+            assert _read_only_requested() is True
+
+        for falsy in ("0", "false", "no", "", "off"):
+            monkeypatch.setenv("MORGENMCP_READ_ONLY", falsy)
+            assert _read_only_requested() is False
+
+    async def test_default_lists_all_tools(self):
+        """Without read-only mode, all 22 tools are visible."""
+        async with Client(mcp) as client:
+            tools = await client.list_tools()
+            assert len(tools) == 22
+
+    async def test_read_only_hides_mutating_tools(self):
+        """After _apply_read_only, only the 6 read tools are visible, and each
+        mutating tool is both unlisted and uncallable.
+
+        Also guards the cache fix: ``ResponseCachingMiddleware`` caches
+        ``tools/list`` for 5 min by default, which would mask the visibility
+        toggle. The middleware config disables that cache, so the toggle (and
+        the ``enable`` restore below) is reflected immediately through the
+        client/protocol path.
+        """
+        from fastmcp.exceptions import ToolError
+
+        from morgenmcp.server import _MUTATING_TAGS, _apply_read_only
+
+        try:
+            _apply_read_only(mcp)
+            async with Client(mcp) as client:
+                names = {t.name for t in await client.list_tools()}
+                assert names == self._READ_TOOLS
+                # A disabled tool is not merely unlisted — calling it fails.
+                with pytest.raises(ToolError):
+                    await client.call_tool("morgen_create_event", {})
+        finally:
+            mcp.enable(tags=_MUTATING_TAGS)
+
+        # enable() restore is visible immediately (list_tools is not cached).
+        async with Client(mcp) as client:
+            assert len({t.name for t in await client.list_tools()}) == 22
+
+
+class TestRequireApiKey:
+    """Startup fails fast when MORGEN_API_KEY is missing.
+
+    ``_require_api_key`` runs both in ``main()`` (clean argparse error) and at
+    the top of the lifespan (covers programmatic/embedded use), so a
+    misconfigured server never starts, advertises tools, and then fails
+    lazily on the first call.
+    """
+
+    def test_missing_key_raises(self, monkeypatch):
+        from morgenmcp.server import _require_api_key
+
+        monkeypatch.delenv("MORGEN_API_KEY", raising=False)
+        with pytest.raises(RuntimeError, match="MORGEN_API_KEY is not set"):
+            _require_api_key()
+
+    def test_blank_key_raises(self, monkeypatch):
+        from morgenmcp.server import _require_api_key
+
+        monkeypatch.setenv("MORGEN_API_KEY", "   ")
+        with pytest.raises(RuntimeError, match="MORGEN_API_KEY is not set"):
+            _require_api_key()
+
+    def test_present_key_passes(self, monkeypatch):
+        from morgenmcp.server import _require_api_key
+
+        monkeypatch.setenv("MORGEN_API_KEY", "some-key")
+        _require_api_key()  # must not raise
+
+
 class TestResponseCaching:
     """Tests for ResponseCachingMiddleware behavior — both that read-only
     tools/resources are cached and that writes are NOT (the dangerous case).

@@ -799,6 +799,23 @@ class TestCreateEvent:
         # Event ID is now virtualized (7-char Base64url)
         assert len(result["event"]["id"]) == 7
 
+    async def test_create_event_empty_title_rejected(
+        self, mock_morgen_client, sample_calendar_id
+    ):
+        """Empty/whitespace titles are rejected (parity with tasks and tags)."""
+        virtual_cal = register_id(sample_calendar_id)
+
+        for bad_title in ("", "   "):
+            with pytest.raises(ToolError, match="title cannot be empty"):
+                await create_event(
+                    calendar_id=virtual_cal,
+                    title=bad_title,
+                    start="2023-03-15T14:00:00",
+                    duration="PT1H",
+                    time_zone="Europe/Berlin",
+                )
+        mock_morgen_client.create_event.assert_not_awaited()
+
     async def test_create_event_with_location(
         self, mock_morgen_client, sample_calendar_id, sample_account_id
     ):
@@ -1259,7 +1276,10 @@ class TestContextWarnings:
         assert result["count"] == 0
         ctx.warning.assert_awaited_once()
         warning_msg = ctx.warning.call_args[0][0]
-        assert other_account_id in warning_msg
+        # The warning must reference the *virtual* ID — raw Morgen IDs
+        # (email-bearing when decoded) never surface in client-visible text.
+        assert register_id(other_account_id) in warning_msg
+        assert other_account_id not in warning_msg
 
     async def test_list_events_reports_progress(
         self, mock_morgen_client, sample_calendar

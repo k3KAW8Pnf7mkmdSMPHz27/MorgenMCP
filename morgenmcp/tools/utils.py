@@ -1,8 +1,9 @@
 """Utility functions for MCP tools."""
 
+import asyncio
 import base64
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine, Iterable
 from functools import wraps
 from typing import Any
 
@@ -23,6 +24,31 @@ from morgenmcp.validators import (
     validate_alert_offset,
     validate_recurrence_rule,
 )
+
+# Cap concurrent Morgen API calls issued by a single tool invocation. Batch
+# tools fan out one request per item; unbounded gather would fire them all at
+# once and trip Morgen's rate limiter on large batches.
+BATCH_CONCURRENCY = 8
+
+
+async def gather_bounded(
+    coros: Iterable[Coroutine[Any, Any, Any]],
+    *,
+    limit: int = BATCH_CONCURRENCY,
+) -> list[Any]:
+    """``asyncio.gather(*coros, return_exceptions=True)`` with at most
+    ``limit`` coroutines running at once.
+
+    Per-item exceptions are returned in-place (never raised), matching the
+    batch tools' partial-result contract.
+    """
+    semaphore = asyncio.Semaphore(limit)
+
+    async def _run(coro: Coroutine[Any, Any, Any]) -> Any:
+        async with semaphore:
+            return await coro
+
+    return await asyncio.gather(*(_run(c) for c in coros), return_exceptions=True)
 
 
 def filter_none_values(d: dict[str, Any]) -> dict[str, Any]:

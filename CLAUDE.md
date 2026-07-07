@@ -8,6 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 uv sync --all-extras                    # Install dependencies
 echo "export MORGEN_API_KEY=..." > .envrc && direnv allow  # Configure API key
 uv run morgenmcp                        # Run server
+uv run morgenmcp --read-only            # Run server with only the 6 read tools (also: MORGENMCP_READ_ONLY=1)
 uv run pytest                           # Run all tests (excludes integration)
 uv run pytest tests/test_tools.py::TestCreateEvent -v  # Run specific test class
 uv run pytest tests/test_tools.py::TestCreateEvent::test_create_basic_event -v  # Run single test
@@ -42,17 +43,25 @@ FastMCP-based MCP server wrapping the Morgen calendar API (https://api.morgen.so
 
 ### Patterns
 
-- **Response caching**: `server.py` registers a `ResponseCachingMiddleware` with a 60s in-memory TTL. It caches an explicit allowlist of read-only tools (`morgen_list_*`, `morgen_get_task`) and **all** resources. Writes are intentionally not cached — adding any write tool to `_CACHEABLE_READ_TOOLS` would silently turn duplicate creates into no-ops. Storage is in-memory (resets on server restart) — disk persistence would let stale `events/today` survive restarts. Cache keys are method+args only (no session identity), which is fine for single-user stdio.
+- **Response caching**: `server.py` registers a `ResponseCachingMiddleware` with a 60s in-memory TTL. It caches an explicit allowlist of read-only tools (`morgen_list_*`, `morgen_get_task` via `call_tool`) and **all** resource reads (`read_resource`). Writes are intentionally not cached — adding any write tool to `_CACHEABLE_READ_TOOLS` would silently turn duplicate creates into no-ops. Storage is in-memory (resets on server restart) — disk persistence would let stale `events/today` survive restarts. Cache keys are method+args only (no session identity), which is fine for single-user stdio.
+  - **Listing caches are explicitly disabled** (`list_tools_settings`/`list_resources_settings`/`list_prompts_settings` set to `{"enabled": False}`). The middleware caches `tools/list`/`resources/list`/`prompts/list` **by default** with a 5-minute TTL if you pass `None`; but listing is a pure in-memory component enumeration (no API call), so the cache saves nothing and only risks serving a stale set. Critically, read-only mode toggles tool visibility, and a cached `tools/list` would mask that for up to 5 minutes. Do **not** re-enable listing caches.
+  - **Test isolation**: because the cache is a module-level singleton on `mcp` keyed on method+args (no session partition), two tests that call the same cacheable read tool with the same args collide across the 60s TTL. Tests either use disjoint keys (`TestResponseCaching`) or evict via the public `keys()`+`delete()` API in an autouse fixture (`TestTypedOutputSchemas::_isolate_cache`). Never call `_backend.destroy()` — it tears down collection-setup state and breaks every subsequent `put` in the process.
 - Tools return `{"success": True, ...}` on success
 - Tools raise `ToolError` (from `fastmcp.exceptions`) on failure — messages are always visible to LLMs
 - `@handle_tool_errors` in `utils.py` converts ValidationError, MorgenAPIError, and unexpected exceptions to ToolError
 - Batch operations return partial results with `{"deleted": [...], "failed": [...]}` — per-item failures are dict entries, not ToolError
+- **Typed output schemas**: Every tool declares a `TypedDict` return from `tools/outputs.py` (not `models.py` — those are alias-based wire models with a different shape than the hand-built camelCase output dicts like `calendarId`/`isAllDay`). This gives each tool a shaped `outputSchema` **and** makes FastMCP validate every return against it at runtime — a payload missing a schema-`required` field raises `ToolError: Output validation error: '<field>' is a required property`. Because tool payloads run through `filter_none_values` (drops None/empty keys), **any field that can be absent MUST be `NotRequired`**, or a normal sparse response (account with no `displayName`, event with no `description`) fails. Nested "always-present-but-nullable" values (e.g. `update_calendar_metadata`'s `updated.overrideColor`) are typed `T | None` (key required, value nullable), not `NotRequired`. The `_format_*` helpers are typed to return their item TypedDict via `cast(...)` at the `filter_none_values` boundary (resolves list-invariance under pyright). `TestTypedOutputSchemas` locks the `NotRequired` decisions into CI.
+- **Read-only launch mode**: `MORGENMCP_READ_ONLY` (truthy env) or `--read-only` (CLI flag, parsed in `main()`) calls `mcp.disable(tags={"write", "delete"})` **once at startup, before `mcp.run()`** (`_apply_read_only` in `server.py`). This hides + disables the 16 mutating tools, leaving the 6 reads. The tag taxonomy is a complete gate (every mutating tool carries `write` or `delete`, verified by tag tests). Applied at startup so the disabled state is in the first `list_tools` — and because listing caches are disabled, `disable`/`enable` are reflected immediately (a default-cached `tools/list` would have masked the toggle for 5 min). Disabled tools are both unlisted and uncallable through the protocol.
 - Datetime fields use LocalDateTime format (`2023-03-01T10:00:00`) - no Z suffix; timezone is separate
 - `EventCreateResponse` has nested structure: `response.event.id`, not `response.id`
 - **Timing fields constraint**: `update_event` and `batch_update_events` require all four timing fields (`start`, `duration`, `time_zone`, `is_all_day`) together or none — partial updates are rejected
 - **Alerts**: Tools accept negative ISO 8601 offsets (e.g., `'-PT15M'`) and convert them to Morgen's base64-encoded alert ID format (`base64(JSON({a:'display',to:offset}))`). `alerts` and `use_default_alerts` are mutually exclusive.
 - **Recurrence rules**: Accept simplified dicts `{frequency, interval, by_day}`; the `build_recurrence_rules` helper converts to JSCalendar `RecurrenceRule` objects.
 - **Tags endpoint quirk**: `/tags/list` returns a bare JSON array, not the standard `{data: ...}` envelope — the client handles both shapes.
+- **HTTP client hardening** (`client.py`): `_RetryAfterTransport` retries a request **once** when Morgen answers 429 with a short `Retry-After` (≤10s; longer hints and the HTTP-date form surface the 429 immediately). The transport wraps a real `AsyncHTTPTransport` with `Limits(max_connections=10)` and `retries=1` (connect errors), so respx still intercepts in tests. Timeouts are split (`Timeout(30, connect=10)`). Upstream error bodies are truncated to 300 chars (`_truncate_error_text`) before landing in `MorgenAPIError`/`ToolError` — a 5xx HTML page or data-echoing body must not reach the LLM verbatim.
+- **Bounded batch concurrency**: every batch/fan-out `asyncio.gather` goes through `gather_bounded` (`tools/utils.py`, semaphore, `BATCH_CONCURRENCY = 8`, always `return_exceptions=True`). Applies to `batch_delete_events`, `batch_update_events`, `batch_delete_tasks`, and the per-account fan-out in `list_events`. Never add a bare `asyncio.gather` over per-item API calls.
+- **Startup fail-fast**: `_require_api_key` (`server.py`) rejects a missing/blank `MORGEN_API_KEY` both in `main()` (clean argparse error) and at the top of the lifespan (covers programmatic use). Without it the server would start, advertise all tools, and fail lazily on the first call.
+- **No raw Morgen IDs in client-visible text**: warnings/errors surfaced via `ctx.warning` or `ToolError` must reference **virtual** IDs (`register_id(...)`) — raw calendar/event IDs base64-decode to email addresses.
 - **EventUpdateRequest.alerts** uses `dict[str, Alert | None]` to support patch-style removal (set entry to `None` to delete that alert). `EventCreateRequest.alerts` uses the same widened type for consistency at type-check time, even though create never accepts None values.
 - **Display timezone for compact events**: `_format_compact_event` converts event times into a display tz resolved by `_resolve_display_tz`: explicit `display_timezone` arg on `morgen_list_events` → `MORGENMCP_DISPLAY_TZ` env var → system local timezone. Every compact line includes a `MMM DD` date prefix so multi-day listings remain scannable. Rendered lines look like `"Jul 15 09:15-10:00 CDT (America/Chicago): Standup [abc123]"`. All-day events render as `"Jul 15 (all-day): Holiday [abc123]"`. Floating events (`time_zone=None`) are tagged `(floating)` and not converted. Cross-midnight conversions get a date prefix on the end side as well. Resources have no per-call argument path — they rely on env/system fallback only.
 
@@ -82,7 +91,7 @@ Tools expose 7-character Base64url virtual IDs (e.g., `aB-9xZ_`) instead of raw 
 
 Virtual IDs are **deterministic** (`MD5(real_id)`) and **persisted to disk** via `py-key-value-aio`'s `FileTreeStore`. Reads are sync in-memory dict lookups; writes are fire-and-forget async write-through to the store. On startup, the server lifespan loads all persisted mappings into memory, so IDs survive server restarts without re-listing.
 
-- **Storage location**: `~/Library/Application Support/morgenmcp/id_store/` (via `platformdirs.user_data_dir`)
+- **Storage location**: `~/Library/Application Support/morgenmcp/id_store/` (via `platformdirs.user_data_dir`), `chmod 0o700` after setup — persisted entries hold raw Morgen IDs, which decode to email addresses
 - **Override**: Set `MORGENMCP_DATA_DIR` env var to use a custom directory
 - **Graceful degradation**: If the store fails to initialize, the server continues with in-memory-only IDs (session-scoped)
 - **Tests**: Persistence is disabled by an `autouse` conftest fixture (`set_store(None)`)
@@ -95,9 +104,10 @@ Virtual IDs are **deterministic** (`MD5(real_id)`) and **persisted to disk** via
 
 ### Environment variables
 
-- **`MORGEN_API_KEY`**: Required. Morgen API key.
+- **`MORGEN_API_KEY`**: Required. Morgen API key. Checked at startup (`_require_api_key`) — the server refuses to start without it instead of failing lazily on the first tool call.
 - **`MORGENMCP_DATA_DIR`**: Override the virtual-ID persistence directory.
 - **`MORGENMCP_DISPLAY_TZ`**: IANA timezone (e.g. `America/Chicago`) for rendering compact event times in `morgen_list_events` (when `compact=True`) and all `morgen://events/*` resources. Defaults to the system local timezone. Overridden per-call via the `display_timezone` arg on `morgen_list_events`.
+- **`MORGENMCP_READ_ONLY`**: Truthy (`1`/`true`/`yes`/`on`, case-insensitive) launches the server read-only: all mutating tools (everything tagged `write` or `delete` — 16 create/update/delete/complete/reopen/move/batch tools) are disabled, leaving only the 6 read tools. Equivalent to the `--read-only` CLI flag (`uv run morgenmcp --read-only`); either one enables it. Applied once at startup, before `mcp.run()`, so the disabled state is baked into the first `list_tools` response.
 
 ### Testing
 
@@ -110,7 +120,7 @@ Virtual IDs are **deterministic** (`MD5(real_id)`) and **persisted to disk** via
 ### Environment
 
 - Python `>= 3.14` (set in `pyproject.toml`)
-- `fastmcp>=3.3,<3.4` — pinned to 3.3.x patch range
+- `fastmcp>=3.4,<3.5` — pinned to 3.4.x patch range
 
 ## Versioning & Release
 
@@ -137,7 +147,7 @@ When spawning Explore agents, **always include this instruction in the prompt**:
 | **FastMCP** | `docs/fastmcp/docs/` | `fastmcp-docs` | Server framework: tools, context, auth, testing, deployment |
 
 - **Morgen docs submodule**: `f977d08` (updated automatically by SessionStart hook)
-- **FastMCP docs submodule**: `v3.3.1` / `d8dcc273` — matches `fastmcp>=3.3,<3.4` pin (updated automatically by SessionStart hook)
+- **FastMCP docs submodule**: `v3.4.3` / `1eedd1f6` — matches `fastmcp>=3.4,<3.5` pin (updated automatically by SessionStart hook)
 
 ### Online docs (fallback only)
 

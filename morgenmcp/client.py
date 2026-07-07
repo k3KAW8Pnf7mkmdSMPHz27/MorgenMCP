@@ -1,5 +1,6 @@
 """Async HTTP client for Morgen API."""
 
+import asyncio
 import os
 from typing import Any
 
@@ -36,6 +37,68 @@ from morgenmcp.models import (
     TaskUpdateRequest,
 )
 
+# Upstream error bodies (5xx HTML pages, data-echoing 4xx payloads) must not
+# flow verbatim into ToolError messages — cap what we surface.
+_MAX_ERROR_BODY_CHARS = 300
+# Only honor short Retry-After hints; a long hint isn't worth blocking a tool
+# call for — surface the 429 immediately instead.
+_MAX_RETRY_AFTER_S = 10.0
+_REQUEST_TIMEOUT_S = 30.0
+_CONNECT_TIMEOUT_S = 10.0
+# Batch tools fan out one request per item; keep the pool well below httpx's
+# default 100 so a large batch can't open dozens of simultaneous connections.
+_MAX_CONNECTIONS = 10
+
+
+def _truncate_error_text(text: str, limit: int = _MAX_ERROR_BODY_CHARS) -> str:
+    """Cap upstream error text surfaced to clients."""
+    text = text.strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit] + " …[truncated]"
+
+
+def _parse_retry_after(value: str | None) -> float | None:
+    """Parse a Retry-After header as seconds; HTTP-date form is ignored."""
+    if value is None:
+        return None
+    try:
+        seconds = float(value)
+    except ValueError:
+        return None
+    return seconds if seconds >= 0 else None
+
+
+class _RetryAfterTransport(httpx.AsyncBaseTransport):
+    """Retry a request once when the API answers 429 with a short Retry-After.
+
+    Morgen signals rate limiting with 429 + a Retry-After header. Honoring a
+    short hint (sleep, retry once) lets batch fan-outs degrade gracefully
+    instead of shedding items into their `failed` lists.
+    """
+
+    def __init__(
+        self,
+        wrapped: httpx.AsyncBaseTransport,
+        max_retry_after: float = _MAX_RETRY_AFTER_S,
+    ):
+        self._wrapped = wrapped
+        self._max_retry_after = max_retry_after
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        response = await self._wrapped.handle_async_request(request)
+        if response.status_code != 429:
+            return response
+        retry_after = _parse_retry_after(response.headers.get("Retry-After"))
+        if retry_after is None or retry_after > self._max_retry_after:
+            return response
+        await response.aclose()
+        await asyncio.sleep(retry_after)
+        return await self._wrapped.handle_async_request(request)
+
+    async def aclose(self) -> None:
+        await self._wrapped.aclose()
+
 
 class MorgenClient:
     """Async client for interacting with the Morgen API."""
@@ -67,7 +130,15 @@ class MorgenClient:
                     "Accept": "application/json",
                     "Content-Type": "application/json",
                 },
-                timeout=30.0,
+                # Separate connect timeout so a stalled TCP connect doesn't
+                # consume the full request budget.
+                timeout=httpx.Timeout(_REQUEST_TIMEOUT_S, connect=_CONNECT_TIMEOUT_S),
+                transport=_RetryAfterTransport(
+                    httpx.AsyncHTTPTransport(
+                        limits=httpx.Limits(max_connections=_MAX_CONNECTIONS),
+                        retries=1,  # transient connect errors only
+                    )
+                ),
             )
         return self._client
 
@@ -138,7 +209,7 @@ class MorgenClient:
                 message = response.text
 
             raise MorgenAPIError(
-                f"API error: {message}",
+                f"API error: {_truncate_error_text(str(message))}",
                 status_code=response.status_code,
                 rate_limit_info=rate_limit_info,
             )
