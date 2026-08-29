@@ -165,6 +165,18 @@ class TestValidateTimezone:
 
         assert "cannot be an empty string" in str(exc_info.value)
 
+    def test_windows_missing_timezones_simulation(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Simulate Windows environment without tzdata where available_timezones() is empty."""
+        monkeypatch.setattr("morgenmcp.validators._VALID_TIMEZONES", None)
+        monkeypatch.setattr("morgenmcp.validators.available_timezones", lambda: set())
+
+        with pytest.raises(ValidationError) as exc_info:
+            validate_timezone("America/New_York")
+
+        assert "Invalid timezone: 'America/New_York'" in str(exc_info.value)
+
 
 class TestValidateEmail:
     """Tests for validate_email."""

@@ -9,6 +9,7 @@ dependencies = [
     "httpx>=0.28",
     "platformdirs>=4.0",
     "pydantic>=2.12",
+    "tzdata>=2025.1",
 ]
 
 [project.optional-dependencies]
@@ -59,5 +60,6 @@ known-first-party = ["morgenmcp"]
 [tool.pyright]
 pythonVersion = "3.14"
 typeCheckingMode = "standard"
+include = ["morgenmcp"]
 venvPath = "."
 venv = ".venv"
