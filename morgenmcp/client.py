@@ -395,9 +395,9 @@ class MorgenClient:
         Returns:
             List of Task objects.
         """
-        params: dict[str, str | int] = {}
-        if limit is not None:
-            params["limit"] = limit
+        params: dict[str, str | int] = {
+            "limit": limit if limit is not None else 100,
+        }
         if updated_after is not None:
             params["updatedAfter"] = updated_after
 

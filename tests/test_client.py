@@ -588,7 +588,7 @@ class TestTaskEndpoints:
 
     @respx.mock
     async def test_list_tasks(self):
-        respx.get("https://api.morgen.so/v3/tasks/list").mock(
+        route = respx.get("https://api.morgen.so/v3/tasks/list").mock(
             return_value=httpx.Response(
                 200,
                 json={
@@ -611,6 +611,8 @@ class TestTaskEndpoints:
 
         assert len(tasks) == 1
         assert tasks[0].title == "Hi"
+        url = str(route.calls.last.request.url)
+        assert "limit=100" in url
 
     @respx.mock
     async def test_list_tasks_passes_filters(self):
