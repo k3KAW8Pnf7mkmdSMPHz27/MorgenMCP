@@ -55,6 +55,7 @@ class TestMCPServer:
                 "morgen_batch_delete_tasks",
                 # Tags
                 "morgen_list_tags",
+                "morgen_get_tag",
                 "morgen_create_tag",
                 "morgen_update_tag",
                 "morgen_delete_tag",
@@ -73,6 +74,7 @@ class TestMCPServer:
                 "morgen_list_tasks",
                 "morgen_get_task",
                 "morgen_list_tags",
+                "morgen_get_tag",
             ]:
                 assert by_name[name].annotations.readOnlyHint is True
 
@@ -429,6 +431,7 @@ class TestReadOnlyMode:
         "morgen_list_tasks",
         "morgen_get_task",
         "morgen_list_tags",
+        "morgen_get_tag",
     }
 
     def test_read_only_requested_env_parsing(self, monkeypatch):
@@ -448,13 +451,13 @@ class TestReadOnlyMode:
             assert _read_only_requested() is False
 
     async def test_default_lists_all_tools(self):
-        """Without read-only mode, all 22 tools are visible."""
+        """Without read-only mode, all 23 tools are visible."""
         async with Client(mcp) as client:
             tools = await client.list_tools()
-            assert len(tools) == 22
+            assert len(tools) == 23
 
     async def test_read_only_hides_mutating_tools(self):
-        """After _apply_read_only, only the 6 read tools are visible, and each
+        """After _apply_read_only, only the 7 read tools are visible, and each
         mutating tool is both unlisted and uncallable.
 
         Also guards the cache fix: ``ResponseCachingMiddleware`` caches
@@ -480,7 +483,7 @@ class TestReadOnlyMode:
 
         # enable() restore is visible immediately (list_tools is not cached).
         async with Client(mcp) as client:
-            assert len({t.name for t in await client.list_tools()}) == 22
+            assert len({t.name for t in await client.list_tools()}) == 23
 
 
 class TestRequireApiKey:
@@ -540,6 +543,7 @@ class TestResponseCaching:
         assert "morgen_list_tasks" in included
         assert "morgen_list_tags" in included
         assert "morgen_get_task" in included
+        assert "morgen_get_tag" in included
         # Writes must NOT be in the allowlist
         for write_tool in (
             "morgen_create_event",
