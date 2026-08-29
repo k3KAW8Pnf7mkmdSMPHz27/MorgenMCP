@@ -449,6 +449,38 @@ class MorgenClient:
 
     # Task endpoints
 
+    async def list_tasks_and_spaces(
+        self,
+        limit: int | None = None,
+        updated_after: str | None = None,
+    ) -> TasksListResponse:
+        """List tasks and spaces from /tasks/list.
+
+        Args:
+            limit: Maximum tasks to return (max 100). Defaults to
+                MORGENMCP_TASKS_LIMIT, else 100 — Morgen's documented default,
+                which the endpoint itself fails to apply.
+            updated_after: ISO 8601 datetime to filter for incremental sync.
+
+        Returns:
+            TasksListResponse containing tasks and spaces.
+        """
+        resolved = resolve_limit(
+            limit, TASKS_LIMIT_ENV, TASKS_DEFAULT_LIMIT, TASKS_MAX_LIMIT
+        )
+        params: dict[str, str | int] = {}
+        if resolved is not None:
+            params["limit"] = resolved
+        if updated_after is not None:
+            params["updatedAfter"] = updated_after
+
+        response = await self.client.get("/tasks/list", params=params)
+        self._handle_error(response)
+
+        data = response.json()
+        api_response = APIResponse[TasksListResponse].model_validate(data)
+        return api_response.data
+
     async def list_tasks(
         self,
         limit: int | None = None,
@@ -465,21 +497,10 @@ class MorgenClient:
         Returns:
             List of Task objects.
         """
-        resolved = resolve_limit(
-            limit, TASKS_LIMIT_ENV, TASKS_DEFAULT_LIMIT, TASKS_MAX_LIMIT
+        data = await self.list_tasks_and_spaces(
+            limit=limit, updated_after=updated_after
         )
-        params: dict[str, str | int] = {}
-        if resolved is not None:
-            params["limit"] = resolved
-        if updated_after is not None:
-            params["updatedAfter"] = updated_after
-
-        response = await self.client.get("/tasks/list", params=params)
-        self._handle_error(response)
-
-        data = response.json()
-        api_response = APIResponse[TasksListResponse].model_validate(data)
-        return api_response.data.tasks
+        return data.tasks
 
     async def get_task(self, task_id: str) -> Task:
         """Retrieve a single task by ID.

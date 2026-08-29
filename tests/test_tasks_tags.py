@@ -7,11 +7,13 @@ from fastmcp.exceptions import ToolError
 
 from morgenmcp.models import (
     MorgenAPIError,
+    Space,
     Tag,
     Task,
     TaskCreateRequest,
     TaskMoveRequest,
     TaskRelation,
+    TasksListResponse,
     TaskUpdateRequest,
 )
 from morgenmcp.tools.id_registry import clear_registry, register_id
@@ -22,6 +24,7 @@ from morgenmcp.tools.tasks import (
     create_task,
     delete_task,
     get_task,
+    list_task_lists,
     list_tasks,
     move_task,
     reopen_task,
@@ -80,6 +83,87 @@ def sample_tag():
     )
 
 
+class TestListTaskLists:
+    async def test_list_task_lists_returns_spaces_with_counts(self, mock_task_client):
+        space1 = Space(
+            id="space_real_1",
+            name="Personal",
+            color="#FF5733",
+            account_id="acc_real_1",
+            integration_id="morgen",
+        )
+        space2 = Space(
+            id="space_real_2",
+            name="Work",
+            color="#33FF57",
+            account_id="acc_real_2",
+            integration_id="morgen",
+        )
+        t1 = Task(id="t1", task_list_id="space_real_1", title="Task 1")
+        t2 = Task(id="t2", task_list_id="space_real_1", title="Task 2")
+        t3 = Task(id="t3", task_list_id="space_real_2", title="Task 3")
+        t4 = Task(id="t4", task_list_id="default", title="Task 4")
+
+        mock_task_client.list_tasks_and_spaces.return_value = TasksListResponse(
+            tasks=[t1, t2, t3, t4],
+            spaces=[space1, space2],
+        )
+
+        result = await list_task_lists()
+        assert result["count"] == 3
+        lists = result["task_lists"]
+
+        s1_out = next(item for item in lists if item["name"] == "Personal")
+        assert len(s1_out["id"]) == 7
+        assert s1_out["color"] == "#FF5733"
+        assert s1_out["task_count"] == 2
+        assert s1_out["account_id"] is not None
+        assert len(s1_out["account_id"]) == 7
+
+        s2_out = next(item for item in lists if item["name"] == "Work")
+        assert len(s2_out["id"]) == 7
+        assert s2_out["color"] == "#33FF57"
+        assert s2_out["task_count"] == 1
+
+        def_out = next(item for item in lists if item["name"] == "Default")
+        assert len(def_out["id"]) == 7
+        assert def_out["task_count"] == 1
+
+    async def test_list_task_lists_filter_by_account_id(self, mock_task_client):
+        space1 = Space(id="s1", name="Acc1 Space", account_id="acc_real_1")
+        space2 = Space(id="s2", name="Acc2 Space", account_id="acc_real_2")
+        t1 = Task(id="t1", task_list_id="s1", account_id="acc_real_1", title="T1")
+        t2 = Task(id="t2", task_list_id="s2", account_id="acc_real_2", title="T2")
+
+        mock_task_client.list_tasks_and_spaces.return_value = TasksListResponse(
+            tasks=[t1, t2],
+            spaces=[space1, space2],
+        )
+
+        acc1_virtual = register_id("acc_real_1")
+        result = await list_task_lists(account_id=acc1_virtual)
+        assert result["count"] == 1
+        assert result["task_lists"][0]["name"] == "Acc1 Space"
+        assert result["task_lists"][0]["task_count"] == 1
+
+    async def test_list_task_lists_fallback_client_list_tasks(self, mock_task_client):
+        del mock_task_client.list_tasks_and_spaces
+        t1 = Task(id="t1", task_list_id="space_a", title="T1")
+        mock_task_client.list_tasks.return_value = [t1]
+
+        result = await list_task_lists()
+        assert result["count"] == 1
+        assert result["task_lists"][0]["task_count"] == 1
+        assert len(result["task_lists"][0]["id"]) == 7
+
+    async def test_list_task_lists_api_error(self, mock_task_client):
+        mock_task_client.list_tasks_and_spaces.side_effect = MorgenAPIError(
+            "failed", status_code=500
+        )
+        with pytest.raises(ToolError, match="API error"):
+            await list_task_lists()
+
+
 class TestListTasks:
     async def test_list_tasks_returns_virtual_ids(self, mock_task_client, sample_task):
         mock_task_client.list_tasks.return_value = [sample_task]
@@ -109,6 +193,25 @@ class TestListTasks:
         )
         with pytest.raises(ToolError, match="API error"):
             await list_tasks()
+
+    async def test_list_tasks_filters_by_task_list_id(self, mock_task_client):
+        t1 = Task(id="t1", task_list_id="space_real_1", title="Task 1")
+        t2 = Task(id="t2", task_list_id="space_real_2", title="Task 2")
+        t3 = Task(id="t3", task_list_id="default", title="Task 3")
+        t4 = Task(id="t4", task_list_id=None, title="Task 4")
+        mock_task_client.list_tasks.return_value = [t1, t2, t3, t4]
+
+        # Filter by virtual ID
+        space1_virtual = register_id("space_real_1")
+        res1 = await list_tasks(task_list_id=space1_virtual)
+        assert res1["count"] == 1
+        assert res1["tasks"][0]["title"] == "Task 1"
+
+        # Filter by "default" (matches "default" and None)
+        res_default = await list_tasks(task_list_id="default")
+        assert res_default["count"] == 2
+        titles = {t["title"] for t in res_default["tasks"]}
+        assert titles == {"Task 3", "Task 4"}
 
 
 class TestGetTask:

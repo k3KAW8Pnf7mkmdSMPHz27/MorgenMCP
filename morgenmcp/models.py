@@ -418,10 +418,22 @@ class TaskDeleteRequest(MorgenModel):
     id: str
 
 
+class Space(MorgenModel):
+    """Morgen task list / space model."""
+
+    id: str
+    name: str | None = None
+    color: str | None = None
+    updated: str | None = None
+    account_id: Annotated[str | None, Field(alias="accountId")] = None
+    integration_id: Annotated[str | None, Field(alias="integrationId")] = None
+
+
 class TasksListResponse(BaseModel):
     """Response from tasks list endpoint."""
 
     tasks: list[Task]
+    spaces: list[Space] | None = None
 
 
 class TaskGetResponse(BaseModel):
