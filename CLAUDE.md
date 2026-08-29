@@ -2,21 +2,21 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Quick Reference
+@AGENTS.md
+
+The import above pulls in `AGENTS.md` — the harness-agnostic contributor guide (environment setup, base lint/format/typecheck/test commands, code conventions, scope and safety rules) shared with any other coding-agent tool working in this repo. Edit that file, not this section, when those base commands or conventions change; the two must not drift.
+
+## Quick Reference (Claude Code additions)
+
+Commands specific to working in this repo through Claude Code — beyond the base set in `AGENTS.md`:
 
 ```bash
-uv sync --all-extras                    # Install dependencies
 echo "export MORGEN_API_KEY=..." > .envrc && direnv allow  # Configure API key
 uv run morgenmcp                        # Run server
 uv run morgenmcp --read-only            # Run server with only the 6 read tools (also: MORGENMCP_READ_ONLY=1)
-uv run pytest                           # Run all tests (excludes integration)
 uv run pytest tests/test_tools.py::TestCreateEvent -v  # Run specific test class
 uv run pytest tests/test_tools.py::TestCreateEvent::test_create_basic_event -v  # Run single test
 uv run pytest tests/test_integration.py -v -s -m integration  # Run live API tests
-uv run ruff check .                     # Lint code
-uv run ruff format .                    # Format code
-uv run pyright morgenmcp/               # Type check
-pre-commit install                      # Set up git hooks (once)
 ```
 
 ## Local Debugging
