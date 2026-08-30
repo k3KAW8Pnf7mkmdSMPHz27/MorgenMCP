@@ -10,6 +10,7 @@ tag APIs through FastMCP. The package source is in `morgenmcp/`; tests are in
 
 - Use Python 3.14 and manage dependencies with `uv`.
 - Install development dependencies with `uv sync --all-extras`.
+- Set up git hooks once with `pre-commit install`.
 - Run the default test suite with `uv run pytest`. Integration tests are
   excluded by default; run them explicitly with `uv run pytest -m integration`
   only when `MORGEN_API_KEY` is configured and real API calls are intended.
