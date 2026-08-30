@@ -5,6 +5,7 @@ An MCP server for the [Morgen](https://morgen.so) calendar API.
 ## Requirements
 
 - [uv](https://github.com/astral-sh/uv) - Install with `brew install uv`
+- [mise](https://mise.jdx.dev/) - Install with `brew install mise` (used to manage the `MORGEN_API_KEY` environment variable during local development)
 - A Morgen API key - Get one from [Morgen Developer Portal](https://platform.morgen.so/developers-api)
 
 ## Installation
@@ -61,11 +62,11 @@ uv run pytest
 
 ### Environment Setup
 
-The server reads `MORGEN_API_KEY` from the process environment — it does not load a `.env` file itself. Export it with [direnv](https://direnv.net/) so it's available whenever you're in this directory:
+The server reads `MORGEN_API_KEY` from the process environment — it does not load a `.env` file itself. This repo ships a `mise.toml` that declares `MORGEN_API_KEY` as required; set the actual value via [mise](https://mise.jdx.dev/), which writes it to a gitignored `mise.local.toml` rather than the committed config:
 
 ```bash
-echo "export MORGEN_API_KEY=your_api_key" > .envrc
-direnv allow
+mise trust
+mise set --file mise.local.toml MORGEN_API_KEY=your_api_key
 ```
 
 Then run the server:

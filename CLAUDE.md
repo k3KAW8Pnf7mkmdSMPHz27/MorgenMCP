@@ -11,7 +11,7 @@ The import above pulls in `AGENTS.md` — the harness-agnostic contributor guide
 Commands specific to working in this repo through Claude Code — beyond the base set in `AGENTS.md`:
 
 ```bash
-echo "export MORGEN_API_KEY=..." > .envrc && direnv allow  # Configure API key
+mise trust && mise set --file mise.local.toml MORGEN_API_KEY=...  # Configure API key
 uv run morgenmcp                        # Run server
 uv run morgenmcp --read-only            # Run server with only the 6 read tools (also: MORGENMCP_READ_ONLY=1)
 uv run pytest tests/test_tools.py::TestCreateEvent -v  # Run specific test class
