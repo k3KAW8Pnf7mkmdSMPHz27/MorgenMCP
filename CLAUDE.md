@@ -141,10 +141,10 @@ When spawning Explore agents, **always include this instruction in the prompt**:
 
 ### Local docs (primary — version-pinned, always available)
 
-| Source | Path | Agent | Covers |
-|--------|------|-------|--------|
-| **Morgen API** | `docs/morgen-dev-docs/content/*.mdx` | `morgen-api-docs` | Endpoints, parameters, schemas, changelog |
-| **FastMCP** | `docs/fastmcp/docs/` | `fastmcp-docs` | Server framework: tools, context, auth, testing, deployment |
+| Source | Path | Covers |
+|--------|------|--------|
+| **Morgen API** | `docs/morgen-dev-docs/content/*.mdx` | Endpoints, parameters, schemas, changelog |
+| **FastMCP** | `docs/fastmcp/docs/` | Server framework: tools, context, auth, testing, deployment |
 
 - **Morgen docs submodule**: `f977d08` (updated automatically by SessionStart hook)
 - **FastMCP docs submodule**: `v3.4.3` / `1eedd1f6` — matches `fastmcp>=3.4,<3.5` pin (updated automatically by SessionStart hook)
@@ -159,8 +159,8 @@ When spawning Explore agents, **always include this instruction in the prompt**:
 
 ### Lookup rules
 
-1. **Before implementing or modifying any tool**: Use the `morgen-api-docs` agent to look up the relevant Morgen API endpoint in the local MDX files. Confirm parameters, required fields, and response shapes. Only cross-reference online docs if the local result is incomplete.
-2. **For FastMCP patterns** (tool registration, return types, error handling, testing): Use the `fastmcp-docs` agent — it searches `docs/fastmcp/docs/` and returns file paths, line numbers, and code examples. These docs match the installed FastMCP version exactly.
+1. **Before implementing or modifying any tool**: Search `docs/morgen-dev-docs/content/*.mdx` directly (grep for the endpoint or resource name, read the matching file) to confirm parameters, required fields, and response shapes. Only cross-reference online docs if the local result is incomplete.
+2. **For FastMCP patterns** (tool registration, return types, error handling, testing): Search `docs/fastmcp/docs/` directly — grep for the pattern (decorator, `Context` method, error class, testing helper) and read the matching file for file paths, line numbers, and code examples. These docs match the installed FastMCP version exactly.
 3. **For MCP protocol questions** (transport, JSON-RPC, tool schema): Fetch `https://modelcontextprotocol.io/llms.txt` first, then the relevant spec page (no local copy exists).
 4. **When adding a new tool or changing tool signatures**: Check both FastMCP local docs (for decorator/return-type patterns) and the MCP protocol spec (for schema requirements) to ensure compliance.
-5. **When spawning any agent** (Explore, Plan, or general-purpose) that may need API or framework information: Include the local doc paths and agent names in the prompt so the subagent searches them directly rather than guessing or using online sources.
+5. **When spawning any agent** (Explore, Plan, or general-purpose) that may need API or framework information: Include the local doc paths in the prompt (`docs/morgen-dev-docs/content/` for Morgen API, `docs/fastmcp/docs/` for FastMCP) so the subagent searches them directly rather than guessing or using online sources.
