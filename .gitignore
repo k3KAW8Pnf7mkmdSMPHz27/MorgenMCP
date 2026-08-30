@@ -51,6 +51,7 @@ htmlcov/
 !.claude/settings.json
 !.claude/hooks
 !.claude/skills
+!.claude/agents
 .env
 .env.local
 *.env
