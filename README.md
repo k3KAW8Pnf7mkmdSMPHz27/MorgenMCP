@@ -36,12 +36,14 @@ To pin to a specific version, replace `@main` with a version tag (e.g., `@v0.1.0
 
 ## Available Tools
 
-- **list_calendars** - List all calendars
-- **update_calendar_metadata** - Update calendar display name or color
-- **list_events** - List events with optional date filtering
-- **create_event** - Create a new calendar event
-- **update_event** - Update an existing event
-- **delete_event** - Delete an event
+22 tools across accounts, calendars, events, tasks, and tags — 6 read-only, 16 mutating:
+
+- **Accounts & calendars**: `list_accounts`, `list_calendars`, `update_calendar_metadata`
+- **Events**: `list_events`, `create_event`, `update_event`, `delete_event`, `batch_update_events`, `batch_delete_events`
+- **Tasks**: `list_tasks`, `get_task`, `create_task`, `update_task`, `move_task`, `complete_task`, `reopen_task`, `delete_task`, `batch_delete_tasks`
+- **Tags**: `list_tags`, `create_tag`, `update_tag`, `delete_tag`
+
+Pass `--read-only` (or set `MORGENMCP_READ_ONLY=1`) to expose only the 6 read-only tools. For the exact live list with schemas and annotations, connect any MCP client or run the [MCP Inspector](#local-debugging-with-mcp-inspector).
 
 ## Development
 
@@ -59,13 +61,14 @@ uv run pytest
 
 ### Environment Setup
 
-Create a `.env` file with your API key:
+The server reads `MORGEN_API_KEY` from the process environment — it does not load a `.env` file itself. Export it with [direnv](https://direnv.net/) so it's available whenever you're in this directory:
 
 ```bash
-echo "MORGEN_API_KEY=your_api_key" > .env
+echo "export MORGEN_API_KEY=your_api_key" > .envrc
+direnv allow
 ```
 
-The server loads `.env` automatically when running locally:
+Then run the server:
 
 ```bash
 uv run morgenmcp
