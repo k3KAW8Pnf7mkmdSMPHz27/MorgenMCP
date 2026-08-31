@@ -49,6 +49,74 @@ _CONNECT_TIMEOUT_S = 10.0
 # default 100 so a large batch can't open dozens of simultaneous connections.
 _MAX_CONNECTIONS = 10
 
+# --- Configurable per-endpoint list limits ------------------------------------
+#
+# Morgen documents a default for /tasks/list but does not apply it: omitting
+# `limit` yields ONE task, not the documented 100 (tasks.mdx). So the client
+# always sends the documented default explicitly. /tags/list documents no
+# default and no maximum ("Returns all tags"), so its limit stays omitted
+# unless configured. Precedence: per-call arg > CLI flag > env var > default.
+
+TASKS_LIMIT_ENV = "MORGENMCP_TASKS_LIMIT"
+TAGS_LIMIT_ENV = "MORGENMCP_TAGS_LIMIT"
+
+#: tasks.mdx documents `limit` as default 100, max 100.
+TASKS_DEFAULT_LIMIT = 100
+TASKS_MAX_LIMIT: int | None = 100
+#: tags.mdx documents neither a default nor a maximum.
+TAGS_DEFAULT_LIMIT: int | None = None
+TAGS_MAX_LIMIT: int | None = None
+
+_LIMIT_OVERRIDES: dict[str, int] = {}
+
+
+def validate_limit(value: int, name: str, maximum: int | None) -> int:
+    """Range-check a configured limit, raising ValueError with a clean message."""
+    if value < 1:
+        raise ValueError(f"{name} must be >= 1 (got {value})")
+    if maximum is not None and value > maximum:
+        raise ValueError(f"{name} must be <= {maximum} (got {value})")
+    return value
+
+
+def set_limit_override(env_name: str, value: int | None) -> None:
+    """Register a CLI-supplied limit, which outranks the env var.
+
+    Called once from ``main()``. ``None`` clears any existing override, which
+    keeps tests independent of one another.
+    """
+    if value is None:
+        _LIMIT_OVERRIDES.pop(env_name, None)
+    else:
+        _LIMIT_OVERRIDES[env_name] = value
+
+
+def resolve_limit(
+    explicit: int | None,
+    env_name: str,
+    default: int | None,
+    maximum: int | None,
+) -> int | None:
+    """Resolve the limit to send: explicit arg > CLI override > env > default.
+
+    A malformed or out-of-range env var raises ValueError rather than being
+    silently ignored — a limit that quietly fails to apply is worse than a loud
+    failure, because it under-returns data with no visible symptom.
+    """
+    if explicit is not None:
+        return explicit
+    override = _LIMIT_OVERRIDES.get(env_name)
+    if override is not None:
+        return override
+    raw = os.environ.get(env_name, "").strip()
+    if raw:
+        try:
+            parsed = int(raw)
+        except ValueError:
+            raise ValueError(f"{env_name} must be an integer (got {raw!r})") from None
+        return validate_limit(parsed, env_name, maximum)
+    return default
+
 
 def _truncate_error_text(text: str, limit: int = _MAX_ERROR_BODY_CHARS) -> str:
     """Cap upstream error text surfaced to clients."""
@@ -389,15 +457,20 @@ class MorgenClient:
         """List tasks, optionally filtered by update time.
 
         Args:
-            limit: Maximum tasks to return (max 100, default 100).
+            limit: Maximum tasks to return (max 100). Defaults to
+                MORGENMCP_TASKS_LIMIT, else 100 — Morgen's documented default,
+                which the endpoint itself fails to apply.
             updated_after: ISO 8601 datetime to filter for incremental sync.
 
         Returns:
             List of Task objects.
         """
-        params: dict[str, str | int] = {
-            "limit": limit if limit is not None else 100,
-        }
+        resolved = resolve_limit(
+            limit, TASKS_LIMIT_ENV, TASKS_DEFAULT_LIMIT, TASKS_MAX_LIMIT
+        )
+        params: dict[str, str | int] = {}
+        if resolved is not None:
+            params["limit"] = resolved
         if updated_after is not None:
             params["updatedAfter"] = updated_after
 
@@ -492,15 +565,20 @@ class MorgenClient:
         """List tags. With updated_after, also returns tags marked deleted.
 
         Args:
-            limit: Maximum tags to return.
+            limit: Maximum tags to return. Defaults to MORGENMCP_TAGS_LIMIT;
+                when neither is set the parameter is omitted, which Morgen
+                documents as returning all tags.
             updated_after: ISO 8601 datetime for incremental sync.
 
         Returns:
             List of Tag objects (deleted ones have deleted=True).
         """
+        resolved = resolve_limit(
+            limit, TAGS_LIMIT_ENV, TAGS_DEFAULT_LIMIT, TAGS_MAX_LIMIT
+        )
         params: dict[str, str | int] = {}
-        if limit is not None:
-            params["limit"] = limit
+        if resolved is not None:
+            params["limit"] = resolved
         if updated_after is not None:
             params["updatedAfter"] = updated_after
 

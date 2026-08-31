@@ -673,3 +673,82 @@ class TestResponseCaching:
 
             # Different windows ⇒ two underlying fetches
             assert client_mock.list_events.await_count == 2
+
+
+class TestLimitConfig:
+    """CLI/env wiring for the per-endpoint list limits (_apply_limit_config)."""
+
+    @pytest.fixture(autouse=True)
+    def _isolate(self, monkeypatch):
+        from morgenmcp.client import (
+            TAGS_LIMIT_ENV,
+            TASKS_LIMIT_ENV,
+            set_limit_override,
+        )
+
+        monkeypatch.delenv(TASKS_LIMIT_ENV, raising=False)
+        monkeypatch.delenv(TAGS_LIMIT_ENV, raising=False)
+        yield
+        set_limit_override(TASKS_LIMIT_ENV, None)
+        set_limit_override(TAGS_LIMIT_ENV, None)
+
+    def test_cli_values_are_registered_as_overrides(self):
+        from morgenmcp.client import TAGS_LIMIT_ENV, TASKS_LIMIT_ENV, resolve_limit
+        from morgenmcp.server import _apply_limit_config
+
+        _apply_limit_config(cli_tasks_limit=30, cli_tags_limit=60)
+
+        assert resolve_limit(None, TASKS_LIMIT_ENV, 100, 100) == 30
+        assert resolve_limit(None, TAGS_LIMIT_ENV, None, None) == 60
+
+    def test_omitted_cli_values_clear_previous_overrides(self):
+        """Calling twice must not leave a stale override behind."""
+        from morgenmcp.client import TASKS_LIMIT_ENV, resolve_limit
+        from morgenmcp.server import _apply_limit_config
+
+        _apply_limit_config(cli_tasks_limit=30)
+        _apply_limit_config()
+
+        assert resolve_limit(None, TASKS_LIMIT_ENV, 100, 100) == 100
+
+    def test_cli_tasks_limit_above_max_rejected(self):
+        from morgenmcp.server import _apply_limit_config
+
+        with pytest.raises(ValueError, match=r"--tasks-limit must be <= 100"):
+            _apply_limit_config(cli_tasks_limit=101)
+
+    def test_cli_tasks_limit_below_one_rejected(self):
+        from morgenmcp.server import _apply_limit_config
+
+        with pytest.raises(ValueError, match=r"--tasks-limit must be >= 1"):
+            _apply_limit_config(cli_tasks_limit=0)
+
+    def test_cli_tags_limit_has_no_upper_bound(self):
+        """tags.mdx documents no maximum, so a large value is legal."""
+        from morgenmcp.client import TAGS_LIMIT_ENV, resolve_limit
+        from morgenmcp.server import _apply_limit_config
+
+        _apply_limit_config(cli_tags_limit=9999)
+        assert resolve_limit(None, TAGS_LIMIT_ENV, None, None) == 9999
+
+    def test_bad_env_var_rejected_at_startup(self, monkeypatch):
+        """A bad env var fails during config, not on the first list call."""
+        from morgenmcp.client import TASKS_LIMIT_ENV
+        from morgenmcp.server import _apply_limit_config
+
+        monkeypatch.setenv(TASKS_LIMIT_ENV, "9000")
+        with pytest.raises(ValueError, match="must be <= 100"):
+            _apply_limit_config()
+
+    def test_cli_flags_are_exposed(self):
+        """--tasks-limit / --tags-limit appear in the parser."""
+        import subprocess
+        import sys
+
+        result = subprocess.run(
+            [sys.executable, "-m", "morgenmcp.server", "--help"],
+            capture_output=True,
+            text=True,
+        )
+        assert "--tasks-limit" in result.stdout
+        assert "--tags-limit" in result.stdout

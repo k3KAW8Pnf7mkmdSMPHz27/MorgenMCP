@@ -21,6 +21,15 @@ from fastmcp.utilities.logging import get_logger
 from mcp.types import ToolAnnotations
 
 from morgenmcp import __version__
+from morgenmcp.client import (
+    TAGS_LIMIT_ENV,
+    TAGS_MAX_LIMIT,
+    TASKS_LIMIT_ENV,
+    TASKS_MAX_LIMIT,
+    resolve_limit,
+    set_limit_override,
+    validate_limit,
+)
 from morgenmcp.resources import (
     res_account,
     res_accounts,
@@ -611,6 +620,28 @@ def _read_only_requested(cli_read_only: bool = False) -> bool:
     return env_val in _TRUTHY_ENV
 
 
+def _apply_limit_config(
+    cli_tasks_limit: int | None = None,
+    cli_tags_limit: int | None = None,
+) -> None:
+    """Validate and register the configured per-endpoint list limits.
+
+    Both the CLI values and any env vars are range-checked here so a bad value
+    surfaces as a clean argparse error at startup rather than as a confusing
+    under-count on the first list call.
+    """
+    for value, flag, env_name, maximum in (
+        (cli_tasks_limit, "--tasks-limit", TASKS_LIMIT_ENV, TASKS_MAX_LIMIT),
+        (cli_tags_limit, "--tags-limit", TAGS_LIMIT_ENV, TAGS_MAX_LIMIT),
+    ):
+        if value is not None:
+            validate_limit(value, flag, maximum)
+        set_limit_override(env_name, value)
+        # Range-check the env var too, so a bad one also fails at startup
+        # rather than on the first list call.
+        resolve_limit(None, env_name, None, maximum)
+
+
 def _apply_read_only(server: FastMCP) -> None:
     """Disable all mutating (write/delete) tools on the server in place.
 
@@ -636,12 +667,39 @@ def main() -> None:
             "are exposed. Also enabled via MORGENMCP_READ_ONLY=1."
         ),
     )
+    parser.add_argument(
+        "--tasks-limit",
+        type=int,
+        metavar="N",
+        help=(
+            "Default `limit` sent to /tasks/list when a caller does not specify "
+            "one (1-100). Also settable via MORGENMCP_TASKS_LIMIT; the flag wins. "
+            "Defaults to 100, Morgen's documented default."
+        ),
+    )
+    parser.add_argument(
+        "--tags-limit",
+        type=int,
+        metavar="N",
+        help=(
+            "Default `limit` sent to /tags/list when a caller does not specify "
+            "one. Also settable via MORGENMCP_TAGS_LIMIT; the flag wins. Unset "
+            "omits the parameter, which returns all tags."
+        ),
+    )
     args = parser.parse_args()
 
     try:
         _require_api_key()
     except RuntimeError as e:
         parser.error(str(e))  # clean CLI message instead of a lifespan traceback
+
+    try:
+        _apply_limit_config(
+            cli_tasks_limit=args.tasks_limit, cli_tags_limit=args.tags_limit
+        )
+    except ValueError as e:
+        parser.error(str(e))  # bad limit fails at startup, not on first call
 
     if _read_only_requested(cli_read_only=args.read_only):
         _apply_read_only(mcp)
