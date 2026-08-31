@@ -47,7 +47,8 @@ async def list_tags(
     Args:
         updated_after: ISO 8601 datetime; when provided, also returns
             tags marked deleted (deleted=True). Useful for incremental sync.
-        limit: Maximum number of tags to return.
+        limit: Maximum number of tags to return. Defaults to the server's
+            configured MORGENMCP_TAGS_LIMIT; when unset, all tags are returned.
 
     Returns:
         Dictionary with 'tags' key containing list of tag objects, plus 'count'.

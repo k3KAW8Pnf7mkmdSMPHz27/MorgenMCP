@@ -46,6 +46,39 @@ To pin to a specific version, replace `@main` with a version tag (e.g., `@v0.1.0
 
 Pass `--read-only` (or set `MORGENMCP_READ_ONLY=1`) to expose only the 6 read-only tools. For the exact live list with schemas and annotations, connect any MCP client or run the [MCP Inspector](#local-debugging-with-mcp-inspector).
 
+## Configuration
+
+`MORGEN_API_KEY` is required; everything else is optional. Each setting has an
+equivalent CLI flag, and the flag wins over the environment variable.
+
+| Environment variable | CLI flag | Default | Description |
+|---|---|---|---|
+| `MORGEN_API_KEY` | — | *(required)* | Morgen API key. The server refuses to start without it. |
+| `MORGENMCP_READ_ONLY` | `--read-only` | off | Truthy (`1`/`true`/`yes`/`on`) exposes only the 6 read tools, disabling all 16 mutating ones. |
+| `MORGENMCP_TASKS_LIMIT` | `--tasks-limit N` | `100` | Default `limit` sent to `/tasks/list`. Integer 1–100. |
+| `MORGENMCP_TAGS_LIMIT` | `--tags-limit N` | *(unset)* | Default `limit` sent to `/tags/list`. Integer ≥ 1, no upper bound. Unset returns all tags. |
+| `MORGENMCP_DISPLAY_TZ` | — | system local | IANA timezone (e.g. `America/Chicago`) for rendering compact event times. |
+| `MORGENMCP_DATA_DIR` | — | platform data dir | Override the virtual-ID persistence directory. |
+
+An invalid limit fails at startup with a clear error rather than silently
+returning fewer results:
+
+```bash
+$ uv run morgenmcp --tasks-limit 500
+morgenmcp: error: --tasks-limit must be <= 100 (got 500)
+```
+
+The two list limits are deliberately asymmetric, because Morgen documents the
+two endpoints differently: `/tasks/list` documents a default of 100 and a
+maximum of 100, while `/tags/list` documents neither and returns all tags when
+the parameter is omitted. A per-call `limit` argument on the tool always
+overrides both the flag and the environment variable.
+
+> **Note:** `MORGENMCP_TASKS_LIMIT` defaults to `100` because Morgen's
+> `/tasks/list` returns a *single* task when `limit` is omitted, despite
+> documenting the default as 100. The server sends the documented value
+> explicitly to compensate.
+
 ## Development
 
 ```bash
