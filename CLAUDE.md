@@ -141,17 +141,40 @@ Users reference tags in their MCP client config: `git+https://github.com/k3KAW8P
 
 **IMPORTANT: Always use the local docs submodules as the primary source of truth.** They are version-pinned to match the exact dependency versions in this project. Online docs may describe newer or older API versions that do not match what this project uses. Only fall back to online docs when local docs are insufficient.
 
+**Caveat — the Morgen docs describe intent, not always behavior.** They are the
+right starting point and beat online sources, but they are not authoritative
+about runtime behavior; at least one documented parameter default does not match
+what the live endpoint does. The Morgen submodule is also pinned to a *branch*
+commit (`john/use-new-rate-liimit-values-6`), not a release tag, so it may not
+match what is deployed. When a doc claim drives a code change, confirm it with a
+read-only probe against the live API where that is cheap.
+
 When spawning Explore agents, **always include this instruction in the prompt**: _"For Morgen API questions, search `docs/morgen-dev-docs/content/` first. For FastMCP questions, search `docs/fastmcp/docs/` first. These local docs match the pinned dependency versions and take priority over online sources."_
 
-### Local docs (primary — version-pinned, always available)
+### Local docs (primary — version-pinned, must be initialized)
 
 | Source | Path | Covers |
 |--------|------|--------|
 | **Morgen API** | `docs/morgen-dev-docs/content/*.mdx` | Endpoints, parameters, schemas, changelog |
 | **FastMCP** | `docs/fastmcp/docs/` | Server framework: tools, context, auth, testing, deployment |
 
-- **Morgen docs submodule**: `f977d08` (updated automatically by SessionStart hook)
-- **FastMCP docs submodule**: `v3.4.3` / `1eedd1f6` — matches `fastmcp>=3.4,<3.5` pin (updated automatically by SessionStart hook)
+- **Morgen docs submodule**: pinned at `f977d08`
+- **FastMCP docs submodule**: pinned at `1eedd1f6` (`v3.4.3`, matching the `fastmcp>=3.4,<3.5` pin); cloned `shallow = true`, so it carries no tags and `git describe` will fail
+
+**These are git submodules and are NOT populated by a fresh clone.** Nothing
+updates them automatically — there is no hook that does this. Check and
+initialize them before relying on any lookup rule below:
+
+```bash
+git submodule status                # a leading '-' means uninitialized/empty
+git submodule update --init         # populate both
+```
+
+An uninitialized submodule is an empty directory, so a `grep` over
+`docs/morgen-dev-docs/content/` silently returns nothing rather than erroring.
+Treat "no matches" as "check `git submodule status` first", not as "the docs
+don't cover it" — otherwise every rule in this section quietly degrades to
+guessing from memory or reaching for the live API.
 
 ### Online docs (fallback only)
 
