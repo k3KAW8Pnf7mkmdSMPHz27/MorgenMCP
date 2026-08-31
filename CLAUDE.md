@@ -2,21 +2,21 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Quick Reference
+@AGENTS.md
+
+The import above pulls in `AGENTS.md` — the harness-agnostic contributor guide (environment setup, base lint/format/typecheck/test commands, code conventions, scope and safety rules) shared with any other coding-agent tool working in this repo. Edit that file, not this section, when those base commands or conventions change; the two must not drift.
+
+## Quick Reference (Claude Code additions)
+
+Commands specific to working in this repo through Claude Code — beyond the base set in `AGENTS.md`:
 
 ```bash
-uv sync --all-extras                    # Install dependencies
-echo "export MORGEN_API_KEY=..." > .envrc && direnv allow  # Configure API key
+mise trust && mise set --file mise.local.toml MORGEN_API_KEY=...  # Configure API key
 uv run morgenmcp                        # Run server
 uv run morgenmcp --read-only            # Run server with only the 6 read tools (also: MORGENMCP_READ_ONLY=1)
-uv run pytest                           # Run all tests (excludes integration)
 uv run pytest tests/test_tools.py::TestCreateEvent -v  # Run specific test class
 uv run pytest tests/test_tools.py::TestCreateEvent::test_create_basic_event -v  # Run single test
 uv run pytest tests/test_integration.py -v -s -m integration  # Run live API tests
-uv run ruff check .                     # Lint code
-uv run ruff format .                    # Format code
-uv run pyright morgenmcp/               # Type check
-pre-commit install                      # Set up git hooks (once)
 ```
 
 ## Local Debugging
@@ -34,7 +34,7 @@ FastMCP-based MCP server wrapping the Morgen calendar API (https://api.morgen.so
 - **`client.py`** - Async HTTP client; global instance via `get_client()`. Auth header: `"Authorization": f"ApiKey {self.api_key}"` (not `Bearer`).
 - **`models.py`** - Pydantic models using `Annotated[type, Field(alias="...")]` pattern. Base `MorgenModel` config: `validate_by_name=True, validate_by_alias=True`. Serialize with `model.model_dump(by_alias=True, exclude_none=True)`.
 - **`validators.py`** - Input validation (datetime, duration, timezone, email, color)
-- **`resources.py`** - MCP resource handlers under the `morgen://` URI scheme. Read-only — writes still go through tools. Static URIs (`morgen://accounts`, `morgen://calendars`, `morgen://events/today`, `morgen://events/this-week`, `morgen://events/upcoming`, `morgen://tasks`, `morgen://tasks/today`, `morgen://tags`) and templates (`morgen://account/{account_id}`, `morgen://calendar/{calendar_id}`, `morgen://calendar/{calendar_id}/events`). All return `application/json` strings; IDs are virtual, identical to tool output. Renaming any URI is a breaking contract change for saved client chats.
+- **`resources.py`** - MCP resource handlers under the `morgen://` URI scheme. Read-only — writes still go through tools. Static URIs (`morgen://server`, `morgen://accounts`, `morgen://calendars`, `morgen://events/today`, `morgen://events/this-week`, `morgen://events/upcoming`, `morgen://tasks`, `morgen://tasks/today`, `morgen://tags`) and templates (`morgen://account/{account_id}`, `morgen://calendar/{calendar_id}`, `morgen://calendar/{calendar_id}/events`). All return `application/json` strings; IDs are virtual, identical to tool output. Renaming any URI is a breaking contract change for saved client chats.
 - **`tools/`** - Tool implementations:
   - `accounts.py`, `calendars.py`, `events.py`, `tasks.py`, `tags.py` - MCP tool functions
   - `id_registry.py` - Virtual ID ↔ real ID bidirectional mapping with disk persistence
@@ -59,7 +59,7 @@ FastMCP-based MCP server wrapping the Morgen calendar API (https://api.morgen.so
 - **Recurrence rules**: Accept simplified dicts `{frequency, interval, by_day}`; the `build_recurrence_rules` helper converts to JSCalendar `RecurrenceRule` objects.
 - **Tags endpoint quirk**: `/tags/list` returns a bare JSON array, not the standard `{data: ...}` envelope — the client handles both shapes.
 - **HTTP client hardening** (`client.py`): `_RetryAfterTransport` retries a request **once** when Morgen answers 429 with a short `Retry-After` (≤10s; longer hints and the HTTP-date form surface the 429 immediately). The transport wraps a real `AsyncHTTPTransport` with `Limits(max_connections=10)` and `retries=1` (connect errors), so respx still intercepts in tests. Timeouts are split (`Timeout(30, connect=10)`). Upstream error bodies are truncated to 300 chars (`_truncate_error_text`) before landing in `MorgenAPIError`/`ToolError` — a 5xx HTML page or data-echoing body must not reach the LLM verbatim.
-- **Bounded batch concurrency**: every batch/fan-out `asyncio.gather` goes through `gather_bounded` (`tools/utils.py`, semaphore, `BATCH_CONCURRENCY = 8`, always `return_exceptions=True`). Applies to `batch_delete_events`, `batch_update_events`, `batch_delete_tasks`, and the per-account fan-out in `list_events`. Never add a bare `asyncio.gather` over per-item API calls.
+- **Bounded batch concurrency**: every batch/fan-out `asyncio.gather` goes through `gather_bounded` (`tools/utils.py`, semaphore, `BATCH_CONCURRENCY = 8`, always `return_exceptions=True`). Applies to `batch_delete_events`, `batch_update_events`, `batch_delete_tasks`, the per-account fan-out in `tools/events.py::list_events`, and `resources.py::_fetch_events_in_window` (backing every `morgen://events/*` and `morgen://calendar/{id}/events` resource). Never add a bare `asyncio.gather` over per-item API calls.
 - **Startup fail-fast**: `_require_api_key` (`server.py`) rejects a missing/blank `MORGEN_API_KEY` both in `main()` (clean argparse error) and at the top of the lifespan (covers programmatic use). Without it the server would start, advertise all tools, and fail lazily on the first call.
 - **No raw Morgen IDs in client-visible text**: warnings/errors surfaced via `ctx.warning` or `ToolError` must reference **virtual** IDs (`register_id(...)`) — raw calendar/event IDs base64-decode to email addresses.
 - **EventUpdateRequest.alerts** uses `dict[str, Alert | None]` to support patch-style removal (set entry to `None` to delete that alert). `EventCreateRequest.alerts` uses the same widened type for consistency at type-check time, even though create never accepts None values.
@@ -141,10 +141,10 @@ When spawning Explore agents, **always include this instruction in the prompt**:
 
 ### Local docs (primary — version-pinned, always available)
 
-| Source | Path | Agent | Covers |
-|--------|------|-------|--------|
-| **Morgen API** | `docs/morgen-dev-docs/content/*.mdx` | `morgen-api-docs` | Endpoints, parameters, schemas, changelog |
-| **FastMCP** | `docs/fastmcp/docs/` | `fastmcp-docs` | Server framework: tools, context, auth, testing, deployment |
+| Source | Path | Covers |
+|--------|------|--------|
+| **Morgen API** | `docs/morgen-dev-docs/content/*.mdx` | Endpoints, parameters, schemas, changelog |
+| **FastMCP** | `docs/fastmcp/docs/` | Server framework: tools, context, auth, testing, deployment |
 
 - **Morgen docs submodule**: `f977d08` (updated automatically by SessionStart hook)
 - **FastMCP docs submodule**: `v3.4.3` / `1eedd1f6` — matches `fastmcp>=3.4,<3.5` pin (updated automatically by SessionStart hook)
@@ -159,8 +159,8 @@ When spawning Explore agents, **always include this instruction in the prompt**:
 
 ### Lookup rules
 
-1. **Before implementing or modifying any tool**: Use the `morgen-api-docs` agent to look up the relevant Morgen API endpoint in the local MDX files. Confirm parameters, required fields, and response shapes. Only cross-reference online docs if the local result is incomplete.
-2. **For FastMCP patterns** (tool registration, return types, error handling, testing): Use the `fastmcp-docs` agent — it searches `docs/fastmcp/docs/` and returns file paths, line numbers, and code examples. These docs match the installed FastMCP version exactly.
+1. **Before implementing or modifying any tool**: Search `docs/morgen-dev-docs/content/*.mdx` directly (grep for the endpoint or resource name, read the matching file) to confirm parameters, required fields, and response shapes. Only cross-reference online docs if the local result is incomplete.
+2. **For FastMCP patterns** (tool registration, return types, error handling, testing): Search `docs/fastmcp/docs/` directly — grep for the pattern (decorator, `Context` method, error class, testing helper) and read the matching file for file paths, line numbers, and code examples. These docs match the installed FastMCP version exactly.
 3. **For MCP protocol questions** (transport, JSON-RPC, tool schema): Fetch `https://modelcontextprotocol.io/llms.txt` first, then the relevant spec page (no local copy exists).
 4. **When adding a new tool or changing tool signatures**: Check both FastMCP local docs (for decorator/return-type patterns) and the MCP protocol spec (for schema requirements) to ensure compliance.
-5. **When spawning any agent** (Explore, Plan, or general-purpose) that may need API or framework information: Include the local doc paths and agent names in the prompt so the subagent searches them directly rather than guessing or using online sources.
+5. **When spawning any agent** (Explore, Plan, or general-purpose) that may need API or framework information: Include the local doc paths in the prompt (`docs/morgen-dev-docs/content/` for Morgen API, `docs/fastmcp/docs/` for FastMCP) so the subagent searches them directly rather than guessing or using online sources.

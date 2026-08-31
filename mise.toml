@@ -1,0 +1,2 @@
+[env]
+MORGEN_API_KEY = { required = "Set MORGEN_API_KEY in mise.local.toml (gitignored) or your shell environment. Get a key from https://platform.morgen.so/developers-api. Run: mise set --file mise.local.toml MORGEN_API_KEY=your_api_key" }

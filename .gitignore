@@ -55,6 +55,7 @@ htmlcov/
 .env.local
 *.env
 .envrc
+mise.local.toml
 
 # OS files
 .DS_Store
