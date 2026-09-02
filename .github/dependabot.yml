@@ -1,0 +1,41 @@
+# Dependabot configuration.
+#
+# Deliberately low-maintenance: monthly rather than weekly, with updates grouped
+# so a quiet month produces one PR per ecosystem instead of one per dependency.
+#
+# Not covered, on purpose:
+#   - gitsubmodule: docs/morgen-dev-docs and docs/fastmcp are pinned to match the
+#     dependency versions they document. Auto-bumping them would defeat the pin.
+#   - pre-commit: two hook repos, and a stale hook is harmless.
+version: 2
+
+updates:
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      # Patch and minor bumps are the routine case — one PR for all of them.
+      python-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      # fastmcp is pinned to >=3.4,<3.5 because the docs submodule tracks 3.4.x
+      # and FastMCP ships breaking changes across minors. Major/minor bumps here
+      # need a human to move the submodule too, so only patches are wanted.
+      - dependency-name: fastmcp
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(ci)"
+    groups:
+      actions:
+        patterns: ["*"]
