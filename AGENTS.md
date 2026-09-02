@@ -40,6 +40,14 @@ tag APIs through FastMCP. The package source is in `morgenmcp/`; tests are in
   change is explicitly requested.
 - Keep `.env` and credentials local; never add them to version control.
 
+## AI usage
+
+- Read and follow [AI_POLICY.md](AI_POLICY.md).
+- Disclose all AI assistance in the PR description (tool and extent).
+- Mark AI-assisted commits with `Assisted-by: LLM (<tool>, <model>)`; do not use `Co-Authored-By`.
+- Verify claims against this repository (run the command, check output) before reporting.
+- Ensure a human understands and can explain all submitted changes.
+
 ## Working alongside other agents
 
 Multiple agents or harnesses may work on this repo at the same time, each in
