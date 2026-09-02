@@ -1,6 +1,8 @@
 [project]
 name = "morgenmcp"
-version = "0.1.0"
+# Derived from the latest git tag by hatch-vcs; see [tool.hatch.version]
+# below. Never hardcode it here.
+dynamic = ["version"]
 description = "MCP server for Morgen calendar API"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.14"
@@ -24,6 +26,23 @@ dev = [
 
 [project.scripts]
 morgenmcp = "morgenmcp.server:main"
+
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+# Single source of truth: the latest git tag. `git tag -a v0.3.0` is the whole
+# release step — nothing in the tree records the version.
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+# Writes the resolved version into the built artifact so importlib.metadata can
+# read it back at runtime.
+version-file = "morgenmcp/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["morgenmcp"]
 
 [tool.uv]
 package = true
