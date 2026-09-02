@@ -800,6 +800,15 @@ class TestConfigurableListLimits:
         assert route.calls.last.request.url.params["limit"] == "100"
 
     @respx.mock
+    async def test_tasks_and_spaces_defaults_to_documented_100(self):
+        """The limit is resolved in list_tasks_and_spaces, where the HTTP call
+        lives — not in the list_tasks wrapper that delegates to it."""
+        route = self._tasks_route()
+        async with MorgenClient(api_key="k") as client:
+            await client.list_tasks_and_spaces()
+        assert route.calls.last.request.url.params["limit"] == "100"
+
+    @respx.mock
     async def test_tags_omits_limit_by_default(self):
         """tags.mdx documents no default; omitting returns all tags."""
         route = self._tags_route()
@@ -815,6 +824,14 @@ class TestConfigurableListLimits:
         route = self._tasks_route()
         async with MorgenClient(api_key="k") as client:
             await client.list_tasks()
+        assert route.calls.last.request.url.params["limit"] == "25"
+
+    @respx.mock
+    async def test_tasks_and_spaces_honors_env_var(self, monkeypatch):
+        monkeypatch.setenv(TASKS_LIMIT_ENV, "25")
+        route = self._tasks_route()
+        async with MorgenClient(api_key="k") as client:
+            await client.list_tasks_and_spaces()
         assert route.calls.last.request.url.params["limit"] == "25"
 
     @respx.mock
