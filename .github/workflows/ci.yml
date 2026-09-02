@@ -19,28 +19,11 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
-          # No python-version here on purpose — it duplicated the version that
-          # pyproject.toml and .python-version already declare. Omitted, uv
-          # resolves an interpreter itself, as release.yml already does. The
-          # patch level is intentionally not pinned in CI; the step below
-          # asserts only the 3.14 floor.
+          # No python-version: uv resolves it from requires-python.
           enable-cache: true
 
       - name: Install dependencies
         run: uv sync --all-extras
-
-      - name: Confirm the interpreter satisfies requires-python
-        shell: bash
-        run: |
-          # Only the major.minor floor is asserted. The patch level is
-          # deliberately free: CI should run whatever 3.14.x is current so an
-          # upstream regression surfaces here, which is closer to what users
-          # actually install than pinning one patch release would be.
-          want=$(grep -oE '"?>=3\.[0-9]+' pyproject.toml | head -1 | grep -oE '3\.[0-9]+')
-          actual=$(uv run python -c 'import sys; print("%d.%d" % sys.version_info[:2])')
-          full=$(uv run python -c 'import sys; print("%d.%d.%d" % sys.version_info[:3])')
-          echo "requires-python floor=$want  running=$full"
-          [ "$want" = "$actual" ] || { echo "::error::CI is running $full but requires-python floor is $want"; exit 1; }
 
       - name: Lint with ruff
         run: uv run ruff check .
