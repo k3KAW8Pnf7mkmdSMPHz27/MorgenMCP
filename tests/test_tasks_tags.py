@@ -15,7 +15,13 @@ from morgenmcp.models import (
     TaskUpdateRequest,
 )
 from morgenmcp.tools.id_registry import clear_registry, register_id
-from morgenmcp.tools.tags import create_tag, delete_tag, list_tags, update_tag
+from morgenmcp.tools.tags import (
+    create_tag,
+    delete_tag,
+    get_tag,
+    list_tags,
+    update_tag,
+)
 from morgenmcp.tools.tasks import (
     batch_delete_tasks,
     complete_task,
@@ -325,6 +331,35 @@ class TestListTags:
     async def test_list_tags_rejects_bad_limit(self, mock_tag_client):
         with pytest.raises(ToolError, match="limit"):
             await list_tags(limit=0)
+
+
+class TestGetTag:
+    async def test_get_tag_success(self, mock_tag_client, sample_tag):
+        mock_tag_client.get_tag.return_value = sample_tag
+        v_id = register_id(sample_tag.id)
+        result = await get_tag(v_id)
+        assert result["id"] == v_id
+        assert result["name"] == "Work"
+        assert result["color"] == "#A8D5BA"
+        mock_tag_client.get_tag.assert_awaited_once_with(sample_tag.id)
+
+    async def test_get_tag_empty_id(self, mock_tag_client):
+        with pytest.raises(ToolError, match="id cannot be empty"):
+            await get_tag("")
+        with pytest.raises(ToolError, match="id cannot be empty"):
+            await get_tag("   ")
+
+    async def test_get_tag_not_found(self, mock_tag_client):
+        with pytest.raises(ToolError, match="not found"):
+            await get_tag("nonexist")
+
+    async def test_get_tag_api_error(self, mock_tag_client):
+        mock_tag_client.get_tag.side_effect = MorgenAPIError(
+            "Tag not found on server", status_code=404
+        )
+        v_id = register_id("real_tag_404")
+        with pytest.raises(ToolError, match="Failed to retrieve tag"):
+            await get_tag(v_id)
 
 
 class TestCreateTag:

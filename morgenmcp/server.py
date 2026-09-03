@@ -55,7 +55,13 @@ from morgenmcp.tools.events import (
     update_event,
 )
 from morgenmcp.tools.id_registry import HASH_SCHEME_VERSION
-from morgenmcp.tools.tags import create_tag, delete_tag, list_tags, update_tag
+from morgenmcp.tools.tags import (
+    create_tag,
+    delete_tag,
+    get_tag,
+    list_tags,
+    update_tag,
+)
 from morgenmcp.tools.tasks import (
     batch_delete_tasks,
     complete_task,
@@ -440,6 +446,17 @@ mcp.tool(
     ),
 )(list_tags)
 mcp.tool(
+    name="morgen_get_tag",
+    tags={"tags", "read"},
+    timeout=30.0,
+    annotations=ToolAnnotations(
+        title="Get Tag",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=True,
+    ),
+)(get_tag)
+mcp.tool(
     name="morgen_create_tag",
     tags={"tags", "write"},
     timeout=30.0,
@@ -571,6 +588,7 @@ _CACHEABLE_READ_TOOLS = [
     "morgen_list_tasks",
     "morgen_get_task",
     "morgen_list_tags",
+    "morgen_get_tag",
 ]
 _CACHE_TTL_S = 60
 
