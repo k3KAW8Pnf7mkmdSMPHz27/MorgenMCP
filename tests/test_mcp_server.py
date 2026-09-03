@@ -44,6 +44,7 @@ class TestMCPServer:
                 "morgen_batch_delete_events",
                 "morgen_batch_update_events",
                 # Tasks
+                "morgen_list_task_lists",
                 "morgen_list_tasks",
                 "morgen_get_task",
                 "morgen_create_task",
@@ -70,6 +71,7 @@ class TestMCPServer:
                 "morgen_list_accounts",
                 "morgen_list_calendars",
                 "morgen_list_events",
+                "morgen_list_task_lists",
                 "morgen_list_tasks",
                 "morgen_get_task",
                 "morgen_list_tags",
@@ -426,6 +428,7 @@ class TestReadOnlyMode:
         "morgen_list_accounts",
         "morgen_list_calendars",
         "morgen_list_events",
+        "morgen_list_task_lists",
         "morgen_list_tasks",
         "morgen_get_task",
         "morgen_list_tags",
@@ -448,13 +451,13 @@ class TestReadOnlyMode:
             assert _read_only_requested() is False
 
     async def test_default_lists_all_tools(self):
-        """Without read-only mode, all 22 tools are visible."""
+        """Without read-only mode, all 23 tools are visible."""
         async with Client(mcp) as client:
             tools = await client.list_tools()
-            assert len(tools) == 22
+            assert len(tools) == 23
 
     async def test_read_only_hides_mutating_tools(self):
-        """After _apply_read_only, only the 6 read tools are visible, and each
+        """After _apply_read_only, only the 7 read tools are visible, and each
         mutating tool is both unlisted and uncallable.
 
         Also guards the cache fix: ``ResponseCachingMiddleware`` caches
@@ -480,7 +483,7 @@ class TestReadOnlyMode:
 
         # enable() restore is visible immediately (list_tools is not cached).
         async with Client(mcp) as client:
-            assert len({t.name for t in await client.list_tools()}) == 22
+            assert len({t.name for t in await client.list_tools()}) == 23
 
 
 class TestRequireApiKey:
@@ -537,6 +540,7 @@ class TestResponseCaching:
         assert "morgen_list_accounts" in included
         assert "morgen_list_calendars" in included
         assert "morgen_list_events" in included
+        assert "morgen_list_task_lists" in included
         assert "morgen_list_tasks" in included
         assert "morgen_list_tags" in included
         assert "morgen_get_task" in included
