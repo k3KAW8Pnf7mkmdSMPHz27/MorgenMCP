@@ -1,2 +1,10 @@
+[settings]
+# Take the interpreter from `.python-version` — the same file uv reads — so the
+# exact version lives in exactly one place. Without this, mise ignores that file
+# and falls back to the global config, which resolved to a *different* patch
+# release than uv used. Do not add a `[tools] python` pin here: it overrides
+# `.python-version` and reintroduces the drift.
+idiomatic_version_file_enable_tools = ["python"]
+
 [env]
 MORGEN_API_KEY = { required = "Set MORGEN_API_KEY in mise.local.toml (gitignored) or your shell environment. Get a key from https://platform.morgen.so/developers-api. Run: mise set --file mise.local.toml MORGEN_API_KEY=your_api_key" }
