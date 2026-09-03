@@ -1,0 +1,32 @@
+# Low-maintenance Dependabot config: monthly, grouped updates so a quiet month
+# yields one PR per ecosystem. Submodules and pre-commit hooks are left out on
+# purpose (submodules are version-pinned; stale hooks are harmless).
+version: 2
+
+updates:
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      python-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      # fastmcp is submodule-pinned; only patch bumps are wanted here.
+      - dependency-name: fastmcp
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(ci)"
+    groups:
+      actions:
+        patterns: ["*"]
