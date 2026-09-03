@@ -129,6 +129,16 @@ git push origin v0.1.0
 
 Users can then reference the specific version in their MCP client configuration.
 
+## Contributing
+
+See [AGENTS.md](AGENTS.md) for environment setup, conventions, and the checks to
+run before handing off changes.
+
+**AI-assisted contributions are welcome and must be disclosed** — see
+[AI_POLICY.md](AI_POLICY.md), adapted from the
+[Ghostty project's AI policy](https://github.com/ghostty-org/ghostty/blob/main/AI_POLICY.md)
+(MIT).
+
 ## License
 
 Apache 2.0 - See [LICENSE](LICENSE) and [NOTICE](NOTICE) for details.
