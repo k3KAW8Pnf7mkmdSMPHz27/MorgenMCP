@@ -17,7 +17,7 @@ dev = [
     "pytest>=9.0",
     "pytest-asyncio>=1.0",
     "respx>=0.22",
-    "ruff>=0.15.3",
+    "ruff>=0.16.6,<0.17",
     "pre-commit>=4.0",
     "pyright>=1.1.408",
 ]
@@ -53,6 +53,12 @@ addopts = "-m 'not integration'"
 [tool.ruff]
 target-version = "py314"
 line-length = 88
+
+# ruff 0.16 formats fenced code blocks inside Markdown. Neither of these trees
+# is ours to reformat: docs/ holds two vendored submodules, and .claude/skills
+# holds upstream-authored skill docs. CI sees them (no global gitignore) even
+# when a local checkout does not.
+exclude = ["docs", ".claude"]
 
 [tool.ruff.lint]
 select = [
