@@ -78,7 +78,10 @@ overrides both the flag and the environment variable.
 > **Note:** `MORGENMCP_TASKS_LIMIT` defaults to `100`, which is MorgenMCP's own
 > choice rather than Morgen's. `/tasks/list` returns a *single* task when
 > `limit` is omitted — its documented default is 1, and the API docs tell
-> callers to always set the parameter explicitly. The server does that for you.
+> callers to always set the parameter explicitly, so the server never leaves it
+> to Morgen. This is only a fallback: the tool asks the model to pass a `limit`
+> suited to the request, and a per-call value always wins. Set this variable to
+> bound what a model can pull in one call, not to express a typical page size.
 
 ## Development
 
