@@ -69,15 +69,15 @@ morgenmcp: error: --tasks-limit must be <= 100 (got 500)
 ```
 
 The two list limits are deliberately asymmetric, because Morgen documents the
-two endpoints differently: `/tasks/list` documents a default of 100 and a
+two endpoints differently: `/tasks/list` documents a default of 1 and a
 maximum of 100, while `/tags/list` documents neither and returns all tags when
 the parameter is omitted. A per-call `limit` argument on the tool always
 overrides both the flag and the environment variable.
 
-> **Note:** `MORGENMCP_TASKS_LIMIT` defaults to `100` because Morgen's
-> `/tasks/list` returns a *single* task when `limit` is omitted, despite
-> documenting the default as 100. The server sends the documented value
-> explicitly to compensate.
+> **Note:** `MORGENMCP_TASKS_LIMIT` defaults to `100`, which is MorgenMCP's own
+> choice rather than Morgen's. `/tasks/list` returns a *single* task when
+> `limit` is omitted — its documented default is 1, and the API docs tell
+> callers to always set the parameter explicitly. The server does that for you.
 
 ## Development
 

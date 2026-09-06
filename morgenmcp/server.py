@@ -674,7 +674,7 @@ def main() -> None:
         help=(
             "Default `limit` sent to /tasks/list when a caller does not specify "
             "one (1-100). Also settable via MORGENMCP_TASKS_LIMIT; the flag wins. "
-            "Defaults to 100, Morgen's documented default."
+            "Defaults to 100; Morgen's own default is 1."
         ),
     )
     parser.add_argument(
