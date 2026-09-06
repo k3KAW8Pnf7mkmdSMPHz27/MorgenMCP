@@ -11,7 +11,8 @@ The import above pulls in `AGENTS.md` — the harness-agnostic contributor guide
 Commands specific to working in this repo through Claude Code — beyond the base set in `AGENTS.md`:
 
 ```bash
-mise trust && mise set --file mise.local.toml MORGEN_API_KEY=...  # Configure API key
+echo 'MORGEN_API_KEY=...' > .env && export UV_ENV_FILE=.env   # Configure API key (uv only)
+mise trust && mise set --file mise.local.toml MORGEN_API_KEY=...  # Same, if you use mise
 uv run morgenmcp                        # Run server
 uv run morgenmcp --read-only            # Run server with only the 6 read tools (also: MORGENMCP_READ_ONLY=1)
 uv run morgenmcp --tasks-limit 25       # Cap /tasks/list results (also: MORGENMCP_TASKS_LIMIT=25)

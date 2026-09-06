@@ -4,9 +4,10 @@ An MCP server for the [Morgen](https://morgen.so) calendar API.
 
 ## Requirements
 
-- [uv](https://github.com/astral-sh/uv) - Install with `brew install uv`
-- [mise](https://mise.jdx.dev/) - Install with `brew install mise` (used to manage the `MORGEN_API_KEY` environment variable during local development)
+- [uv](https://docs.astral.sh/uv/) - [Install](https://docs.astral.sh/uv/getting-started/installation/) with `curl -LsSf https://astral.sh/uv/install.sh | sh`, `brew install uv`, or `winget install astral-sh.uv`
+- [mise](https://mise.jdx.dev/) *(optional)* - [Install](https://mise.jdx.dev/getting-started.html) with `curl https://mise.run | sh`, `brew install mise`, or `winget install jdx.mise`. Convenient for local development: it puts the right Python on `PATH` in a plain shell and fails fast with setup instructions when `MORGEN_API_KEY` is unset. Everything works with uv alone — see [Environment Setup](#environment-setup).
 - A Morgen API key - Get one from [Morgen Developer Portal](https://platform.morgen.so/developers-api)
+- Python 3.14 or newer — Only needed when working from a clone (`uv` and `mise` provision this automatically from `.python-version`). End users running via `uvx` require no setup.
 
 ## Installation
 
@@ -95,18 +96,28 @@ uv run pytest
 
 ### Environment Setup
 
-The server reads `MORGEN_API_KEY` from the process environment — it does not load a `.env` file itself. This repo ships a `mise.toml` that declares `MORGEN_API_KEY` as required; set the actual value via [mise](https://mise.jdx.dev/), which writes it to a gitignored `mise.local.toml` rather than the committed config:
+The server reads `MORGEN_API_KEY` from the process environment — it does not load a `.env` file itself. Either of the following supplies it. Both keep the key in a gitignored file; neither is required if the variable is already exported in your shell.
+
+**With uv alone.** Put the key in a `.env` file (already gitignored) and let uv load it:
+
+```bash
+echo 'MORGEN_API_KEY=your_api_key' > .env
+UV_ENV_FILE=.env uv run morgenmcp
+```
+
+Export `UV_ENV_FILE=.env` in your shell profile to skip the prefix. `uv run --env-file .env <cmd>` works the same way for one-off commands.
+
+> If `uv` is itself installed *through* mise (a shim under `~/.local/share/mise/shims/uv`), every `uv` call routes through mise, and mise refuses to run against this repo's untrusted `mise.toml` — so `uv run` fails until you `mise trust`. That is a property of that install, not of this project; a standalone `uv` (`brew install uv`) is unaffected.
+
+**With mise** *(optional, recommended if you already use it)*. This repo ships a `mise.toml` declaring `MORGEN_API_KEY` as required, so a missing key fails immediately with setup instructions instead of surfacing on the first tool call. `mise set` writes to a gitignored `mise.local.toml`, never the committed config:
 
 ```bash
 mise trust
 mise set --file mise.local.toml MORGEN_API_KEY=your_api_key
-```
-
-Then run the server:
-
-```bash
 uv run morgenmcp
 ```
+
+mise also puts the interpreter from `.python-version` on `PATH` in a plain shell, so a bare `python3` in a clone is the right one — useful because the source requires Python 3.14 (see [Requirements](#requirements)).
 
 ### Local Debugging with MCP Inspector
 
