@@ -54,10 +54,7 @@ addopts = "-m 'not integration'"
 target-version = "py314"
 line-length = 88
 
-# ruff 0.16 formats fenced code blocks inside Markdown. Neither of these trees
-# is ours to reformat: docs/ holds two vendored submodules, and .claude/skills
-# holds upstream-authored skill docs. CI sees them (no global gitignore) even
-# when a local checkout does not.
+# ruff 0.16 formats Markdown code blocks; neither tree is ours to reformat.
 exclude = ["docs", ".claude"]
 
 [tool.ruff.lint]
