@@ -1,9 +1,6 @@
 [settings]
-# Take the interpreter from `.python-version` — the same file uv reads — so the
-# exact version lives in exactly one place. Without this, mise ignores that file
-# and falls back to the global config, which resolved to a *different* patch
-# release than uv used. Do not add a `[tools] python` pin here: it overrides
-# `.python-version` and reintroduces the drift.
+# Read Python version from .python-version (matches uv). Do not add a
+# `[tools] python` pin here — it overrides that file and reintroduces drift.
 idiomatic_version_file_enable_tools = ["python"]
 
 [env]

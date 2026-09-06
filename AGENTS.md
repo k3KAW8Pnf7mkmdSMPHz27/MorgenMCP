@@ -8,16 +8,9 @@ tag APIs through FastMCP. The package source is in `morgenmcp/`; tests are in
 
 ## Environment and commands
 
-- Use Python 3.14 or newer and manage dependencies with `uv`. The floor is
-  real, not nominal: the source uses PEP 758 syntax (unparenthesized
-  `except A, B:`), which is a `SyntaxError` on 3.13 and earlier. `uv` and
-  `mise` both provision a correct interpreter; a bare system `python3` may
-  not be one.
-- The exact interpreter lives in **`.python-version`** and nowhere else.
-  `uv` reads it natively; `mise.toml` opts in via
-  `idiomatic_version_file_enable_tools`. Bump that one file to change the
-  version — do not add a `[tools] python` pin to `mise.toml`, which would
-  override it.
+- Use Python 3.14 or newer (pinned in `.python-version`) and manage dependencies
+  with `uv`. The floor is real: the source uses PEP 758 syntax (unparenthesized
+  `except A, B:`), a `SyntaxError` on 3.13 and earlier.
 - Install development dependencies with `uv sync --all-extras`.
 - Set up git hooks once with `pre-commit install`.
 - Run the default test suite with `uv run pytest`. Integration tests are
