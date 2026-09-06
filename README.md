@@ -4,10 +4,10 @@ An MCP server for the [Morgen](https://morgen.so) calendar API.
 
 ## Requirements
 
-- [uv](https://github.com/astral-sh/uv) - Install with `brew install uv`
-- [mise](https://mise.jdx.dev/) - Install with `brew install mise` (used to manage the Python toolchain and the `MORGEN_API_KEY` environment variable during local development)
+- [uv](https://docs.astral.sh/uv/) - [Install](https://docs.astral.sh/uv/getting-started/installation/) with `curl -LsSf https://astral.sh/uv/install.sh | sh`, `brew install uv`, or `winget install astral-sh.uv`
+- [mise](https://mise.jdx.dev/) - [Install](https://mise.jdx.dev/getting-started.html) with `curl https://mise.run | sh`, `brew install mise`, or `winget install jdx.mise` (used to manage the Python toolchain and the `MORGEN_API_KEY` environment variable during local development)
 - A Morgen API key - Get one from [Morgen Developer Portal](https://platform.morgen.so/developers-api)
-- Python 3.14 or newer — **only needed when working from a clone.** End users can skip this: `uvx` reads `requires-python` and provisions a suitable interpreter automatically. The source uses [PEP 758](https://peps.python.org/pep-0758/) syntax (unparenthesized `except A, B:`), which is a `SyntaxError` on 3.13 and earlier, so reaching for a system `python3` in a clone can fail confusingly. `mise install` (or `uv run`) gets you the right one — both read the exact version from `.python-version`.
+- Python 3.14 or newer — Only needed when working from a clone (`uv` and `mise` provision this automatically from `.python-version`). End users running via `uvx` require no setup.
 
 ## Installation
 
