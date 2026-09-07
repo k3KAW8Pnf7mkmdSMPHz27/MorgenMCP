@@ -60,7 +60,7 @@ FastMCP-based MCP server wrapping the Morgen calendar API (https://api.morgen.so
 - **Alerts**: Tools accept negative ISO 8601 offsets (e.g., `'-PT15M'`) and convert them to Morgen's base64-encoded alert ID format (`base64(JSON({a:'display',to:offset}))`). `alerts` and `use_default_alerts` are mutually exclusive.
 - **Recurrence rules**: Accept simplified dicts `{frequency, interval, by_day}`; the `build_recurrence_rules` helper converts to JSCalendar `RecurrenceRule` objects.
 - **Tags endpoint quirk**: `/tags/list` returns a bare JSON array, not the standard `{data: ...}` envelope — the client handles both shapes.
-- **Send Morgen's documented parameter defaults explicitly** (`resolve_limit` in `client.py`). Morgen does not always honor its own documented defaults: `/tasks/list` returns **1** task when `limit` is omitted, though `tasks.mdx` documents the default as 100. So the client sends the documented value rather than relying on the server, which is behaviorally identical if Morgen ever fixes it. `limit` handling therefore differs per endpoint *because the docs differ*: tasks documents default 100 / max 100, so `list_tasks` sends 100 and rejects >100; tags documents neither ("Returns all tags"), so `list_tags` omits the parameter and enforces no ceiling. Do not "harmonize" the two — hardcoding `limit=100` in `list_tags` would introduce truncation past 100 tags. Resolution order is per-call arg > CLI flag > env var > documented default; a malformed or out-of-range env var raises at startup rather than silently under-returning.
+- **Never rely on Morgen's server-side list defaults** (`resolve_limit` in `client.py`). `/tasks/list` returns **1** task when `limit` is omitted — that is Morgen's documented, intentional default, and `tasks.mdx` carries a warning telling callers to always set the parameter explicitly. So the client always sends one. `TASKS_DEFAULT_LIMIT = 100` is therefore **MorgenMCP's own choice, not a mirror of Morgen's default**: it shields callers from a near-empty response that is easy to misread as "no tasks". `limit` handling still differs per endpoint *because the docs differ*: tasks documents default 1 / max 100, so `list_tasks` sends its own default and rejects >100; tags documents neither ("Returns all tags"), so `list_tags` omits the parameter and enforces no ceiling. Do not "harmonize" the two — hardcoding `limit=100` in `list_tags` would introduce truncation past 100 tags. Resolution order is per-call arg > CLI flag > env var > MorgenMCP default; a malformed or out-of-range env var raises at startup rather than silently under-returning.
 - **HTTP client hardening** (`client.py`): `_RetryAfterTransport` retries a request **once** when Morgen answers 429 with a short `Retry-After` (≤10s; longer hints and the HTTP-date form surface the 429 immediately). The transport wraps a real `AsyncHTTPTransport` with `Limits(max_connections=10)` and `retries=1` (connect errors), so respx still intercepts in tests. Timeouts are split (`Timeout(30, connect=10)`). Upstream error bodies are truncated to 300 chars (`_truncate_error_text`) before landing in `MorgenAPIError`/`ToolError` — a 5xx HTML page or data-echoing body must not reach the LLM verbatim.
 - **Bounded batch concurrency**: every batch/fan-out `asyncio.gather` goes through `gather_bounded` (`tools/utils.py`, semaphore, `BATCH_CONCURRENCY = 8`, always `return_exceptions=True`). Applies to `batch_delete_events`, `batch_update_events`, `batch_delete_tasks`, the per-account fan-out in `tools/events.py::list_events`, and `resources.py::_fetch_events_in_window` (backing every `morgen://events/*` and `morgen://calendar/{id}/events` resource). Never add a bare `asyncio.gather` over per-item API calls.
 - **Startup fail-fast**: `_require_api_key` (`server.py`) rejects a missing/blank `MORGEN_API_KEY` both in `main()` (clean argparse error) and at the top of the lifespan (covers programmatic use). Without it the server would start, advertise all tools, and fail lazily on the first call.
@@ -142,13 +142,15 @@ Users reference tags in their MCP client config: `git+https://github.com/k3KAW8P
 
 **IMPORTANT: Always use the local docs submodules as the primary source of truth.** They are version-pinned to match the exact dependency versions in this project. Online docs may describe newer or older API versions that do not match what this project uses. Only fall back to online docs when local docs are insufficient.
 
-**Caveat — the Morgen docs describe intent, not always behavior.** They are the
-right starting point and beat online sources, but they are not authoritative
-about runtime behavior; at least one documented parameter default does not match
-what the live endpoint does. The Morgen submodule is also pinned to a *branch*
-commit (`john/use-new-rate-liimit-values-6`), not a release tag, so it may not
-match what is deployed. When a doc claim drives a code change, confirm it with a
-read-only probe against the live API where that is cheap.
+**Caveat — verify any doc claim that drives a code change.** The Morgen docs are
+the right starting point and beat online sources, but they are not always
+authoritative about runtime behavior. `/tasks/list`'s documented default was
+wrong for months — it claimed 100 while the endpoint returned 1 — and was
+corrected upstream only in `616aeed` (MOR-4652), which is why this repo's
+`limit` handling carries so much explanatory comment. The submodule now tracks
+the docs repo's `main` rather than a feature branch, but it can still run ahead
+of or behind what is deployed. Confirm doc-driven claims with a read-only probe
+against the live API where that is cheap.
 
 When spawning Explore agents, **always include this instruction in the prompt**: _"For Morgen API questions, search `docs/morgen-dev-docs/content/` first. For FastMCP questions, search `docs/fastmcp/docs/` first. These local docs match the pinned dependency versions and take priority over online sources."_
 
@@ -159,7 +161,7 @@ When spawning Explore agents, **always include this instruction in the prompt**:
 | **Morgen API** | `docs/morgen-dev-docs/content/*.mdx` | Endpoints, parameters, schemas, changelog |
 | **FastMCP** | `docs/fastmcp/docs/` | Server framework: tools, context, auth, testing, deployment |
 
-- **Morgen docs submodule**: pinned at `f977d08`
+- **Morgen docs submodule**: pinned at `e2fb838` (docs repo `main`)
 - **FastMCP docs submodule**: pinned at `1eedd1f6` (`v3.4.3`, matching the `fastmcp>=3.4,<3.5` pin); cloned `shallow = true`, so it carries no tags and `git describe` will fail
 
 **These are git submodules and are NOT populated by a fresh clone.** Nothing

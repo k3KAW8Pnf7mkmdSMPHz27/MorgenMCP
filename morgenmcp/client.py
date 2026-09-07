@@ -51,16 +51,19 @@ _MAX_CONNECTIONS = 10
 
 # --- Configurable per-endpoint list limits ------------------------------------
 #
-# Morgen documents a default for /tasks/list but does not apply it: omitting
-# `limit` yields ONE task, not the documented 100 (tasks.mdx). So the client
-# always sends the documented default explicitly. /tags/list documents no
-# default and no maximum ("Returns all tags"), so its limit stays omitted
-# unless configured. Precedence: per-call arg > CLI flag > env var > default.
+# /tasks/list returns ONE task when `limit` is omitted. That is Morgen's
+# documented, intentional default, and tasks.mdx tells callers to always set
+# the parameter explicitly — so the client never relies on the server default.
+# /tags/list documents no default and no maximum ("Returns all tags"), so its
+# limit stays omitted unless configured. Precedence: per-call arg > CLI flag >
+# env var > default.
 
 TASKS_LIMIT_ENV = "MORGENMCP_TASKS_LIMIT"
 TAGS_LIMIT_ENV = "MORGENMCP_TAGS_LIMIT"
 
-#: tasks.mdx documents `limit` as default 100, max 100.
+#: MorgenMCP's own choice, not Morgen's: tasks.mdx documents `limit` as
+#: default 1, max 100. Sending 100 shields callers from the near-empty
+#: single-task response.
 TASKS_DEFAULT_LIMIT = 100
 TASKS_MAX_LIMIT: int | None = 100
 #: tags.mdx documents neither a default nor a maximum.
@@ -458,8 +461,8 @@ class MorgenClient:
 
         Args:
             limit: Maximum tasks to return (max 100). Defaults to
-                MORGENMCP_TASKS_LIMIT, else 100 — Morgen's documented default,
-                which the endpoint itself fails to apply.
+                MORGENMCP_TASKS_LIMIT, else 100. Morgen's own default is 1, so
+                a limit is always sent rather than left to the server.
             updated_after: ISO 8601 datetime to filter for incremental sync.
 
         Returns:

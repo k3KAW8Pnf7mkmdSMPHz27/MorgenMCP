@@ -200,7 +200,7 @@ mcp = FastMCP(
     4. Use batch_delete_events or batch_update_events for bulk operations
 
     Task workflow:
-    1. Use list_tasks to enumerate tasks (paginate via limit + updated_after)
+    1. Use list_tasks to enumerate tasks (set limit; results may be truncated)
     2. Use create_task / update_task / delete_task for CRUD
     3. Use complete_task / reopen_task to toggle completion
     4. Use move_task to reorder or change a task's parent
@@ -674,7 +674,7 @@ def main() -> None:
         help=(
             "Default `limit` sent to /tasks/list when a caller does not specify "
             "one (1-100). Also settable via MORGENMCP_TASKS_LIMIT; the flag wins. "
-            "Defaults to 100, Morgen's documented default."
+            "Defaults to 100; Morgen's own default is 1."
         ),
     )
     parser.add_argument(
