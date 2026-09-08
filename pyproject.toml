@@ -40,7 +40,7 @@ packages = ["morgenmcp"]
 
 [tool.uv]
 package = true
-prerelease = "if-necessary-or-explicit"
+prerelease = "if-necessary"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
