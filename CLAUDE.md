@@ -2,21 +2,23 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Quick Reference
+@AGENTS.md
+
+The import above pulls in `AGENTS.md` — the harness-agnostic contributor guide (environment setup, base lint/format/typecheck/test commands, code conventions, scope and safety rules) shared with any other coding-agent tool working in this repo. Edit that file, not this section, when those base commands or conventions change; the two must not drift.
+
+## Quick Reference (Claude Code additions)
+
+Commands specific to working in this repo through Claude Code — beyond the base set in `AGENTS.md`:
 
 ```bash
-uv sync --all-extras                    # Install dependencies
-echo "export MORGEN_API_KEY=..." > .envrc && direnv allow  # Configure API key
+echo 'MORGEN_API_KEY=...' > .env && export UV_ENV_FILE=.env   # Configure API key (uv only)
+mise trust && mise set --file mise.local.toml MORGEN_API_KEY=...  # Same, if you use mise
 uv run morgenmcp                        # Run server
 uv run morgenmcp --read-only            # Run server with only the 6 read tools (also: MORGENMCP_READ_ONLY=1)
-uv run pytest                           # Run all tests (excludes integration)
+uv run morgenmcp --tasks-limit 25       # Cap /tasks/list results (also: MORGENMCP_TASKS_LIMIT=25)
 uv run pytest tests/test_tools.py::TestCreateEvent -v  # Run specific test class
 uv run pytest tests/test_tools.py::TestCreateEvent::test_create_basic_event -v  # Run single test
 uv run pytest tests/test_integration.py -v -s -m integration  # Run live API tests
-uv run ruff check .                     # Lint code
-uv run ruff format .                    # Format code
-uv run pyright morgenmcp/               # Type check
-pre-commit install                      # Set up git hooks (once)
 ```
 
 ## Local Debugging
@@ -34,7 +36,7 @@ FastMCP-based MCP server wrapping the Morgen calendar API (https://api.morgen.so
 - **`client.py`** - Async HTTP client; global instance via `get_client()`. Auth header: `"Authorization": f"ApiKey {self.api_key}"` (not `Bearer`).
 - **`models.py`** - Pydantic models using `Annotated[type, Field(alias="...")]` pattern. Base `MorgenModel` config: `validate_by_name=True, validate_by_alias=True`. Serialize with `model.model_dump(by_alias=True, exclude_none=True)`.
 - **`validators.py`** - Input validation (datetime, duration, timezone, email, color)
-- **`resources.py`** - MCP resource handlers under the `morgen://` URI scheme. Read-only — writes still go through tools. Static URIs (`morgen://accounts`, `morgen://calendars`, `morgen://events/today`, `morgen://events/this-week`, `morgen://events/upcoming`, `morgen://tasks`, `morgen://tasks/today`, `morgen://tags`) and templates (`morgen://account/{account_id}`, `morgen://calendar/{calendar_id}`, `morgen://calendar/{calendar_id}/events`). All return `application/json` strings; IDs are virtual, identical to tool output. Renaming any URI is a breaking contract change for saved client chats.
+- **`resources.py`** - MCP resource handlers under the `morgen://` URI scheme. Read-only — writes still go through tools. Static URIs (`morgen://server`, `morgen://accounts`, `morgen://calendars`, `morgen://events/today`, `morgen://events/this-week`, `morgen://events/upcoming`, `morgen://tasks`, `morgen://tasks/today`, `morgen://tags`) and templates (`morgen://account/{account_id}`, `morgen://calendar/{calendar_id}`, `morgen://calendar/{calendar_id}/events`). All return `application/json` strings; IDs are virtual, identical to tool output. Renaming any URI is a breaking contract change for saved client chats.
 - **`tools/`** - Tool implementations:
   - `accounts.py`, `calendars.py`, `events.py`, `tasks.py`, `tags.py` - MCP tool functions
   - `id_registry.py` - Virtual ID ↔ real ID bidirectional mapping with disk persistence
@@ -58,8 +60,9 @@ FastMCP-based MCP server wrapping the Morgen calendar API (https://api.morgen.so
 - **Alerts**: Tools accept negative ISO 8601 offsets (e.g., `'-PT15M'`) and convert them to Morgen's base64-encoded alert ID format (`base64(JSON({a:'display',to:offset}))`). `alerts` and `use_default_alerts` are mutually exclusive.
 - **Recurrence rules**: Accept simplified dicts `{frequency, interval, by_day}`; the `build_recurrence_rules` helper converts to JSCalendar `RecurrenceRule` objects.
 - **Tags endpoint quirk**: `/tags/list` returns a bare JSON array, not the standard `{data: ...}` envelope — the client handles both shapes.
+- **Never rely on Morgen's server-side list defaults** (`resolve_limit` in `client.py`). `/tasks/list` returns **1** task when `limit` is omitted — that is Morgen's documented, intentional default, and `tasks.mdx` carries a warning telling callers to always set the parameter explicitly. So the client always sends one. `TASKS_DEFAULT_LIMIT = 100` is therefore **MorgenMCP's own choice, not a mirror of Morgen's default**: it shields callers from a near-empty response that is easy to misread as "no tasks". `limit` handling still differs per endpoint *because the docs differ*: tasks documents default 1 / max 100, so `list_tasks` sends its own default and rejects >100; tags documents neither ("Returns all tags"), so `list_tags` omits the parameter and enforces no ceiling. Do not "harmonize" the two — hardcoding `limit=100` in `list_tags` would introduce truncation past 100 tags. Resolution order is per-call arg > CLI flag > env var > MorgenMCP default; a malformed or out-of-range env var raises at startup rather than silently under-returning.
 - **HTTP client hardening** (`client.py`): `_RetryAfterTransport` retries a request **once** when Morgen answers 429 with a short `Retry-After` (≤10s; longer hints and the HTTP-date form surface the 429 immediately). The transport wraps a real `AsyncHTTPTransport` with `Limits(max_connections=10)` and `retries=1` (connect errors), so respx still intercepts in tests. Timeouts are split (`Timeout(30, connect=10)`). Upstream error bodies are truncated to 300 chars (`_truncate_error_text`) before landing in `MorgenAPIError`/`ToolError` — a 5xx HTML page or data-echoing body must not reach the LLM verbatim.
-- **Bounded batch concurrency**: every batch/fan-out `asyncio.gather` goes through `gather_bounded` (`tools/utils.py`, semaphore, `BATCH_CONCURRENCY = 8`, always `return_exceptions=True`). Applies to `batch_delete_events`, `batch_update_events`, `batch_delete_tasks`, and the per-account fan-out in `list_events`. Never add a bare `asyncio.gather` over per-item API calls.
+- **Bounded batch concurrency**: every batch/fan-out `asyncio.gather` goes through `gather_bounded` (`tools/utils.py`, semaphore, `BATCH_CONCURRENCY = 8`, always `return_exceptions=True`). Applies to `batch_delete_events`, `batch_update_events`, `batch_delete_tasks`, the per-account fan-out in `tools/events.py::list_events`, and `resources.py::_fetch_events_in_window` (backing every `morgen://events/*` and `morgen://calendar/{id}/events` resource). Never add a bare `asyncio.gather` over per-item API calls.
 - **Startup fail-fast**: `_require_api_key` (`server.py`) rejects a missing/blank `MORGEN_API_KEY` both in `main()` (clean argparse error) and at the top of the lifespan (covers programmatic use). Without it the server would start, advertise all tools, and fail lazily on the first call.
 - **No raw Morgen IDs in client-visible text**: warnings/errors surfaced via `ctx.warning` or `ToolError` must reference **virtual** IDs (`register_id(...)`) — raw calendar/event IDs base64-decode to email addresses.
 - **EventUpdateRequest.alerts** uses `dict[str, Alert | None]` to support patch-style removal (set entry to `None` to delete that alert). `EventCreateRequest.alerts` uses the same widened type for consistency at type-check time, even though create never accepts None values.
@@ -107,6 +110,8 @@ Virtual IDs are **deterministic** (`MD5(real_id)`) and **persisted to disk** via
 - **`MORGEN_API_KEY`**: Required. Morgen API key. Checked at startup (`_require_api_key`) — the server refuses to start without it instead of failing lazily on the first tool call.
 - **`MORGENMCP_DATA_DIR`**: Override the virtual-ID persistence directory.
 - **`MORGENMCP_DISPLAY_TZ`**: IANA timezone (e.g. `America/Chicago`) for rendering compact event times in `morgen_list_events` (when `compact=True`) and all `morgen://events/*` resources. Defaults to the system local timezone. Overridden per-call via the `display_timezone` arg on `morgen_list_events`.
+- **`MORGENMCP_TASKS_LIMIT`**: Default `limit` sent to `/tasks/list` when a caller does not pass one. Integer 1-100 (`tasks.mdx`'s documented maximum); defaults to 100. Equivalent CLI flag `--tasks-limit N`, which wins over the env var. An invalid value fails at startup with an argparse error.
+- **`MORGENMCP_TAGS_LIMIT`**: Default `limit` sent to `/tags/list`. Integer >= 1, no upper bound (`tags.mdx` documents no maximum). Unset omits the parameter entirely, which returns all tags. Equivalent CLI flag `--tags-limit N`, which wins over the env var.
 - **`MORGENMCP_READ_ONLY`**: Truthy (`1`/`true`/`yes`/`on`, case-insensitive) launches the server read-only: all mutating tools (everything tagged `write` or `delete` — 16 create/update/delete/complete/reopen/move/batch tools) are disabled, leaving only the 6 read tools. Equivalent to the `--read-only` CLI flag (`uv run morgenmcp --read-only`); either one enables it. Applied once at startup, before `mcp.run()`, so the disabled state is baked into the first `list_tools` response.
 
 ### Testing
@@ -137,17 +142,42 @@ Users reference tags in their MCP client config: `git+https://github.com/k3KAW8P
 
 **IMPORTANT: Always use the local docs submodules as the primary source of truth.** They are version-pinned to match the exact dependency versions in this project. Online docs may describe newer or older API versions that do not match what this project uses. Only fall back to online docs when local docs are insufficient.
 
+**Caveat — verify any doc claim that drives a code change.** The Morgen docs are
+the right starting point and beat online sources, but they are not always
+authoritative about runtime behavior. `/tasks/list`'s documented default was
+wrong for months — it claimed 100 while the endpoint returned 1 — and was
+corrected upstream only in `616aeed` (MOR-4652), which is why this repo's
+`limit` handling carries so much explanatory comment. The submodule now tracks
+the docs repo's `main` rather than a feature branch, but it can still run ahead
+of or behind what is deployed. Confirm doc-driven claims with a read-only probe
+against the live API where that is cheap.
+
 When spawning Explore agents, **always include this instruction in the prompt**: _"For Morgen API questions, search `docs/morgen-dev-docs/content/` first. For FastMCP questions, search `docs/fastmcp/docs/` first. These local docs match the pinned dependency versions and take priority over online sources."_
 
-### Local docs (primary — version-pinned, always available)
+### Local docs (primary — version-pinned, must be initialized)
 
-| Source | Path | Agent | Covers |
-|--------|------|-------|--------|
-| **Morgen API** | `docs/morgen-dev-docs/content/*.mdx` | `morgen-api-docs` | Endpoints, parameters, schemas, changelog |
-| **FastMCP** | `docs/fastmcp/docs/` | `fastmcp-docs` | Server framework: tools, context, auth, testing, deployment |
+| Source | Path | Covers |
+|--------|------|--------|
+| **Morgen API** | `docs/morgen-dev-docs/content/*.mdx` | Endpoints, parameters, schemas, changelog |
+| **FastMCP** | `docs/fastmcp/docs/` | Server framework: tools, context, auth, testing, deployment |
 
-- **Morgen docs submodule**: `f977d08` (updated automatically by SessionStart hook)
-- **FastMCP docs submodule**: `v3.4.3` / `1eedd1f6` — matches `fastmcp>=3.4,<3.5` pin (updated automatically by SessionStart hook)
+- **Morgen docs submodule**: pinned at `e2fb838` (docs repo `main`)
+- **FastMCP docs submodule**: pinned at `1eedd1f6` (`v3.4.3`, matching the `fastmcp>=3.4,<3.5` pin); cloned `shallow = true`, so it carries no tags and `git describe` will fail
+
+**These are git submodules and are NOT populated by a fresh clone.** Nothing
+updates them automatically — there is no hook that does this. Check and
+initialize them before relying on any lookup rule below:
+
+```bash
+git submodule status                # a leading '-' means uninitialized/empty
+git submodule update --init         # populate both
+```
+
+An uninitialized submodule is an empty directory, so a `grep` over
+`docs/morgen-dev-docs/content/` silently returns nothing rather than erroring.
+Treat "no matches" as "check `git submodule status` first", not as "the docs
+don't cover it" — otherwise every rule in this section quietly degrades to
+guessing from memory or reaching for the live API.
 
 ### Online docs (fallback only)
 
@@ -159,8 +189,8 @@ When spawning Explore agents, **always include this instruction in the prompt**:
 
 ### Lookup rules
 
-1. **Before implementing or modifying any tool**: Use the `morgen-api-docs` agent to look up the relevant Morgen API endpoint in the local MDX files. Confirm parameters, required fields, and response shapes. Only cross-reference online docs if the local result is incomplete.
-2. **For FastMCP patterns** (tool registration, return types, error handling, testing): Use the `fastmcp-docs` agent — it searches `docs/fastmcp/docs/` and returns file paths, line numbers, and code examples. These docs match the installed FastMCP version exactly.
+1. **Before implementing or modifying any tool**: Search `docs/morgen-dev-docs/content/*.mdx` directly (grep for the endpoint or resource name, read the matching file) to confirm parameters, required fields, and response shapes. Only cross-reference online docs if the local result is incomplete.
+2. **For FastMCP patterns** (tool registration, return types, error handling, testing): Search `docs/fastmcp/docs/` directly — grep for the pattern (decorator, `Context` method, error class, testing helper) and read the matching file for file paths, line numbers, and code examples. These docs match the installed FastMCP version exactly.
 3. **For MCP protocol questions** (transport, JSON-RPC, tool schema): Fetch `https://modelcontextprotocol.io/llms.txt` first, then the relevant spec page (no local copy exists).
 4. **When adding a new tool or changing tool signatures**: Check both FastMCP local docs (for decorator/return-type patterns) and the MCP protocol spec (for schema requirements) to ensure compliance.
-5. **When spawning any agent** (Explore, Plan, or general-purpose) that may need API or framework information: Include the local doc paths and agent names in the prompt so the subagent searches them directly rather than guessing or using online sources.
+5. **When spawning any agent** (Explore, Plan, or general-purpose) that may need API or framework information: Include the local doc paths in the prompt (`docs/morgen-dev-docs/content/` for Morgen API, `docs/fastmcp/docs/` for FastMCP) so the subagent searches them directly rather than guessing or using online sources.

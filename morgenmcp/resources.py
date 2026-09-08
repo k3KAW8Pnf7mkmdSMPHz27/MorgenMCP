@@ -23,7 +23,6 @@ All bodies are JSON. IDs are virtual IDs, identical to those returned by tools.
 
 from __future__ import annotations
 
-import asyncio
 import json
 from collections import defaultdict
 from datetime import date, datetime, timedelta, tzinfo
@@ -39,7 +38,7 @@ from morgenmcp.tools.id_registry import HASH_SPEC, register_id, resolve_id
 from morgenmcp.tools.id_utils import extract_account_from_calendar
 from morgenmcp.tools.tags import _format_tag
 from morgenmcp.tools.tasks import _format_task
-from morgenmcp.tools.utils import filter_none_values
+from morgenmcp.tools.utils import filter_none_values, gather_bounded
 
 _LOCAL_DT_FMT = "%Y-%m-%dT%H:%M:%S"
 
@@ -102,10 +101,7 @@ async def _fetch_events_in_window(
             end=end,
         )
 
-    results = await asyncio.gather(
-        *(fetch(a, c) for a, c in by_account.items()),
-        return_exceptions=True,
-    )
+    results = await gather_bounded(fetch(a, c) for a, c in by_account.items())
     out: list[Event] = []
     for r in results:
         if isinstance(r, BaseException):

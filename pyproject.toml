@@ -1,6 +1,6 @@
 [project]
 name = "morgenmcp"
-version = "0.1.0"
+dynamic = ["version"]
 description = "MCP server for Morgen calendar API"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.14"
@@ -9,6 +9,7 @@ dependencies = [
     "httpx>=0.28",
     "platformdirs>=4.0",
     "pydantic>=2.12",
+    "tzdata>=2025.1",
 ]
 
 [project.optional-dependencies]
@@ -16,13 +17,26 @@ dev = [
     "pytest>=9.0",
     "pytest-asyncio>=1.0",
     "respx>=0.22",
-    "ruff>=0.15.3",
+    "ruff>=0.16.6,<0.17",
     "pre-commit>=4.0",
     "pyright>=1.1.408",
 ]
 
 [project.scripts]
 morgenmcp = "morgenmcp.server:main"
+
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "morgenmcp/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["morgenmcp"]
 
 [tool.uv]
 package = true
@@ -39,6 +53,9 @@ addopts = "-m 'not integration'"
 [tool.ruff]
 target-version = "py314"
 line-length = 88
+
+# ruff 0.16 formats Markdown code blocks; neither tree is ours to reformat.
+exclude = ["docs", ".claude"]
 
 [tool.ruff.lint]
 select = [
@@ -59,5 +76,6 @@ known-first-party = ["morgenmcp"]
 [tool.pyright]
 pythonVersion = "3.14"
 typeCheckingMode = "standard"
+include = ["morgenmcp"]
 venvPath = "."
 venv = ".venv"

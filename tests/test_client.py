@@ -4,7 +4,14 @@ import httpx
 import pytest
 import respx
 
-from morgenmcp.client import MorgenClient, get_client, set_client
+from morgenmcp.client import (
+    TAGS_LIMIT_ENV,
+    TASKS_LIMIT_ENV,
+    MorgenClient,
+    get_client,
+    set_client,
+    set_limit_override,
+)
 from morgenmcp.models import (
     EventCreateRequest,
     EventDeleteRequest,
@@ -588,7 +595,7 @@ class TestTaskEndpoints:
 
     @respx.mock
     async def test_list_tasks(self):
-        respx.get("https://api.morgen.so/v3/tasks/list").mock(
+        route = respx.get("https://api.morgen.so/v3/tasks/list").mock(
             return_value=httpx.Response(
                 200,
                 json={
@@ -611,6 +618,8 @@ class TestTaskEndpoints:
 
         assert len(tasks) == 1
         assert tasks[0].title == "Hi"
+        url = str(route.calls.last.request.url)
+        assert "limit=100" in url
 
     @respx.mock
     async def test_list_tasks_passes_filters(self):
@@ -752,3 +761,141 @@ class TestTagEndpoints:
         )
         async with MorgenClient(api_key="k") as client:
             await client.delete_tag(TagDeleteRequest(id="t1"))
+
+
+class TestConfigurableListLimits:
+    """Per-endpoint list limits via MORGENMCP_*_LIMIT env vars and CLI flags."""
+
+    @pytest.fixture(autouse=True)
+    def _isolate_limit_config(self, monkeypatch):
+        """Clear both overrides and env vars so tests can't leak into each other."""
+        monkeypatch.delenv(TASKS_LIMIT_ENV, raising=False)
+        monkeypatch.delenv(TAGS_LIMIT_ENV, raising=False)
+        set_limit_override(TASKS_LIMIT_ENV, None)
+        set_limit_override(TAGS_LIMIT_ENV, None)
+        yield
+        set_limit_override(TASKS_LIMIT_ENV, None)
+        set_limit_override(TAGS_LIMIT_ENV, None)
+
+    @staticmethod
+    def _tasks_route():
+        return respx.get("https://api.morgen.so/v3/tasks/list").mock(
+            return_value=httpx.Response(200, json={"data": {"tasks": []}})
+        )
+
+    @staticmethod
+    def _tags_route():
+        return respx.get("https://api.morgen.so/v3/tags/list").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+
+    # --- defaults -------------------------------------------------------
+
+    @respx.mock
+    async def test_tasks_defaults_to_documented_100(self):
+        """Unset config still sends 100 — the endpoint's own default is broken."""
+        route = self._tasks_route()
+        async with MorgenClient(api_key="k") as client:
+            await client.list_tasks()
+        assert route.calls.last.request.url.params["limit"] == "100"
+
+    @respx.mock
+    async def test_tags_omits_limit_by_default(self):
+        """tags.mdx documents no default; omitting returns all tags."""
+        route = self._tags_route()
+        async with MorgenClient(api_key="k") as client:
+            await client.list_tags()
+        assert "limit" not in route.calls.last.request.url.params
+
+    # --- env var --------------------------------------------------------
+
+    @respx.mock
+    async def test_tasks_env_var_overrides_default(self, monkeypatch):
+        monkeypatch.setenv(TASKS_LIMIT_ENV, "25")
+        route = self._tasks_route()
+        async with MorgenClient(api_key="k") as client:
+            await client.list_tasks()
+        assert route.calls.last.request.url.params["limit"] == "25"
+
+    @respx.mock
+    async def test_tags_env_var_adds_limit(self, monkeypatch):
+        monkeypatch.setenv(TAGS_LIMIT_ENV, "50")
+        route = self._tags_route()
+        async with MorgenClient(api_key="k") as client:
+            await client.list_tags()
+        assert route.calls.last.request.url.params["limit"] == "50"
+
+    @respx.mock
+    async def test_env_vars_are_endpoint_scoped(self, monkeypatch):
+        """MORGENMCP_TASKS_LIMIT must not bleed into /tags/list."""
+        monkeypatch.setenv(TASKS_LIMIT_ENV, "7")
+        route = self._tags_route()
+        async with MorgenClient(api_key="k") as client:
+            await client.list_tags()
+        assert "limit" not in route.calls.last.request.url.params
+
+    # --- precedence -----------------------------------------------------
+
+    @respx.mock
+    async def test_explicit_arg_beats_env_var(self, monkeypatch):
+        monkeypatch.setenv(TASKS_LIMIT_ENV, "25")
+        route = self._tasks_route()
+        async with MorgenClient(api_key="k") as client:
+            await client.list_tasks(limit=3)
+        assert route.calls.last.request.url.params["limit"] == "3"
+
+    @respx.mock
+    async def test_cli_override_beats_env_var(self, monkeypatch):
+        monkeypatch.setenv(TASKS_LIMIT_ENV, "25")
+        set_limit_override(TASKS_LIMIT_ENV, 40)
+        route = self._tasks_route()
+        async with MorgenClient(api_key="k") as client:
+            await client.list_tasks()
+        assert route.calls.last.request.url.params["limit"] == "40"
+
+    @respx.mock
+    async def test_explicit_arg_beats_cli_override(self):
+        set_limit_override(TASKS_LIMIT_ENV, 40)
+        route = self._tasks_route()
+        async with MorgenClient(api_key="k") as client:
+            await client.list_tasks(limit=2)
+        assert route.calls.last.request.url.params["limit"] == "2"
+
+    # --- validation -----------------------------------------------------
+
+    async def test_non_integer_env_var_raises(self, monkeypatch):
+        monkeypatch.setenv(TASKS_LIMIT_ENV, "lots")
+        with pytest.raises(ValueError, match="must be an integer"):
+            async with MorgenClient(api_key="k") as client:
+                await client.list_tasks()
+
+    async def test_tasks_env_var_above_documented_max_raises(self, monkeypatch):
+        """tasks.mdx caps limit at 100; a larger value fails loudly."""
+        monkeypatch.setenv(TASKS_LIMIT_ENV, "500")
+        with pytest.raises(ValueError, match="must be <= 100"):
+            async with MorgenClient(api_key="k") as client:
+                await client.list_tasks()
+
+    async def test_zero_env_var_raises(self, monkeypatch):
+        monkeypatch.setenv(TASKS_LIMIT_ENV, "0")
+        with pytest.raises(ValueError, match="must be >= 1"):
+            async with MorgenClient(api_key="k") as client:
+                await client.list_tasks()
+
+    @respx.mock
+    async def test_tags_has_no_documented_maximum(self, monkeypatch):
+        """tags.mdx documents no ceiling, so a large value is accepted."""
+        monkeypatch.setenv(TAGS_LIMIT_ENV, "5000")
+        route = self._tags_route()
+        async with MorgenClient(api_key="k") as client:
+            await client.list_tags()
+        assert route.calls.last.request.url.params["limit"] == "5000"
+
+    @respx.mock
+    async def test_blank_env_var_falls_back_to_default(self, monkeypatch):
+        """A blank value is treated as unset, not as a parse error."""
+        monkeypatch.setenv(TASKS_LIMIT_ENV, "   ")
+        route = self._tasks_route()
+        async with MorgenClient(api_key="k") as client:
+            await client.list_tasks()
+        assert route.calls.last.request.url.params["limit"] == "100"

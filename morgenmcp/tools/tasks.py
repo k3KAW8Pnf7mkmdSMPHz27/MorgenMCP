@@ -91,9 +91,17 @@ async def list_tasks(
 ) -> ListTasksResult:
     """List Morgen tasks.
 
+    Set `limit` to what you actually need — a small number for a quick look,
+    up to 100 when you need the full picture. Results are truncated silently:
+    if `count` equals the limit, there may be more tasks you did not see, so
+    do not treat the response as a complete inventory. Narrow with
+    `updated_after` rather than raising the limit where you can.
+
     Args:
-        limit: Max tasks to return (1-100, default 100). The /tasks/list
-            endpoint costs 10 rate-limit points per call regardless of limit.
+        limit: Max tasks to return (1-100). Defaults to the server's
+            configured MORGENMCP_TASKS_LIMIT, else 100. The /tasks/list
+            endpoint costs 10 rate-limit points per call regardless of limit,
+            so a smaller limit saves tokens but not quota.
         updated_after: ISO 8601 datetime; when provided, returns tasks
             updated/created after this timestamp. Useful for incremental sync.
 
