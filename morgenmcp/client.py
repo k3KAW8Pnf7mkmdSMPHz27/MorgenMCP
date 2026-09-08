@@ -601,7 +601,7 @@ class MorgenClient:
         response = await self.client.get("/tags", params={"id": tag_id})
         self._handle_error(response)
 
-        # Like /tags/list, this endpoint skips the {data: ...} envelope.
+        # No {data: ...} envelope here — tags.mdx documents a bare object.
         return Tag.model_validate(response.json())
 
     async def create_tag(self, request: TagCreateRequest) -> Tag:

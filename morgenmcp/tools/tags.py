@@ -18,7 +18,6 @@ from morgenmcp.tools.outputs import (
     ListTagsResult,
     MutateTagResult,
     TagItem,
-    TagOutput,
 )
 from morgenmcp.tools.utils import filter_none_values, handle_tool_errors
 from morgenmcp.validators import validate_hex_color
@@ -68,22 +67,22 @@ async def list_tags(
 
 
 @handle_tool_errors
-async def get_tag(id: str) -> TagOutput:
+async def get_tag(tag_id: str) -> TagItem:
     """Retrieve a single tag by virtual ID.
 
     Args:
-        id: Virtual ID of the tag.
+        tag_id: Virtual ID of the tag.
 
     Returns:
         Dictionary with tag details (id, name, color, updated, deleted).
     """
-    if not id or not id.strip():
-        raise ToolError("id cannot be empty")
+    if not tag_id or not tag_id.strip():
+        raise ToolError("tag_id cannot be empty")
 
     try:
-        real_id = resolve_id(id)
+        real_id = resolve_id(tag_id)
     except IDNotFoundError as e:
-        raise ToolError(f"Tag with ID '{id}' not found") from e
+        raise ToolError(f"Tag with ID '{tag_id}' not found") from e
 
     client = get_client()
     try:

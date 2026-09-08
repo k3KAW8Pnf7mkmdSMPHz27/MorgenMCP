@@ -322,6 +322,3 @@ class MutateTagResult(TypedDict):
     success: bool
     message: str
     tagId: str
-
-
-TagOutput = TagItem

@@ -344,9 +344,9 @@ class TestGetTag:
         mock_tag_client.get_tag.assert_awaited_once_with(sample_tag.id)
 
     async def test_get_tag_empty_id(self, mock_tag_client):
-        with pytest.raises(ToolError, match="id cannot be empty"):
+        with pytest.raises(ToolError, match="tag_id cannot be empty"):
             await get_tag("")
-        with pytest.raises(ToolError, match="id cannot be empty"):
+        with pytest.raises(ToolError, match="tag_id cannot be empty"):
             await get_tag("   ")
 
     async def test_get_tag_not_found(self, mock_tag_client):
