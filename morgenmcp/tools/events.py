@@ -77,7 +77,9 @@ def _tz_label(dt: datetime, tz: tzinfo) -> str:
 
 
 def _classify_event(event: Event) -> str:
-    """Return a ``" {kind}"`` suffix for a compact line, or ``""`` for a plain busy event.
+    """Return a ``" kind"`` suffix rendered INSIDE the ID brackets, or ``""``.
+
+    The caller emits ``[{virtual_id}{kind}]``, e.g. ``[aB-9xZ_ task,free]``.
 
     Ordinary busy events get no tag: they are the large majority of any listing,
     and compact output exists to save tokens. A tag marks an item the client
@@ -97,8 +99,7 @@ def _classify_event(event: Event) -> str:
     ``canBeCompleted=True`` and sets ``progress="completed"`` (verified live).
     The tag says what the item is; ``progress`` says whether it is done.
 
-    No space after the comma: the tag must stay a single whitespace-delimited
-    token so clients can split on it.
+    No space after the comma, so the bracket content stays two tokens at most.
     """
     meta = event.metadata
     parts: list[str] = []
@@ -110,7 +111,7 @@ def _classify_event(event: Event) -> str:
         parts.append("flexible")
     if event.free_busy_status == "free":
         parts.append("free")
-    return f" {{{','.join(parts)}}}" if parts else ""
+    return f" {','.join(parts)}" if parts else ""
 
 
 def _format_compact_event(event: Event, display_tz: tzinfo) -> str:
@@ -122,15 +123,16 @@ def _format_compact_event(event: Event, display_tz: tzinfo) -> str:
     events (no source timezone) are tagged "(floating)" and not converted.
     All-day events use ``"MMM DD (all-day)"`` form.
 
-    A ``{kind}`` tag may precede the bracketed ID (see ``_classify_event``):
-    ``{task}``, ``{routine}``, ``{flexible}``, ``{free}``, or a pair such as
-    ``{task,free}``. An untagged line is an ordinary busy commitment -- the
+    A kind tag may appear INSIDE the ID brackets (see ``_classify_event``):
+    ``[id task]``, ``routine``, ``flexible``, ``free``, or a pair such as
+    ``[id task,free]``. An untagged line is an ordinary busy commitment -- the
     common case, left untagged to keep compact output cheap.
 
-    Parsing note: titles may themselves contain braces and brackets, so the tag
-    is only well defined as the final ``{...}`` immediately preceding the
-    trailing ``" [id]"``. Parse right to left; do not assume whitespace-group
-    positions, and do not assume the first ``{`` on the line starts the tag.
+    Parsing note: match the trailing ``[<7-char id>( <tag>)?]`` anchored at end
+    of line. The tag lives inside the brackets so that a title cannot spoof it:
+    with the tag outside, a title ending in ``{free}`` on a busy event rendered
+    byte-identically to a genuinely free event, which would lead a client to
+    schedule over a hard conflict.
     """
     virtual_id = register_id(event.id)
     title = event.title or "(No title)"
@@ -143,7 +145,7 @@ def _format_compact_event(event: Event, display_tz: tzinfo) -> str:
             date_str = dt.strftime("%b %d")
         except (ValueError, TypeError):
             date_str = event.start
-        return f"{date_str} (all-day): {title}{kind} [{virtual_id}]"
+        return f"{date_str} (all-day): {title} [{virtual_id}{kind}]"
 
     try:
         start_naive = datetime.fromisoformat(event.start)
@@ -170,13 +172,13 @@ def _format_compact_event(event: Event, display_tz: tzinfo) -> str:
             end_label = f"{end_naive.strftime('%b %d')} {end_str}" if cross else end_str
             return (
                 f"{date_prefix} {start_str}-{end_label} (floating): "
-                f"{title}{kind} [{virtual_id}]"
+                f"{title} [{virtual_id}{kind}]"
             )
 
         try:
             source_tz = ZoneInfo(event.time_zone)
         except Exception:
-            return f"{event.start} {event.time_zone}: {title}{kind} [{virtual_id}]"
+            return f"{event.start} {event.time_zone}: {title} [{virtual_id}{kind}]"
 
         start_dt = start_naive.replace(tzinfo=source_tz).astimezone(display_tz)
         end_dt = end_naive.replace(tzinfo=source_tz).astimezone(display_tz)
@@ -188,10 +190,10 @@ def _format_compact_event(event: Event, display_tz: tzinfo) -> str:
         end_label = f"{end_dt.strftime('%b %d')} {end_str}" if cross else end_str
         return (
             f"{date_prefix} {start_str}-{end_label} {_tz_label(start_dt, display_tz)}: "
-            f"{title}{kind} [{virtual_id}]"
+            f"{title} [{virtual_id}{kind}]"
         )
     except (ValueError, TypeError):
-        return f"{event.start}: {title}{kind} [{virtual_id}]"
+        return f"{event.start}: {title} [{virtual_id}{kind}]"
 
 
 def _format_recurrence_rule(rule: Any) -> dict[str, Any]:
@@ -298,11 +300,12 @@ async def list_events(
         calendar_ids: Optional list of virtual calendar IDs. If omitted, queries all calendars.
         compact: If True, returns compact one-liner format to reduce tokens.
             Format: "Jul 15 09:15-10:00 CDT (America/Chicago): Meeting [event_id]"
-            A kind tag may precede the ID: {task} (linked to a Morgen task),
-            {routine} (a check-off-able Morgen Routine), {flexible} (Morgen
-            auto-scheduled, so movable), {free} (does not mark you busy), or a
-            pair like {task,free}. No tag means an ordinary busy commitment.
-            Only {task}/{routine}/{flexible} are mutually exclusive.
+            A kind tag may appear inside the ID brackets, e.g.
+            "[abc123 task]": task (linked to a Morgen task), routine (a
+            check-off-able Morgen Routine), flexible (Morgen auto-scheduled, so
+            movable), free (does not mark you busy), or a pair like
+            "[abc123 task,free]". No tag means an ordinary busy commitment.
+            Only task/routine/flexible are mutually exclusive.
         display_timezone: Optional IANA timezone (e.g. "America/Chicago") used to
             render compact times. Defaults to the MORGENMCP_DISPLAY_TZ env var,
             or the system local timezone if unset. Only affects compact=True

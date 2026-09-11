@@ -371,7 +371,7 @@ class TestClassifyCompactEvent:
     ``{...}`` before the trailing ``" [id]"`` is the tag.
     """
 
-    TAG_RE = re.compile(r"\{[a-z,]+\} \[[A-Za-z0-9_-]{7}\]$")
+    TAG_RE = re.compile(r"\[[A-Za-z0-9_-]{7} [a-z,]+\]$")
 
     def _event(self, sample_calendar_id, sample_account_id, uid, **kwargs):
         kwargs.setdefault("title", "Thing")
@@ -396,7 +396,7 @@ class TestClassifyCompactEvent:
             metadata=EventMetadata(task_id="task-uuid"),
         )
         result = _format_compact_event(event, ZoneInfo("America/Chicago"))
-        assert re.search(r"\{task\} \[[A-Za-z0-9_-]{7}\]$", result)
+        assert re.search(r"\[[A-Za-z0-9_-]{7} task\]$", result)
 
     def test_can_be_completed_renders_routine_tag(
         self, sample_calendar_id, sample_account_id
@@ -411,7 +411,7 @@ class TestClassifyCompactEvent:
             metadata=EventMetadata(can_be_completed=True),
         )
         result = _format_compact_event(event, ZoneInfo("America/Chicago"))
-        assert re.search(r"\{routine\} \[[A-Za-z0-9_-]{7}\]$", result)
+        assert re.search(r"\[[A-Za-z0-9_-]{7} routine\]$", result)
 
     def test_auto_scheduled_renders_flexible_tag(
         self, sample_calendar_id, sample_account_id
@@ -425,7 +425,7 @@ class TestClassifyCompactEvent:
             metadata=EventMetadata(is_auto_scheduled=True),
         )
         result = _format_compact_event(event, ZoneInfo("America/Chicago"))
-        assert re.search(r"\{flexible\} \[[A-Za-z0-9_-]{7}\]$", result)
+        assert re.search(r"\[[A-Za-z0-9_-]{7} flexible\]$", result)
 
     def test_task_wins_over_routine(self, sample_calendar_id, sample_account_id):
         """Morgen rejects create with both, but be deterministic if both appear."""
@@ -438,7 +438,7 @@ class TestClassifyCompactEvent:
             metadata=EventMetadata(task_id="task-uuid", can_be_completed=True),
         )
         result = _format_compact_event(event, ZoneInfo("America/Chicago"))
-        assert re.search(r"\{task\} \[[A-Za-z0-9_-]{7}\]$", result)
+        assert re.search(r"\[[A-Za-z0-9_-]{7} task\]$", result)
         assert "routine" not in result
 
     def test_routine_wins_over_flexible(self, sample_calendar_id, sample_account_id):
@@ -451,7 +451,7 @@ class TestClassifyCompactEvent:
             metadata=EventMetadata(can_be_completed=True, is_auto_scheduled=True),
         )
         result = _format_compact_event(event, ZoneInfo("America/Chicago"))
-        assert re.search(r"\{routine\} \[[A-Za-z0-9_-]{7}\]$", result)
+        assert re.search(r"\[[A-Za-z0-9_-]{7} routine\]$", result)
         assert "flexible" not in result
 
     def test_free_busy_status_free_renders_free_tag(
@@ -461,7 +461,7 @@ class TestClassifyCompactEvent:
             sample_calendar_id, sample_account_id, "free_uid", free_busy_status="free"
         )
         result = _format_compact_event(event, ZoneInfo("America/Chicago"))
-        assert re.search(r"\{free\} \[[A-Za-z0-9_-]{7}\]$", result)
+        assert re.search(r"\[[A-Za-z0-9_-]{7} free\]$", result)
 
     def test_task_and_free_combine_without_space(
         self, sample_calendar_id, sample_account_id
@@ -477,10 +477,9 @@ class TestClassifyCompactEvent:
             metadata=EventMetadata(task_id="task-uuid"),
         )
         result = _format_compact_event(event, ZoneInfo("America/Chicago"))
-        assert re.search(r"\{task,free\} \[[A-Za-z0-9_-]{7}\]$", result)
-        assert "{task, free}" not in result
-        # the tag is a single whitespace-delimited group
-        assert result.rsplit(" ", 2)[1] == "{task,free}"
+        assert re.search(r"\[[A-Za-z0-9_-]{7} task,free\]$", result)
+        assert "task, free" not in result  # no space after the comma
+        assert result.endswith(" task,free]")
 
     def test_plain_busy_event_has_no_tag(self, sample_calendar_id, sample_account_id):
         """The common case stays byte-identical to pre-tag output."""
@@ -529,7 +528,122 @@ class TestClassifyCompactEvent:
         )
         result = _format_compact_event(tagged, ZoneInfo("America/Chicago"))
         assert "Fix {config} bug" in result
-        assert re.search(r"\{task\} \[[A-Za-z0-9_-]{7}\]$", result)
+        assert re.search(r"\[[A-Za-z0-9_-]{7} task\]$", result)
+
+    def test_title_ending_in_brace_word_is_not_mistaken_for_a_tag(
+        self, sample_calendar_id, sample_account_id
+    ):
+        """A busy event whose TITLE ends in a brace-word must not read as tagged.
+
+        Regression for the spoof found in review: when the tag lived outside the
+        ID brackets, `"Board meeting {free}"` on a busy event rendered
+        byte-identically to a genuinely-free event, so a client would treat a
+        hard conflict as schedulable. The tag now lives INSIDE the brackets, so
+        spoofing would require forging the 7-char virtual ID.
+
+        Note the mid-title case (``Fix {config} bug``) was always safe; it is
+        specifically the brace-group-adjacent-to-ID position that broke.
+        """
+        for title in ("Board meeting {free}", "Retro {task,free}", "Sync {routine}"):
+            event = self._event(
+                sample_calendar_id,
+                sample_account_id,
+                f"spoof_{len(title)}",
+                title=title,
+            )
+            result = _format_compact_event(event, ZoneInfo("America/Chicago"))
+            assert title in result, "title must survive verbatim"
+            assert not self.TAG_RE.search(result), f"{title!r} spoofed a tag: {result}"
+
+    def test_metadata_parses_from_live_wire_aliases(
+        self, sample_calendar_id, sample_account_id
+    ):
+        """The camelCase aliases are the ONLY path live Morgen JSON takes.
+
+        Every other test builds EventMetadata by snake_case field name, so a
+        typo'd alias would leave the feature dead in production while the whole
+        suite stayed green (verified by mutation: breaking the canBeCompleted
+        alias kept all 366 tests passing). This test validates from the wire
+        shape instead.
+        """
+        from morgenmcp.models import Event as WireEvent
+
+        wire = {
+            "id": make_event_id("test@example.com", "wire_uid", sample_account_id),
+            "calendarId": sample_calendar_id,
+            "accountId": sample_account_id,
+            "integrationId": "google",
+            "title": "Morning walk",
+            "start": "2026-07-15T05:00:00",
+            "duration": "PT30M",
+            "timeZone": "America/Chicago",
+            "showWithoutTime": False,
+            "freeBusyStatus": "busy",
+            "morgen.so:metadata": {
+                "canBeCompleted": True,
+                "isAutoScheduled": False,
+                "isFlexible": False,
+                "progress": "needs-action",
+            },
+        }
+        event = WireEvent.model_validate(wire)
+        assert event.metadata is not None
+        assert event.metadata.can_be_completed is True
+        assert event.metadata.is_auto_scheduled is False
+        assert event.metadata.is_flexible is False
+
+        result = _format_compact_event(event, ZoneInfo("America/Chicago"))
+        assert re.search(r"\[[A-Za-z0-9_-]{7} routine\]$", result)
+
+    def test_auto_scheduled_parses_from_wire_alias(
+        self, sample_calendar_id, sample_account_id
+    ):
+        """Same alias guard for isAutoScheduled -> {flexible}."""
+        from morgenmcp.models import Event as WireEvent
+
+        wire = {
+            "id": make_event_id("test@example.com", "wire2_uid", sample_account_id),
+            "calendarId": sample_calendar_id,
+            "accountId": sample_account_id,
+            "integrationId": "google",
+            "title": "Auto block",
+            "start": "2026-07-15T09:00:00",
+            "duration": "PT1H",
+            "timeZone": "America/Chicago",
+            "showWithoutTime": False,
+            "freeBusyStatus": "busy",
+            "morgen.so:metadata": {"isAutoScheduled": True, "canBeCompleted": False},
+        }
+        event = WireEvent.model_validate(wire)
+        assert event.metadata is not None
+        assert event.metadata.is_auto_scheduled is True
+        result = _format_compact_event(event, ZoneInfo("America/Chicago"))
+        assert re.search(r"\[[A-Za-z0-9_-]{7} flexible\]$", result)
+
+    def test_task_id_parses_from_wire_alias(
+        self, sample_calendar_id, sample_account_id
+    ):
+        """Same alias guard for taskId -> {task}."""
+        from morgenmcp.models import Event as WireEvent
+
+        wire = {
+            "id": make_event_id("test@example.com", "wire3_uid", sample_account_id),
+            "calendarId": sample_calendar_id,
+            "accountId": sample_account_id,
+            "integrationId": "google",
+            "title": "Deep work",
+            "start": "2026-07-15T09:00:00",
+            "duration": "PT1H",
+            "timeZone": "America/Chicago",
+            "showWithoutTime": False,
+            "freeBusyStatus": "busy",
+            "morgen.so:metadata": {"taskId": "task-uuid", "canBeCompleted": False},
+        }
+        event = WireEvent.model_validate(wire)
+        assert event.metadata is not None
+        assert event.metadata.task_id == "task-uuid"
+        result = _format_compact_event(event, ZoneInfo("America/Chicago"))
+        assert re.search(r"\[[A-Za-z0-9_-]{7} task\]$", result)
 
     def test_completed_routine_still_tags_routine(
         self, sample_calendar_id, sample_account_id
@@ -549,7 +663,7 @@ class TestClassifyCompactEvent:
             metadata=EventMetadata(can_be_completed=True, progress="completed"),
         )
         result = _format_compact_event(event, ZoneInfo("America/Chicago"))
-        assert re.search(r"\{routine\} \[[A-Za-z0-9_-]{7}\]$", result)
+        assert re.search(r"\[[A-Za-z0-9_-]{7} routine\]$", result)
 
     def test_routine_and_free_combine(self, sample_calendar_id, sample_account_id):
         """Verified live: a free routine renders {routine,free}."""
@@ -563,8 +677,8 @@ class TestClassifyCompactEvent:
             metadata=EventMetadata(can_be_completed=True),
         )
         result = _format_compact_event(event, ZoneInfo("America/Chicago"))
-        assert re.search(r"\{routine,free\} \[[A-Za-z0-9_-]{7}\]$", result)
-        assert result.rsplit(" ", 2)[1] == "{routine,free}"
+        assert re.search(r"\[[A-Za-z0-9_-]{7} routine,free\]$", result)
+        assert result.endswith(" routine,free]")
 
     def test_all_day_routine_tags_routine(self, sample_calendar_id, sample_account_id):
         """Verified live: 'Aug 12 (all-day): ... {routine} [id]'."""
@@ -579,7 +693,7 @@ class TestClassifyCompactEvent:
         )
         result = _format_compact_event(event, ZoneInfo("America/Chicago"))
         assert "(all-day)" in result
-        assert re.search(r"\{routine\} \[[A-Za-z0-9_-]{7}\]$", result)
+        assert re.search(r"\[[A-Za-z0-9_-]{7} routine\]$", result)
 
     def test_tag_appears_on_all_day_floating_and_bad_tz_lines(
         self, sample_calendar_id, sample_account_id
@@ -598,7 +712,7 @@ class TestClassifyCompactEvent:
             metadata=meta,
         )
         assert re.search(
-            r"\{task\} \[[A-Za-z0-9_-]{7}\]$", _format_compact_event(all_day, tz)
+            r"\[[A-Za-z0-9_-]{7} task\]$", _format_compact_event(all_day, tz)
         )
 
         floating = self._event(
@@ -609,7 +723,7 @@ class TestClassifyCompactEvent:
             metadata=meta,
         )
         assert re.search(
-            r"\{task\} \[[A-Za-z0-9_-]{7}\]$", _format_compact_event(floating, tz)
+            r"\[[A-Za-z0-9_-]{7} task\]$", _format_compact_event(floating, tz)
         )
 
         bad_tz = self._event(
@@ -620,7 +734,7 @@ class TestClassifyCompactEvent:
             metadata=meta,
         )
         assert re.search(
-            r"\{task\} \[[A-Za-z0-9_-]{7}\]$", _format_compact_event(bad_tz, tz)
+            r"\[[A-Za-z0-9_-]{7} task\]$", _format_compact_event(bad_tz, tz)
         )
 
         bad_start = self._event(
@@ -631,7 +745,7 @@ class TestClassifyCompactEvent:
             metadata=meta,
         )
         assert re.search(
-            r"\{task\} \[[A-Za-z0-9_-]{7}\]$", _format_compact_event(bad_start, tz)
+            r"\[[A-Za-z0-9_-]{7} task\]$", _format_compact_event(bad_start, tz)
         )
 
 
