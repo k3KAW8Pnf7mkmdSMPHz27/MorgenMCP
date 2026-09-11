@@ -109,13 +109,20 @@ async def list_task_lists(
     tasks = res.tasks
     spaces = res.spaces or []
 
+    unfiltered_spaces = {s.id: s for s in spaces}
+
     if real_account_id is not None:
         spaces = [s for s in spaces if s.account_id == real_account_id]
         tasks = [t for t in tasks if t.account_id == real_account_id]
 
+    # `None` and the literal "default" are the same list: Morgen omits
+    # taskListId on tasks in the default list, and list_tasks' task_list_id
+    # filter already treats the two as one bucket. Counting them separately
+    # would make this tool disagree with that filter on the same virtual ID.
     task_counts: dict[str | None, int] = {}
     for task in tasks:
-        task_counts[task.task_list_id] = task_counts.get(task.task_list_id, 0) + 1
+        list_key = task.task_list_id if task.task_list_id is not None else "default"
+        task_counts[list_key] = task_counts.get(list_key, 0) + 1
 
     task_lists: list[TaskListOutput] = []
     seen_ids: set[str] = set()
@@ -134,28 +141,39 @@ async def list_task_lists(
             }
         )
 
-    for list_key, count in task_counts.items():
-        if list_key is None or list_key not in seen_ids:
-            raw_id = list_key if list_key is not None else "default"
-            if raw_id in seen_ids:
-                continue
-            seen_ids.add(raw_id)
-            matching_tasks = [t for t in tasks if t.task_list_id == list_key]
-            task_acc_id = None
-            for t in matching_tasks:
-                if t.account_id:
-                    task_acc_id = t.account_id
-                    break
+    for raw_id, count in task_counts.items():
+        if raw_id is None or raw_id in seen_ids:
+            continue
+        seen_ids.add(raw_id)
+        matching_tasks = [
+            t
+            for t in tasks
+            if (t.task_list_id if t.task_list_id is not None else "default") == raw_id
+        ]
+        task_acc_id = None
+        for t in matching_tasks:
+            if t.account_id:
+                task_acc_id = t.account_id
+                break
 
-            task_lists.append(
-                {
-                    "id": register_id(raw_id),
-                    "name": "Default" if raw_id == "default" else raw_id,
-                    "color": None,
-                    "task_count": count,
-                    "account_id": (register_id(task_acc_id) if task_acc_id else None),
-                }
-            )
+        # A space filtered out above (its own accountId was absent) still has
+        # tasks here. Recover its name/colour rather than falling back to the
+        # raw ID, which must never reach the client.
+        known = unfiltered_spaces.get(raw_id)
+
+        task_lists.append(
+            {
+                "id": register_id(raw_id),
+                "name": (
+                    (known.name or "Default")
+                    if known is not None
+                    else ("Default" if raw_id == "default" else "Unnamed list")
+                ),
+                "color": known.color if known is not None else None,
+                "task_count": count,
+                "account_id": (register_id(task_acc_id) if task_acc_id else None),
+            }
+        )
 
     return {
         "task_lists": task_lists,

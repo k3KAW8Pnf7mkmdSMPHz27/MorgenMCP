@@ -152,6 +152,72 @@ class TestListTaskLists:
         assert result["task_lists"][0]["name"] == "Acc1 Space"
         assert result["task_lists"][0]["task_count"] == 1
 
+    async def test_list_task_lists_never_emits_a_raw_id_as_name(self, mock_task_client):
+        """A list with no matching space must not surface its raw Morgen ID.
+
+        Morgen's documented /tasks/list example returns ``"spaces": []`` while
+        tasks still carry a taskListId, so this synthesis path is the common
+        case, not an edge case.
+        """
+        raw = "WyJ1c2VyQGV4YW1wbGUuY29tIiwibGlzdC0xIl0"
+        mock_task_client.list_tasks_and_spaces.return_value = TasksListResponse(
+            tasks=[Task(id="t1", task_list_id=raw, title="T1")],
+            spaces=[],
+        )
+
+        result = await list_task_lists()
+        entry = result["task_lists"][0]
+        assert raw not in entry.values()
+        assert entry["name"] == "Unnamed list"
+        assert len(entry["id"]) == 7
+
+    async def test_list_task_lists_merges_none_and_default_buckets(
+        self, mock_task_client
+    ):
+        """A task with no taskListId belongs to the same list as "default".
+
+        list_tasks' task_list_id filter already merges the two; counting them
+        apart made the two tools disagree about the same virtual ID.
+        """
+        tasks = [
+            Task(id="t1", title="No list"),
+            Task(id="t2", task_list_id="default", title="Default list"),
+        ]
+        mock_task_client.list_tasks_and_spaces.return_value = TasksListResponse(
+            tasks=tasks, spaces=[]
+        )
+        mock_task_client.list_tasks.return_value = tasks
+
+        result = await list_task_lists()
+        assert result["count"] == 1
+        entry = result["task_lists"][0]
+        assert entry["name"] == "Default"
+        assert entry["task_count"] == 2
+
+        # The filter must agree with the count reported above.
+        filtered = await list_tasks(task_list_id=entry["id"])
+        assert filtered["count"] == entry["task_count"]
+
+    async def test_list_task_lists_keeps_space_name_when_account_filtered(
+        self, mock_task_client
+    ):
+        """A space whose own accountId is absent keeps its name and colour.
+
+        The account filter drops such a space, but its tasks survive, so the
+        entry is rebuilt from task_counts — it must not lose its metadata.
+        """
+        space = Space(id="s1", name="Work Projects", color="#ff0000")
+        task = Task(id="t1", task_list_id="s1", account_id="acc_real_1", title="T1")
+        mock_task_client.list_tasks_and_spaces.return_value = TasksListResponse(
+            tasks=[task], spaces=[space]
+        )
+
+        result = await list_task_lists(account_id=register_id("acc_real_1"))
+        entry = result["task_lists"][0]
+        assert entry["name"] == "Work Projects"
+        assert entry["color"] == "#ff0000"
+        assert entry["task_count"] == 1
+
     async def test_list_task_lists_api_error(self, mock_task_client):
         mock_task_client.list_tasks_and_spaces.side_effect = MorgenAPIError(
             "failed", status_code=500
