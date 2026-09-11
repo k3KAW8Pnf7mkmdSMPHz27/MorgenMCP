@@ -83,12 +83,19 @@ def _classify_event(event: Event) -> str:
     and compact output exists to save tokens. A tag marks an item the client
     should *not* treat as a hard commitment.
 
-    ``task`` and ``routine`` are mutually exclusive upstream -- Morgen rejects
-    creating an event with both ``canBeCompleted`` and a ``taskId`` -- so the
-    fallthrough order matches the API's own constraint. A "routine" is Morgen's
-    recurring check-off-able block (https://www.morgen.so/routines), displayed
-    like a task but carrying no task ID. ``flexible`` marks a Morgen
-    auto-scheduled block, which can be moved.
+    ``task`` and ``routine`` are mutually exclusive upstream: creating an event
+    with both ``canBeCompleted`` and a ``taskId`` is rejected with HTTP 400,
+    "An event with canBeCompleted cannot have a taskId" (reproduced against the
+    live API 2026-09-11). The fallthrough order therefore matches the API's own
+    constraint, and the ``elif`` chain is a belt-and-braces tiebreak rather than
+    a case Morgen can actually produce. A "routine" is Morgen's recurring
+    check-off-able block (https://www.morgen.so/routines), displayed like a task
+    but carrying no task ID. ``flexible`` marks a Morgen auto-scheduled block,
+    which can be moved.
+
+    Completing a routine does NOT clear the tag: a checked-off routine keeps
+    ``canBeCompleted=True`` and sets ``progress="completed"`` (verified live).
+    The tag says what the item is; ``progress`` says whether it is done.
 
     No space after the comma: the tag must stay a single whitespace-delimited
     token so clients can split on it.

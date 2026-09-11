@@ -531,6 +531,56 @@ class TestClassifyCompactEvent:
         assert "Fix {config} bug" in result
         assert re.search(r"\{task\} \[[A-Za-z0-9_-]{7}\]$", result)
 
+    def test_completed_routine_still_tags_routine(
+        self, sample_calendar_id, sample_account_id
+    ):
+        """Checking a routine off must NOT drop the tag.
+
+        Verified against the live API: completing a routine sets
+        progress="completed" but leaves canBeCompleted=True. The tag marks what
+        the item IS, not whether it is done -- progress carries done-ness.
+        """
+        from morgenmcp.models import EventMetadata
+
+        event = self._event(
+            sample_calendar_id,
+            sample_account_id,
+            "donecls_uid",
+            metadata=EventMetadata(can_be_completed=True, progress="completed"),
+        )
+        result = _format_compact_event(event, ZoneInfo("America/Chicago"))
+        assert re.search(r"\{routine\} \[[A-Za-z0-9_-]{7}\]$", result)
+
+    def test_routine_and_free_combine(self, sample_calendar_id, sample_account_id):
+        """Verified live: a free routine renders {routine,free}."""
+        from morgenmcp.models import EventMetadata
+
+        event = self._event(
+            sample_calendar_id,
+            sample_account_id,
+            "rfree_uid",
+            free_busy_status="free",
+            metadata=EventMetadata(can_be_completed=True),
+        )
+        result = _format_compact_event(event, ZoneInfo("America/Chicago"))
+        assert re.search(r"\{routine,free\} \[[A-Za-z0-9_-]{7}\]$", result)
+        assert result.rsplit(" ", 2)[1] == "{routine,free}"
+
+    def test_all_day_routine_tags_routine(self, sample_calendar_id, sample_account_id):
+        """Verified live: 'Aug 12 (all-day): ... {routine} [id]'."""
+        from morgenmcp.models import EventMetadata
+
+        event = self._event(
+            sample_calendar_id,
+            sample_account_id,
+            "adr_uid",
+            show_without_time=True,
+            metadata=EventMetadata(can_be_completed=True),
+        )
+        result = _format_compact_event(event, ZoneInfo("America/Chicago"))
+        assert "(all-day)" in result
+        assert re.search(r"\{routine\} \[[A-Za-z0-9_-]{7}\]$", result)
+
     def test_tag_appears_on_all_day_floating_and_bad_tz_lines(
         self, sample_calendar_id, sample_account_id
     ):
