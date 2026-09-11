@@ -1,5 +1,7 @@
 """FastMCP server for Morgen calendar API."""
 
+from __future__ import annotations
+
 import argparse
 import asyncio
 import os
@@ -91,8 +93,8 @@ def _require_api_key() -> None:
     """
     if not os.environ.get("MORGEN_API_KEY", "").strip():
         raise RuntimeError(
-            "MORGEN_API_KEY is not set. Export it (e.g. via .envrc) "
-            "before starting morgenmcp."
+            "MORGEN_API_KEY is not set. Set it in your MCP client's env "
+            "block, or export it before starting morgenmcp."
         )
 
 

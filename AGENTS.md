@@ -8,9 +8,10 @@ tag APIs through FastMCP. The package source is in `morgenmcp/`; tests are in
 
 ## Environment and commands
 
-- Use Python 3.14 or newer (pinned in `.python-version`) and manage dependencies
-  with `uv`. The floor is real: the source uses PEP 758 syntax (unparenthesized
-  `except A, B:`), a `SyntaxError` on 3.13 and earlier.
+- Use Python 3.12 or newer (development pins `.python-version`) and manage
+  dependencies with `uv`. 3.12 is a hard floor — `models.py` uses PEP 695 generic
+  syntax — so keep annotations valid there: every module imports
+  `from __future__ import annotations`, and CI tests the floor as well as 3.14.
 - Install development dependencies with `uv sync --all-extras`.
 - Set up git hooks once with `pre-commit install`.
 - Run the default test suite with `uv run pytest`. Integration tests are

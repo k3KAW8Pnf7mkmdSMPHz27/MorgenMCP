@@ -1,5 +1,7 @@
 """MCP server for Morgen calendar API."""
 
+from __future__ import annotations
+
 from importlib.metadata import PackageNotFoundError, version
 
 try:

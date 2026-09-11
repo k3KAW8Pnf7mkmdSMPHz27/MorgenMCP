@@ -1,5 +1,7 @@
 """MCP tools for Morgen task operations."""
 
+from __future__ import annotations
+
 from typing import Any, Literal, cast
 
 from fastmcp import Context

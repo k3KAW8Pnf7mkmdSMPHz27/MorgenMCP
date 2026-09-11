@@ -1,5 +1,7 @@
 """Async HTTP client for Morgen API."""
 
+from __future__ import annotations
+
 import asyncio
 import os
 from typing import Any
@@ -242,7 +244,7 @@ class MorgenClient:
                     remaining=int(remaining),
                     reset_seconds=int(reset),
                 )
-        except ValueError, TypeError:
+        except (ValueError, TypeError):
             pass
         return None
 
