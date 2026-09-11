@@ -57,6 +57,34 @@ Tools across accounts, calendars, events, tasks, and tags — read-only and muta
 
 Pass `--read-only` (or set `MORGENMCP_READ_ONLY=1`) to expose only the read-only tools. For the exact live list with schemas and annotations, connect any MCP client or run the [MCP Inspector](#local-debugging-with-mcp-inspector).
 
+### Compact event lines
+
+`list_events` with `compact=true` (and every `morgen://events/*` resource)
+returns one line per event instead of a JSON object, to save tokens:
+
+```
+Jul 23 08:00-11:00 CDT (America/Chicago): Deep work block {task} [oAxAjaC]
+Jul 23 05:00-06:00 CDT (America/Chicago): Morning walk {routine} [c0HsnEl]
+Jul 23 11:00-14:00 CDT (America/Chicago): Contractor visit {free} [suqNbDi]
+Jul 23 14:00-14:30 CDT (America/Chicago): Dentist [l1_gFD6]
+```
+
+The optional `{kind}` tag before the ID tells a client what it is looking at:
+
+| tag | meaning |
+|---|---|
+| `{task}` | Linked to a Morgen task — a flexible intention, usually movable. |
+| `{routine}` | A [Morgen Routine](https://www.morgen.so/routines) occurrence: a recurring block you check off. |
+| `{flexible}` | Morgen auto-scheduled this block, so it can be moved. |
+| `{free}` | Does not mark you busy — informational, not an obligation. |
+| *(no tag)* | An ordinary busy commitment. |
+
+`{task}`, `{routine}` and `{flexible}` are mutually exclusive; `{free}` combines
+with any of them as a comma-joined pair with no space, e.g. `{task,free}`.
+
+Event titles may themselves contain `{}` or `[]`, so parse right to left: the
+tag is the final `{...}` immediately preceding the trailing ` [id]`.
+
 ## Configuration
 
 `MORGEN_API_KEY` is required; everything else is optional. Each setting has an

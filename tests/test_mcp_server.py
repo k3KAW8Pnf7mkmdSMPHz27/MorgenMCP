@@ -380,6 +380,71 @@ class TestTypedOutputSchemas:
         assert item["email"] == "user@example.com"
         assert "displayName" not in item  # filtered, and validation allowed it
 
+    async def test_sparse_event_passes_output_validation(self):
+        """An event with no morgen.so:metadata must still validate.
+
+        ``progress``/``canBeCompleted``/``isAutoScheduled`` are dropped entirely
+        by ``filter_none_values`` when there is no metadata object, so they must
+        be ``NotRequired`` in ``EventItem``. A future change tightening any of
+        them to required fails here rather than in production.
+        """
+        from morgenmcp.models import Event
+        from morgenmcp.tools.id_registry import register_id
+
+        real_cal_id = (
+            base64.b64encode(
+                json.dumps(
+                    ["e" * 24, "sparse@example.com"], separators=(",", ":")
+                ).encode()
+            )
+            .decode()
+            .rstrip("=")
+        )
+        real_evt_id = (
+            base64.b64encode(
+                json.dumps(
+                    ["sparse@example.com", "evt_sparse", "e" * 24],
+                    separators=(",", ":"),
+                ).encode()
+            )
+            .decode()
+            .rstrip("=")
+        )
+        virtual_cal_id = register_id(real_cal_id)
+
+        event = Event(
+            id=real_evt_id,
+            calendar_id=real_cal_id,
+            account_id="e" * 24,
+            integration_id="google",
+            title="Bare",
+            start="2025-06-02T10:00:00",
+            duration="PT1H",
+        )
+
+        with patch("morgenmcp.tools.events.get_client") as mock:
+            client_mock = AsyncMock()
+            client_mock.list_events.return_value = [event]
+            mock.return_value = client_mock
+
+            async with Client(mcp) as client:
+                result = await client.call_tool(
+                    "morgen_list_events",
+                    {
+                        "start": "2025-06-02T00:00:00",
+                        "end": "2025-06-03T00:00:00",
+                        "calendar_ids": [virtual_cal_id],
+                    },
+                )
+
+        assert result.is_error is False
+        item = result.structured_content["events"][0]
+        assert item["title"] == "Bare"
+        # filtered out, and validation allowed it
+        assert "progress" not in item
+        assert "canBeCompleted" not in item
+        assert "isAutoScheduled" not in item
+
     async def test_busy_only_calendar_metadata_update_validates(self):
         """A busy-only metadata update leaves overrideColor/overrideName null.
 

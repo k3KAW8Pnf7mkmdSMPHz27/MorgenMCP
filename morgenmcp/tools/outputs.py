@@ -162,6 +162,12 @@ class EventItem(TypedDict):
     categoryName: NotRequired[str]
     categoryColor: NotRequired[str]
     taskId: NotRequired[str]
+    progress: NotRequired[str]
+    # NotRequired, not `bool | None`: filter_none_values drops None but KEEPS
+    # False, so on an event with metadata these arrive as False, and on an event
+    # without metadata they are dropped entirely. Both states must validate.
+    canBeCompleted: NotRequired[bool]
+    isAutoScheduled: NotRequired[bool]
     virtualRoomUrl: NotRequired[str]
 
 

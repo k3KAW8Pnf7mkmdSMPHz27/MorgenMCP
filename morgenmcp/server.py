@@ -204,7 +204,13 @@ mcp = FastMCP(
 
     Calendar workflow:
     1. Use list_calendars to discover available calendars
-    2. Use list_events with calendar_ids to get events (compact=True for fewer tokens)
+    2. Use list_events with calendar_ids to get events (compact=True for fewer
+       tokens). A compact line may carry a kind tag just before the [id]:
+       {{task}}, {{routine}} (a check-off-able Morgen Routine), {{flexible}}
+       (Morgen auto-scheduled, so movable), {{free}}, or a comma-joined pair
+       such as {{task,free}} (no space). An untagged line is an ordinary busy
+       commitment. Treat task/routine/flexible blocks as movable and free ones
+       as informational, not as hard scheduling conflicts.
     3. Use update_event or delete_event with just event_id
     4. Use batch_delete_events or batch_update_events for bulk operations
 

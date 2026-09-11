@@ -2,6 +2,7 @@
 
 import base64
 import json
+import re
 from unittest.mock import AsyncMock, patch
 from zoneinfo import ZoneInfo
 
@@ -355,6 +356,233 @@ class TestFormatCompactEvent:
         assert "Mars/Olympus_Mons" in result
         assert "2026-07-15T10:00:00" in result
         assert "Mystery Meeting" in result
+
+
+class TestClassifyCompactEvent:
+    """The ``{kind}`` tag on compact lines (issue #5).
+
+    Tags mark items a client should NOT treat as a hard commitment. An ordinary
+    busy event is deliberately left untagged -- it is the large majority of any
+    listing, and compact output exists to save tokens.
+
+    Assertions here anchor on the END of the line rather than asserting
+    ``"{" not in result``: a title may legitimately contain braces (see
+    ``test_braces_in_title_do_not_create_a_false_tag``), so only the final
+    ``{...}`` before the trailing ``" [id]"`` is the tag.
+    """
+
+    TAG_RE = re.compile(r"\{[a-z,]+\} \[[A-Za-z0-9_-]{7}\]$")
+
+    def _event(self, sample_calendar_id, sample_account_id, uid, **kwargs):
+        kwargs.setdefault("title", "Thing")
+        kwargs.setdefault("start", "2026-07-15T09:00:00")
+        kwargs.setdefault("duration", "PT1H")
+        kwargs.setdefault("time_zone", "America/Chicago")
+        return Event(
+            id=make_event_id("test@example.com", uid, sample_account_id),
+            calendar_id=sample_calendar_id,
+            account_id=sample_account_id,
+            integration_id="google",
+            **kwargs,
+        )
+
+    def test_task_id_renders_task_tag(self, sample_calendar_id, sample_account_id):
+        from morgenmcp.models import EventMetadata
+
+        event = self._event(
+            sample_calendar_id,
+            sample_account_id,
+            "task_uid",
+            metadata=EventMetadata(task_id="task-uuid"),
+        )
+        result = _format_compact_event(event, ZoneInfo("America/Chicago"))
+        assert re.search(r"\{task\} \[[A-Za-z0-9_-]{7}\]$", result)
+
+    def test_can_be_completed_renders_routine_tag(
+        self, sample_calendar_id, sample_account_id
+    ):
+        """A Morgen Routine: check-off-able, but carries no taskId."""
+        from morgenmcp.models import EventMetadata
+
+        event = self._event(
+            sample_calendar_id,
+            sample_account_id,
+            "routine_uid",
+            metadata=EventMetadata(can_be_completed=True),
+        )
+        result = _format_compact_event(event, ZoneInfo("America/Chicago"))
+        assert re.search(r"\{routine\} \[[A-Za-z0-9_-]{7}\]$", result)
+
+    def test_auto_scheduled_renders_flexible_tag(
+        self, sample_calendar_id, sample_account_id
+    ):
+        from morgenmcp.models import EventMetadata
+
+        event = self._event(
+            sample_calendar_id,
+            sample_account_id,
+            "flex_uid",
+            metadata=EventMetadata(is_auto_scheduled=True),
+        )
+        result = _format_compact_event(event, ZoneInfo("America/Chicago"))
+        assert re.search(r"\{flexible\} \[[A-Za-z0-9_-]{7}\]$", result)
+
+    def test_task_wins_over_routine(self, sample_calendar_id, sample_account_id):
+        """Morgen rejects create with both, but be deterministic if both appear."""
+        from morgenmcp.models import EventMetadata
+
+        event = self._event(
+            sample_calendar_id,
+            sample_account_id,
+            "both_uid",
+            metadata=EventMetadata(task_id="task-uuid", can_be_completed=True),
+        )
+        result = _format_compact_event(event, ZoneInfo("America/Chicago"))
+        assert re.search(r"\{task\} \[[A-Za-z0-9_-]{7}\]$", result)
+        assert "routine" not in result
+
+    def test_routine_wins_over_flexible(self, sample_calendar_id, sample_account_id):
+        from morgenmcp.models import EventMetadata
+
+        event = self._event(
+            sample_calendar_id,
+            sample_account_id,
+            "rf_uid",
+            metadata=EventMetadata(can_be_completed=True, is_auto_scheduled=True),
+        )
+        result = _format_compact_event(event, ZoneInfo("America/Chicago"))
+        assert re.search(r"\{routine\} \[[A-Za-z0-9_-]{7}\]$", result)
+        assert "flexible" not in result
+
+    def test_free_busy_status_free_renders_free_tag(
+        self, sample_calendar_id, sample_account_id
+    ):
+        event = self._event(
+            sample_calendar_id, sample_account_id, "free_uid", free_busy_status="free"
+        )
+        result = _format_compact_event(event, ZoneInfo("America/Chicago"))
+        assert re.search(r"\{free\} \[[A-Za-z0-9_-]{7}\]$", result)
+
+    def test_task_and_free_combine_without_space(
+        self, sample_calendar_id, sample_account_id
+    ):
+        """No space after the comma: the tag must stay ONE whitespace token."""
+        from morgenmcp.models import EventMetadata
+
+        event = self._event(
+            sample_calendar_id,
+            sample_account_id,
+            "tf_uid",
+            free_busy_status="free",
+            metadata=EventMetadata(task_id="task-uuid"),
+        )
+        result = _format_compact_event(event, ZoneInfo("America/Chicago"))
+        assert re.search(r"\{task,free\} \[[A-Za-z0-9_-]{7}\]$", result)
+        assert "{task, free}" not in result
+        # the tag is a single whitespace-delimited group
+        assert result.rsplit(" ", 2)[1] == "{task,free}"
+
+    def test_plain_busy_event_has_no_tag(self, sample_calendar_id, sample_account_id):
+        """The common case stays byte-identical to pre-tag output."""
+        event = self._event(sample_calendar_id, sample_account_id, "plain_uid")
+        result = _format_compact_event(event, ZoneInfo("America/Chicago"))
+        assert not self.TAG_RE.search(result)
+        assert result.endswith("Thing [" + register_id(event.id) + "]")
+
+    def test_can_be_completed_false_is_not_tagged(
+        self, sample_calendar_id, sample_account_id
+    ):
+        """False is not absent: it must not classify as a routine."""
+        from morgenmcp.models import EventMetadata
+
+        event = self._event(
+            sample_calendar_id,
+            sample_account_id,
+            "cbcfalse_uid",
+            metadata=EventMetadata(can_be_completed=False, is_auto_scheduled=False),
+        )
+        result = _format_compact_event(event, ZoneInfo("America/Chicago"))
+        assert not self.TAG_RE.search(result)
+
+    def test_braces_in_title_do_not_create_a_false_tag(
+        self, sample_calendar_id, sample_account_id
+    ):
+        """A title may contain braces; only the final {...} before [id] is a tag."""
+        from morgenmcp.models import EventMetadata
+
+        untagged = self._event(
+            sample_calendar_id,
+            sample_account_id,
+            "brace1_uid",
+            title="Fix {config} bug",
+        )
+        result = _format_compact_event(untagged, ZoneInfo("America/Chicago"))
+        assert "Fix {config} bug" in result
+        assert not self.TAG_RE.search(result)
+
+        tagged = self._event(
+            sample_calendar_id,
+            sample_account_id,
+            "brace2_uid",
+            title="Fix {config} bug",
+            metadata=EventMetadata(task_id="task-uuid"),
+        )
+        result = _format_compact_event(tagged, ZoneInfo("America/Chicago"))
+        assert "Fix {config} bug" in result
+        assert re.search(r"\{task\} \[[A-Za-z0-9_-]{7}\]$", result)
+
+    def test_tag_appears_on_all_day_floating_and_bad_tz_lines(
+        self, sample_calendar_id, sample_account_id
+    ):
+        """Every fallback return site carries the tag, so the format is uniform."""
+        from morgenmcp.models import EventMetadata
+
+        meta = EventMetadata(task_id="task-uuid")
+        tz = ZoneInfo("America/Chicago")
+
+        all_day = self._event(
+            sample_calendar_id,
+            sample_account_id,
+            "ad_uid",
+            show_without_time=True,
+            metadata=meta,
+        )
+        assert re.search(
+            r"\{task\} \[[A-Za-z0-9_-]{7}\]$", _format_compact_event(all_day, tz)
+        )
+
+        floating = self._event(
+            sample_calendar_id,
+            sample_account_id,
+            "fl_uid",
+            time_zone=None,
+            metadata=meta,
+        )
+        assert re.search(
+            r"\{task\} \[[A-Za-z0-9_-]{7}\]$", _format_compact_event(floating, tz)
+        )
+
+        bad_tz = self._event(
+            sample_calendar_id,
+            sample_account_id,
+            "bad_uid",
+            time_zone="Mars/Olympus_Mons",
+            metadata=meta,
+        )
+        assert re.search(
+            r"\{task\} \[[A-Za-z0-9_-]{7}\]$", _format_compact_event(bad_tz, tz)
+        )
+
+        bad_start = self._event(
+            sample_calendar_id,
+            sample_account_id,
+            "bs_uid",
+            start="not-a-date",
+            metadata=meta,
+        )
+        assert re.search(
+            r"\{task\} \[[A-Za-z0-9_-]{7}\]$", _format_compact_event(bad_start, tz)
+        )
 
 
 class TestResolveDisplayTz:
@@ -1540,6 +1768,76 @@ class TestFormatFullEventExposesMetadata:
         assert ev_out["categoryColor"] == "#CCEACD"
         # taskId is virtualized
         assert len(ev_out["taskId"]) == 7
+
+    async def test_full_format_surfaces_routine_and_scheduling_metadata(
+        self, mock_morgen_client, sample_calendar_id, sample_account_id
+    ):
+        """canBeCompleted / isAutoScheduled / progress reach the client."""
+        from morgenmcp.models import EventMetadata
+
+        evt_id = make_event_id("a@b.com", "uid_routine", sample_account_id)
+        evt = Event(
+            id=evt_id,
+            calendar_id=sample_calendar_id,
+            account_id=sample_account_id,
+            integration_id="google",
+            title="Morning walk",
+            start="2025-01-01T06:00:00",
+            duration="PT1H",
+            metadata=EventMetadata(
+                can_be_completed=True,
+                is_auto_scheduled=True,
+                progress="needs-action",
+            ),
+        )
+        mock_morgen_client.list_events.return_value = [evt]
+        virtual_cal = register_id(sample_calendar_id)
+
+        result = await list_events(
+            start="2025-01-01T00:00:00",
+            end="2025-01-02T00:00:00",
+            calendar_ids=[virtual_cal],
+        )
+        ev_out = result["events"][0]
+        assert ev_out["canBeCompleted"] is True
+        assert ev_out["isAutoScheduled"] is True
+        assert ev_out["progress"] == "needs-action"
+
+    async def test_full_format_keeps_false_metadata_flags(
+        self, mock_morgen_client, sample_calendar_id, sample_account_id
+    ):
+        """filter_none_values drops None but KEEPS False.
+
+        This is why canBeCompleted/isAutoScheduled must be NotRequired in
+        EventItem rather than required: they are present-as-False here and
+        absent entirely on a metadata-less event, and both must validate.
+        """
+        from morgenmcp.models import EventMetadata
+
+        evt_id = make_event_id("a@b.com", "uid_false", sample_account_id)
+        evt = Event(
+            id=evt_id,
+            calendar_id=sample_calendar_id,
+            account_id=sample_account_id,
+            integration_id="google",
+            title="Ordinary",
+            start="2025-01-01T10:00:00",
+            duration="PT1H",
+            metadata=EventMetadata(can_be_completed=False, is_auto_scheduled=False),
+        )
+        mock_morgen_client.list_events.return_value = [evt]
+        virtual_cal = register_id(sample_calendar_id)
+
+        result = await list_events(
+            start="2025-01-01T00:00:00",
+            end="2025-01-02T00:00:00",
+            calendar_ids=[virtual_cal],
+        )
+        ev_out = result["events"][0]
+        assert ev_out["canBeCompleted"] is False
+        assert ev_out["isAutoScheduled"] is False
+        # no metadata at all -> keys dropped entirely
+        assert "progress" not in ev_out
 
     async def test_full_format_surfaces_recurrence_rules(
         self, mock_morgen_client, sample_calendar_id, sample_account_id
