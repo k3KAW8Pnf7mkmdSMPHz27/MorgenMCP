@@ -1,5 +1,7 @@
 """MCP tools for Morgen account operations."""
 
+from __future__ import annotations
+
 from typing import cast
 
 from morgenmcp.client import get_client

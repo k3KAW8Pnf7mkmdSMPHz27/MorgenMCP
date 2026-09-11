@@ -12,6 +12,11 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.14"]
+        include:
+          # Also test requires-python's floor, so newer syntax fails here.
+          - os: ubuntu-latest
+            python-version: "3.12"
 
     steps:
       - uses: actions/checkout@v7
@@ -19,7 +24,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
-          # No python-version: uv resolves it from requires-python.
+          python-version: ${{ matrix.python-version }}
           enable-cache: true
 
       - name: Install dependencies

@@ -5,6 +5,8 @@ They do NOT auto-fix inputs to avoid silent data corruption (e.g., stripping
 Z suffix from datetime could shift events by hours).
 """
 
+from __future__ import annotations
+
 import re
 from zoneinfo import available_timezones
 
