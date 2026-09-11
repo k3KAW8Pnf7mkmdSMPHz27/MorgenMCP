@@ -235,6 +235,21 @@ class BatchUpdateResult(TypedDict):
 # ---------------------------------------------------------------------------
 
 
+class TaskListOutput(TypedDict):
+    """One task list / space with task count."""
+
+    id: str
+    name: str
+    color: str | None
+    task_count: int
+    account_id: str | None
+
+
+class TaskListListOutput(TypedDict):
+    task_lists: list[TaskListOutput]
+    count: int
+
+
 class TaskRelationRef(TypedDict):
     relation: NotRequired[str]
 

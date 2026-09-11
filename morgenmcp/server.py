@@ -70,6 +70,7 @@ from morgenmcp.tools.tasks import (
     create_task,
     delete_task,
     get_task,
+    list_task_lists,
     list_tasks,
     move_task,
     reopen_task,
@@ -88,8 +89,8 @@ _HEARTBEAT_INTERVAL_S = (
 def _require_api_key() -> None:
     """Fail fast when MORGEN_API_KEY is missing.
 
-    Without this, a misconfigured server starts cleanly, advertises all 22
-    tools, and only errors on the first tool call — a confusing lazy failure.
+    Without this, a misconfigured server starts cleanly, advertises its full
+    tool set, and only errors on the first tool call — a confusing lazy failure.
     """
     if not os.environ.get("MORGEN_API_KEY", "").strip():
         raise RuntimeError(
@@ -334,6 +335,17 @@ mcp.tool(
 )(batch_update_events)
 
 # Task tools
+mcp.tool(
+    name="morgen_list_task_lists",
+    tags={"tasks", "read"},
+    timeout=30.0,
+    annotations=ToolAnnotations(
+        title="List Task Lists",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=True,
+    ),
+)(list_task_lists)
 mcp.tool(
     name="morgen_list_tasks",
     tags={"tasks", "read"},
@@ -587,6 +599,7 @@ _CACHEABLE_READ_TOOLS = [
     "morgen_list_accounts",
     "morgen_list_calendars",
     "morgen_list_events",
+    "morgen_list_task_lists",
     "morgen_list_tasks",
     "morgen_get_task",
     "morgen_list_tags",

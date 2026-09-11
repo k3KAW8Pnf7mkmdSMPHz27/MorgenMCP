@@ -793,10 +793,19 @@ class TestConfigurableListLimits:
 
     @respx.mock
     async def test_tasks_defaults_to_documented_100(self):
-        """Unset config still sends 100 — the endpoint's own default is broken."""
+        """Unset config still sends 100 — Morgen does not honour its documented default."""
         route = self._tasks_route()
         async with MorgenClient(api_key="k") as client:
             await client.list_tasks()
+        assert route.calls.last.request.url.params["limit"] == "100"
+
+    @respx.mock
+    async def test_tasks_and_spaces_defaults_to_documented_100(self):
+        """The limit is resolved in list_tasks_and_spaces, where the HTTP call
+        lives — not in the list_tasks wrapper that delegates to it."""
+        route = self._tasks_route()
+        async with MorgenClient(api_key="k") as client:
+            await client.list_tasks_and_spaces()
         assert route.calls.last.request.url.params["limit"] == "100"
 
     @respx.mock
@@ -815,6 +824,14 @@ class TestConfigurableListLimits:
         route = self._tasks_route()
         async with MorgenClient(api_key="k") as client:
             await client.list_tasks()
+        assert route.calls.last.request.url.params["limit"] == "25"
+
+    @respx.mock
+    async def test_tasks_and_spaces_honors_env_var(self, monkeypatch):
+        monkeypatch.setenv(TASKS_LIMIT_ENV, "25")
+        route = self._tasks_route()
+        async with MorgenClient(api_key="k") as client:
+            await client.list_tasks_and_spaces()
         assert route.calls.last.request.url.params["limit"] == "25"
 
     @respx.mock

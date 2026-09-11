@@ -52,7 +52,7 @@ Tools across accounts, calendars, events, tasks, and tags — read-only and muta
 
 - **Accounts & calendars**: `list_accounts`, `list_calendars`, `update_calendar_metadata`
 - **Events**: `list_events`, `create_event`, `update_event`, `delete_event`, `batch_update_events`, `batch_delete_events`
-- **Tasks**: `list_tasks`, `get_task`, `create_task`, `update_task`, `move_task`, `complete_task`, `reopen_task`, `delete_task`, `batch_delete_tasks`
+- **Tasks**: `list_tasks`, `list_task_lists`, `get_task`, `create_task`, `update_task`, `move_task`, `complete_task`, `reopen_task`, `delete_task`, `batch_delete_tasks`
 - **Tags**: `list_tags`, `get_tag`, `create_tag`, `update_tag`, `delete_tag`
 
 Pass `--read-only` (or set `MORGENMCP_READ_ONLY=1`) to expose only the read-only tools. For the exact live list with schemas and annotations, connect any MCP client or run the [MCP Inspector](#local-debugging-with-mcp-inspector).

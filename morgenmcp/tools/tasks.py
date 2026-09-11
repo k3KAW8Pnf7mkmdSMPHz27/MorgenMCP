@@ -27,6 +27,8 @@ from morgenmcp.tools.outputs import (
     ListTasksResult,
     MutateTaskResult,
     TaskItem,
+    TaskListListOutput,
+    TaskListOutput,
 )
 from morgenmcp.tools.utils import (
     filter_none_values,
@@ -59,7 +61,9 @@ def _format_task(task: Task) -> TaskItem:
                 "id": register_id(task.id),
                 "accountId": register_id(task.account_id) if task.account_id else None,
                 "integrationId": task.integration_id,
-                "taskListId": task.task_list_id,
+                "taskListId": (
+                    register_id(task.task_list_id) if task.task_list_id else None
+                ),
                 "title": task.title,
                 "description": task.description,
                 "due": task.due,
@@ -87,9 +91,101 @@ def _build_related_to(parent_task_id: str | None) -> dict[str, TaskRelation] | N
 
 
 @handle_tool_errors
+async def list_task_lists(
+    account_id: str | None = None,
+) -> TaskListListOutput:
+    """Discover task lists (spaces) and their task counts.
+
+    Args:
+        account_id: Optional virtual ID of an account to filter task lists.
+
+    Returns:
+        Dictionary with 'task_lists' and 'count'.
+    """
+    client = get_client()
+    real_account_id = resolve_id(account_id) if account_id is not None else None
+
+    res = await client.list_tasks_and_spaces()
+    tasks = res.tasks
+    spaces = res.spaces or []
+
+    unfiltered_spaces = {s.id: s for s in spaces}
+
+    if real_account_id is not None:
+        spaces = [s for s in spaces if s.account_id == real_account_id]
+        tasks = [t for t in tasks if t.account_id == real_account_id]
+
+    # `None` and the literal "default" are the same list: Morgen omits
+    # taskListId on tasks in the default list, and list_tasks' task_list_id
+    # filter already treats the two as one bucket. Counting them separately
+    # would make this tool disagree with that filter on the same virtual ID.
+    task_counts: dict[str | None, int] = {}
+    for task in tasks:
+        list_key = task.task_list_id if task.task_list_id is not None else "default"
+        task_counts[list_key] = task_counts.get(list_key, 0) + 1
+
+    task_lists: list[TaskListOutput] = []
+    seen_ids: set[str] = set()
+
+    for space in spaces:
+        seen_ids.add(space.id)
+        task_lists.append(
+            {
+                "id": register_id(space.id),
+                "name": space.name or "Default",
+                "color": space.color,
+                "task_count": task_counts.get(space.id, 0),
+                "account_id": (
+                    register_id(space.account_id) if space.account_id else None
+                ),
+            }
+        )
+
+    for raw_id, count in task_counts.items():
+        if raw_id is None or raw_id in seen_ids:
+            continue
+        seen_ids.add(raw_id)
+        matching_tasks = [
+            t
+            for t in tasks
+            if (t.task_list_id if t.task_list_id is not None else "default") == raw_id
+        ]
+        task_acc_id = None
+        for t in matching_tasks:
+            if t.account_id:
+                task_acc_id = t.account_id
+                break
+
+        # A space filtered out above (its own accountId was absent) still has
+        # tasks here. Recover its name/colour rather than falling back to the
+        # raw ID, which must never reach the client.
+        known = unfiltered_spaces.get(raw_id)
+
+        task_lists.append(
+            {
+                "id": register_id(raw_id),
+                "name": (
+                    (known.name or "Default")
+                    if known is not None
+                    else ("Default" if raw_id == "default" else "Unnamed list")
+                ),
+                "color": known.color if known is not None else None,
+                "task_count": count,
+                "account_id": (register_id(task_acc_id) if task_acc_id else None),
+            }
+        )
+
+    return {
+        "task_lists": task_lists,
+        "count": len(task_lists),
+    }
+
+
+@handle_tool_errors
 async def list_tasks(
     limit: int | None = None,
     updated_after: str | None = None,
+    task_list_id: str | None = None,
 ) -> ListTasksResult:
     """List Morgen tasks.
 
@@ -106,6 +202,7 @@ async def list_tasks(
             so a smaller limit saves tokens but not quota.
         updated_after: ISO 8601 datetime; when provided, returns tasks
             updated/created after this timestamp. Useful for incremental sync.
+        task_list_id: Filter tasks by task list ID (virtual or real ID).
 
     Returns:
         Dictionary with 'tasks' key containing list of task objects with
@@ -116,6 +213,23 @@ async def list_tasks(
 
     client = get_client()
     tasks = await client.list_tasks(limit=limit, updated_after=updated_after)
+
+    if task_list_id is not None:
+        try:
+            real_task_list_id = resolve_id(task_list_id)
+        except Exception:
+            real_task_list_id = task_list_id
+
+        tasks = [
+            t
+            for t in tasks
+            if t.task_list_id == real_task_list_id
+            or t.task_list_id == task_list_id
+            or (
+                t.task_list_id is None
+                and (real_task_list_id == "default" or task_list_id == "default")
+            )
+        ]
 
     return {
         "tasks": [_format_task(t) for t in tasks],
@@ -185,6 +299,12 @@ async def create_task(
         validate_progress(progress)
 
     real_tags = resolve_ids(tag_ids) if tag_ids else None
+    real_task_list_id = None
+    if task_list_id is not None:
+        try:
+            real_task_list_id = resolve_id(task_list_id)
+        except Exception:
+            real_task_list_id = task_list_id
 
     request = TaskCreateRequest(
         title=title,
@@ -192,7 +312,7 @@ async def create_task(
         due=due,
         time_zone=time_zone,
         estimated_duration=estimated_duration,
-        task_list_id=task_list_id,
+        task_list_id=real_task_list_id,
         priority=priority,
         progress=progress,
         related_to=_build_related_to(parent_task_id),
@@ -253,6 +373,12 @@ async def update_task(
 
     real_id = resolve_id(task_id)
     real_tags = resolve_ids(tag_ids) if tag_ids else None
+    real_task_list_id = None
+    if task_list_id is not None:
+        try:
+            real_task_list_id = resolve_id(task_list_id)
+        except Exception:
+            real_task_list_id = task_list_id
 
     request = TaskUpdateRequest(
         id=real_id,
@@ -261,7 +387,7 @@ async def update_task(
         due=due,
         time_zone=time_zone,
         estimated_duration=estimated_duration,
-        task_list_id=task_list_id,
+        task_list_id=real_task_list_id,
         priority=priority,
         progress=progress,
         tags=real_tags,
