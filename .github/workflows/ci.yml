@@ -12,11 +12,9 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        # "3.14" is the newest supported; "3.12" is requires-python's floor.
-        # Testing both ends means syntax or stdlib newer than the floor fails
-        # here rather than in a user's install.
         python-version: ["3.14"]
         include:
+          # Also test requires-python's floor, so newer syntax fails here.
           - os: ubuntu-latest
             python-version: "3.12"
 
