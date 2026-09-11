@@ -1,5 +1,7 @@
 """Tests for input validators."""
 
+from zoneinfo import available_timezones
+
 import pytest
 
 from morgenmcp.validators import (
@@ -164,6 +166,44 @@ class TestValidateTimezone:
             validate_timezone("")
 
         assert "cannot be an empty string" in str(exc_info.value)
+
+    def test_windows_missing_timezones_simulation(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Simulate Windows environment without tzdata where available_timezones() is empty.
+
+        This characterises the failure mode reported in #1 — it does *not*
+        verify the fix. With the tz database missing, every IANA name is
+        rejected, valid or not. The guard against that regressing is
+        ``test_tzdata_supplies_iana_database`` below, which asserts the
+        database is actually populated at runtime.
+        """
+        monkeypatch.setattr("morgenmcp.validators._VALID_TIMEZONES", None)
+        monkeypatch.setattr("morgenmcp.validators.available_timezones", lambda: set())
+
+        with pytest.raises(ValidationError) as exc_info:
+            validate_timezone("America/New_York")
+
+        assert "Invalid timezone: 'America/New_York'" in str(exc_info.value)
+
+    def test_tzdata_supplies_iana_database(self):
+        """The IANA database must be populated on every supported platform.
+
+        This is the actual regression guard for #1. Windows ships no system tz
+        database, so without the ``tzdata`` dependency ``available_timezones()``
+        is empty there and validation rejects every real timezone. Unlike the
+        simulation above, this fails on a bare Windows runner if that
+        dependency is ever dropped — which is what the multi-OS CI matrix is
+        for.
+        """
+        zones = available_timezones()
+
+        assert zones, (
+            "available_timezones() is empty — is the tzdata dependency installed?"
+        )
+        for name in ("America/New_York", "Europe/Berlin", "UTC"):
+            assert name in zones, f"{name} missing from the IANA database"
+            assert validate_timezone(name) == name
 
 
 class TestValidateEmail:

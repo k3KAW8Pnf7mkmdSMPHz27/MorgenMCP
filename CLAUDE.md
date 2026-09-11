@@ -11,9 +11,10 @@ The import above pulls in `AGENTS.md` — the harness-agnostic contributor guide
 Commands specific to working in this repo through Claude Code — beyond the base set in `AGENTS.md`:
 
 ```bash
-mise trust && mise set --file mise.local.toml MORGEN_API_KEY=...  # Configure API key
+echo 'MORGEN_API_KEY=...' > .env && export UV_ENV_FILE=.env   # Configure API key (uv only)
+mise trust && mise set --file mise.local.toml MORGEN_API_KEY=...  # Same, if you use mise
 uv run morgenmcp                        # Run server
-uv run morgenmcp --read-only            # Run server with only the 6 read tools (also: MORGENMCP_READ_ONLY=1)
+uv run morgenmcp --read-only            # Run server with only the read tools (also: MORGENMCP_READ_ONLY=1)
 uv run morgenmcp --tasks-limit 25       # Cap /tasks/list results (also: MORGENMCP_TASKS_LIMIT=25)
 uv run pytest tests/test_tools.py::TestCreateEvent -v  # Run specific test class
 uv run pytest tests/test_tools.py::TestCreateEvent::test_create_basic_event -v  # Run single test
@@ -44,7 +45,7 @@ FastMCP-based MCP server wrapping the Morgen calendar API (https://api.morgen.so
 
 ### Patterns
 
-- **Response caching**: `server.py` registers a `ResponseCachingMiddleware` with a 60s in-memory TTL. It caches an explicit allowlist of read-only tools (`morgen_list_*`, `morgen_get_task` via `call_tool`) and **all** resource reads (`read_resource`). Writes are intentionally not cached — adding any write tool to `_CACHEABLE_READ_TOOLS` would silently turn duplicate creates into no-ops. Storage is in-memory (resets on server restart) — disk persistence would let stale `events/today` survive restarts. Cache keys are method+args only (no session identity), which is fine for single-user stdio.
+- **Response caching**: `server.py` registers a `ResponseCachingMiddleware` with a 60s in-memory TTL. It caches an explicit allowlist of read-only tools (`morgen_list_*`, `morgen_get_task`, `morgen_get_tag` via `call_tool`) and **all** resource reads (`read_resource`). Writes are intentionally not cached — adding any write tool to `_CACHEABLE_READ_TOOLS` would silently turn duplicate creates into no-ops. Storage is in-memory (resets on server restart) — disk persistence would let stale `events/today` survive restarts. Cache keys are method+args only (no session identity), which is fine for single-user stdio.
   - **Listing caches are explicitly disabled** (`list_tools_settings`/`list_resources_settings`/`list_prompts_settings` set to `{"enabled": False}`). The middleware caches `tools/list`/`resources/list`/`prompts/list` **by default** with a 5-minute TTL if you pass `None`; but listing is a pure in-memory component enumeration (no API call), so the cache saves nothing and only risks serving a stale set. Critically, read-only mode toggles tool visibility, and a cached `tools/list` would mask that for up to 5 minutes. Do **not** re-enable listing caches.
   - **Test isolation**: because the cache is a module-level singleton on `mcp` keyed on method+args (no session partition), two tests that call the same cacheable read tool with the same args collide across the 60s TTL. Tests either use disjoint keys (`TestResponseCaching`) or evict via the public `keys()`+`delete()` API in an autouse fixture (`TestTypedOutputSchemas::_isolate_cache`). Never call `_backend.destroy()` — it tears down collection-setup state and breaks every subsequent `put` in the process.
 - Tools return `{"success": True, ...}` on success
@@ -52,14 +53,14 @@ FastMCP-based MCP server wrapping the Morgen calendar API (https://api.morgen.so
 - `@handle_tool_errors` in `utils.py` converts ValidationError, MorgenAPIError, and unexpected exceptions to ToolError
 - Batch operations return partial results with `{"deleted": [...], "failed": [...]}` — per-item failures are dict entries, not ToolError
 - **Typed output schemas**: Every tool declares a `TypedDict` return from `tools/outputs.py` (not `models.py` — those are alias-based wire models with a different shape than the hand-built camelCase output dicts like `calendarId`/`isAllDay`). This gives each tool a shaped `outputSchema` **and** makes FastMCP validate every return against it at runtime — a payload missing a schema-`required` field raises `ToolError: Output validation error: '<field>' is a required property`. Because tool payloads run through `filter_none_values` (drops None/empty keys), **any field that can be absent MUST be `NotRequired`**, or a normal sparse response (account with no `displayName`, event with no `description`) fails. Nested "always-present-but-nullable" values (e.g. `update_calendar_metadata`'s `updated.overrideColor`) are typed `T | None` (key required, value nullable), not `NotRequired`. The `_format_*` helpers are typed to return their item TypedDict via `cast(...)` at the `filter_none_values` boundary (resolves list-invariance under pyright). `TestTypedOutputSchemas` locks the `NotRequired` decisions into CI.
-- **Read-only launch mode**: `MORGENMCP_READ_ONLY` (truthy env) or `--read-only` (CLI flag, parsed in `main()`) calls `mcp.disable(tags={"write", "delete"})` **once at startup, before `mcp.run()`** (`_apply_read_only` in `server.py`). This hides + disables the 16 mutating tools, leaving the 6 reads. The tag taxonomy is a complete gate (every mutating tool carries `write` or `delete`, verified by tag tests). Applied at startup so the disabled state is in the first `list_tools` — and because listing caches are disabled, `disable`/`enable` are reflected immediately (a default-cached `tools/list` would have masked the toggle for 5 min). Disabled tools are both unlisted and uncallable through the protocol.
+- **Read-only launch mode**: `MORGENMCP_READ_ONLY` (truthy env) or `--read-only` (CLI flag, parsed in `main()`) calls `mcp.disable(tags={"write", "delete"})` **once at startup, before `mcp.run()`** (`_apply_read_only` in `server.py`). This hides + disables every mutating tool, leaving the reads. The tag taxonomy is a complete gate (every mutating tool carries `write` or `delete`, verified by tag tests). Applied at startup so the disabled state is in the first `list_tools` — and because listing caches are disabled, `disable`/`enable` are reflected immediately (a default-cached `tools/list` would have masked the toggle for 5 min). Disabled tools are both unlisted and uncallable through the protocol.
 - Datetime fields use LocalDateTime format (`2023-03-01T10:00:00`) - no Z suffix; timezone is separate
 - `EventCreateResponse` has nested structure: `response.event.id`, not `response.id`
 - **Timing fields constraint**: `update_event` and `batch_update_events` require all four timing fields (`start`, `duration`, `time_zone`, `is_all_day`) together or none — partial updates are rejected
 - **Alerts**: Tools accept negative ISO 8601 offsets (e.g., `'-PT15M'`) and convert them to Morgen's base64-encoded alert ID format (`base64(JSON({a:'display',to:offset}))`). `alerts` and `use_default_alerts` are mutually exclusive.
 - **Recurrence rules**: Accept simplified dicts `{frequency, interval, by_day}`; the `build_recurrence_rules` helper converts to JSCalendar `RecurrenceRule` objects.
 - **Tags endpoint quirk**: `/tags/list` returns a bare JSON array, not the standard `{data: ...}` envelope — the client handles both shapes.
-- **Send Morgen's documented parameter defaults explicitly** (`resolve_limit` in `client.py`). Morgen does not always honor its own documented defaults: `/tasks/list` returns **1** task when `limit` is omitted, though `tasks.mdx` documents the default as 100. So the client sends the documented value rather than relying on the server, which is behaviorally identical if Morgen ever fixes it. `limit` handling therefore differs per endpoint *because the docs differ*: tasks documents default 100 / max 100, so `list_tasks` sends 100 and rejects >100; tags documents neither ("Returns all tags"), so `list_tags` omits the parameter and enforces no ceiling. Do not "harmonize" the two — hardcoding `limit=100` in `list_tags` would introduce truncation past 100 tags. Resolution order is per-call arg > CLI flag > env var > documented default; a malformed or out-of-range env var raises at startup rather than silently under-returning.
+- **Never rely on Morgen's server-side list defaults** (`resolve_limit` in `client.py`). `/tasks/list` returns **1** task when `limit` is omitted — that is Morgen's documented, intentional default, and `tasks.mdx` carries a warning telling callers to always set the parameter explicitly. So the client always sends one. `TASKS_DEFAULT_LIMIT = 100` is therefore **MorgenMCP's own choice, not a mirror of Morgen's default**: it shields callers from a near-empty response that is easy to misread as "no tasks". `limit` handling still differs per endpoint *because the docs differ*: tasks documents default 1 / max 100, so `list_tasks` sends its own default and rejects >100; tags documents neither ("Returns all tags"), so `list_tags` omits the parameter and enforces no ceiling. Do not "harmonize" the two — hardcoding `limit=100` in `list_tags` would introduce truncation past 100 tags. Resolution order is per-call arg > CLI flag > env var > MorgenMCP default; a malformed or out-of-range env var raises at startup rather than silently under-returning.
 - **HTTP client hardening** (`client.py`): `_RetryAfterTransport` retries a request **once** when Morgen answers 429 with a short `Retry-After` (≤10s; longer hints and the HTTP-date form surface the 429 immediately). The transport wraps a real `AsyncHTTPTransport` with `Limits(max_connections=10)` and `retries=1` (connect errors), so respx still intercepts in tests. Timeouts are split (`Timeout(30, connect=10)`). Upstream error bodies are truncated to 300 chars (`_truncate_error_text`) before landing in `MorgenAPIError`/`ToolError` — a 5xx HTML page or data-echoing body must not reach the LLM verbatim.
 - **Bounded batch concurrency**: every batch/fan-out `asyncio.gather` goes through `gather_bounded` (`tools/utils.py`, semaphore, `BATCH_CONCURRENCY = 8`, always `return_exceptions=True`). Applies to `batch_delete_events`, `batch_update_events`, `batch_delete_tasks`, the per-account fan-out in `tools/events.py::list_events`, and `resources.py::_fetch_events_in_window` (backing every `morgen://events/*` and `morgen://calendar/{id}/events` resource). Never add a bare `asyncio.gather` over per-item API calls.
 - **Startup fail-fast**: `_require_api_key` (`server.py`) rejects a missing/blank `MORGEN_API_KEY` both in `main()` (clean argparse error) and at the top of the lifespan (covers programmatic use). Without it the server would start, advertise all tools, and fail lazily on the first call.
@@ -111,7 +112,7 @@ Virtual IDs are **deterministic** (`MD5(real_id)`) and **persisted to disk** via
 - **`MORGENMCP_DISPLAY_TZ`**: IANA timezone (e.g. `America/Chicago`) for rendering compact event times in `morgen_list_events` (when `compact=True`) and all `morgen://events/*` resources. Defaults to the system local timezone. Overridden per-call via the `display_timezone` arg on `morgen_list_events`.
 - **`MORGENMCP_TASKS_LIMIT`**: Default `limit` sent to `/tasks/list` when a caller does not pass one. Integer 1-100 (`tasks.mdx`'s documented maximum); defaults to 100. Equivalent CLI flag `--tasks-limit N`, which wins over the env var. An invalid value fails at startup with an argparse error.
 - **`MORGENMCP_TAGS_LIMIT`**: Default `limit` sent to `/tags/list`. Integer >= 1, no upper bound (`tags.mdx` documents no maximum). Unset omits the parameter entirely, which returns all tags. Equivalent CLI flag `--tags-limit N`, which wins over the env var.
-- **`MORGENMCP_READ_ONLY`**: Truthy (`1`/`true`/`yes`/`on`, case-insensitive) launches the server read-only: all mutating tools (everything tagged `write` or `delete` — 16 create/update/delete/complete/reopen/move/batch tools) are disabled, leaving only the 6 read tools. Equivalent to the `--read-only` CLI flag (`uv run morgenmcp --read-only`); either one enables it. Applied once at startup, before `mcp.run()`, so the disabled state is baked into the first `list_tools` response.
+- **`MORGENMCP_READ_ONLY`**: Truthy (`1`/`true`/`yes`/`on`, case-insensitive) launches the server read-only: all mutating tools (everything tagged `write` or `delete` — the create/update/delete/complete/reopen/move/batch tools) are disabled, leaving only the read tools. Equivalent to the `--read-only` CLI flag (`uv run morgenmcp --read-only`); either one enables it. Applied once at startup, before `mcp.run()`, so the disabled state is baked into the first `list_tools` response.
 
 ### Testing
 
@@ -123,7 +124,7 @@ Virtual IDs are **deterministic** (`MD5(real_id)`) and **persisted to disk** via
 
 ### Environment
 
-- Python `>= 3.14` (set in `pyproject.toml`)
+- Python `>= 3.12` (set in `pyproject.toml`)
 - `fastmcp>=3.4,<3.5` — pinned to 3.4.x patch range
 
 ## Versioning & Release
@@ -141,13 +142,15 @@ Users reference tags in their MCP client config: `git+https://github.com/k3KAW8P
 
 **IMPORTANT: Always use the local docs submodules as the primary source of truth.** They are version-pinned to match the exact dependency versions in this project. Online docs may describe newer or older API versions that do not match what this project uses. Only fall back to online docs when local docs are insufficient.
 
-**Caveat — the Morgen docs describe intent, not always behavior.** They are the
-right starting point and beat online sources, but they are not authoritative
-about runtime behavior; at least one documented parameter default does not match
-what the live endpoint does. The Morgen submodule is also pinned to a *branch*
-commit (`john/use-new-rate-liimit-values-6`), not a release tag, so it may not
-match what is deployed. When a doc claim drives a code change, confirm it with a
-read-only probe against the live API where that is cheap.
+**Caveat — verify any doc claim that drives a code change.** The Morgen docs are
+the right starting point and beat online sources, but they are not always
+authoritative about runtime behavior. `/tasks/list`'s documented default was
+wrong for months — it claimed 100 while the endpoint returned 1 — and was
+corrected upstream only in `616aeed` (MOR-4652), which is why this repo's
+`limit` handling carries so much explanatory comment. The submodule now tracks
+the docs repo's `main` rather than a feature branch, but it can still run ahead
+of or behind what is deployed. Confirm doc-driven claims with a read-only probe
+against the live API where that is cheap.
 
 When spawning Explore agents, **always include this instruction in the prompt**: _"For Morgen API questions, search `docs/morgen-dev-docs/content/` first. For FastMCP questions, search `docs/fastmcp/docs/` first. These local docs match the pinned dependency versions and take priority over online sources."_
 
@@ -158,7 +161,7 @@ When spawning Explore agents, **always include this instruction in the prompt**:
 | **Morgen API** | `docs/morgen-dev-docs/content/*.mdx` | Endpoints, parameters, schemas, changelog |
 | **FastMCP** | `docs/fastmcp/docs/` | Server framework: tools, context, auth, testing, deployment |
 
-- **Morgen docs submodule**: pinned at `f977d08`
+- **Morgen docs submodule**: pinned at `e2fb838` (docs repo `main`)
 - **FastMCP docs submodule**: pinned at `1eedd1f6` (`v3.4.3`, matching the `fastmcp>=3.4,<3.5` pin); cloned `shallow = true`, so it carries no tags and `git describe` will fail
 
 **These are git submodules and are NOT populated by a fresh clone.** Nothing

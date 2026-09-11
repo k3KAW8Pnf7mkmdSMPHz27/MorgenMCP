@@ -56,6 +56,7 @@ class TestMCPServer:
                 "morgen_batch_delete_tasks",
                 # Tags
                 "morgen_list_tags",
+                "morgen_get_tag",
                 "morgen_create_tag",
                 "morgen_update_tag",
                 "morgen_delete_tag",
@@ -75,6 +76,7 @@ class TestMCPServer:
                 "morgen_list_tasks",
                 "morgen_get_task",
                 "morgen_list_tags",
+                "morgen_get_tag",
             ]:
                 assert by_name[name].annotations.readOnlyHint is True
 
@@ -432,6 +434,7 @@ class TestReadOnlyMode:
         "morgen_list_tasks",
         "morgen_get_task",
         "morgen_list_tags",
+        "morgen_get_tag",
     }
 
     def test_read_only_requested_env_parsing(self, monkeypatch):
@@ -544,6 +547,7 @@ class TestResponseCaching:
         assert "morgen_list_tasks" in included
         assert "morgen_list_tags" in included
         assert "morgen_get_task" in included
+        assert "morgen_get_tag" in included
         # Writes must NOT be in the allowlist
         for write_tool in (
             "morgen_create_event",

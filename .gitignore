@@ -60,3 +60,6 @@ mise.local.toml
 # OS files
 .DS_Store
 Thumbs.db
+
+# Generated at build time by hatch-vcs (see [tool.hatch.build.hooks.vcs])
+morgenmcp/_version.py

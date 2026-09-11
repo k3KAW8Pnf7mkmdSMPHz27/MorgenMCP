@@ -8,7 +8,10 @@ tag APIs through FastMCP. The package source is in `morgenmcp/`; tests are in
 
 ## Environment and commands
 
-- Use Python 3.14 and manage dependencies with `uv`.
+- Use Python 3.12 or newer (development pins `.python-version`) and manage
+  dependencies with `uv`. 3.12 is a hard floor — `models.py` uses PEP 695 generic
+  syntax — so keep annotations valid there: every module imports
+  `from __future__ import annotations`, and CI tests the floor as well as 3.14.
 - Install development dependencies with `uv sync --all-extras`.
 - Set up git hooks once with `pre-commit install`.
 - Run the default test suite with `uv run pytest`. Integration tests are
@@ -39,6 +42,14 @@ tag APIs through FastMCP. The package source is in `morgenmcp/`; tests are in
 - Preserve public MCP tool names and parameter compatibility unless a breaking
   change is explicitly requested.
 - Keep `.env` and credentials local; never add them to version control.
+
+## AI usage
+
+- Read and follow [AI_POLICY.md](AI_POLICY.md).
+- Disclose all AI assistance in the PR description (tool and extent).
+- Mark AI-assisted commits with `Assisted-by: LLM (<tool>, <model>)`; do not use `Co-Authored-By`.
+- Verify claims against this repository (run the command, check output) before reporting.
+- Ensure a human understands and can explain all submitted changes.
 
 ## Working alongside other agents
 

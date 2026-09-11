@@ -1,5 +1,7 @@
 """FastMCP server for Morgen calendar API."""
 
+from __future__ import annotations
+
 import argparse
 import asyncio
 import os
@@ -55,7 +57,13 @@ from morgenmcp.tools.events import (
     update_event,
 )
 from morgenmcp.tools.id_registry import HASH_SCHEME_VERSION
-from morgenmcp.tools.tags import create_tag, delete_tag, list_tags, update_tag
+from morgenmcp.tools.tags import (
+    create_tag,
+    delete_tag,
+    get_tag,
+    list_tags,
+    update_tag,
+)
 from morgenmcp.tools.tasks import (
     batch_delete_tasks,
     complete_task,
@@ -86,8 +94,8 @@ def _require_api_key() -> None:
     """
     if not os.environ.get("MORGEN_API_KEY", "").strip():
         raise RuntimeError(
-            "MORGEN_API_KEY is not set. Export it (e.g. via .envrc) "
-            "before starting morgenmcp."
+            "MORGEN_API_KEY is not set. Set it in your MCP client's env "
+            "block, or export it before starting morgenmcp."
         )
 
 
@@ -201,7 +209,7 @@ mcp = FastMCP(
     4. Use batch_delete_events or batch_update_events for bulk operations
 
     Task workflow:
-    1. Use list_tasks to enumerate tasks (paginate via limit + updated_after)
+    1. Use list_tasks to enumerate tasks (set limit; results may be truncated)
     2. Use create_task / update_task / delete_task for CRUD
     3. Use complete_task / reopen_task to toggle completion
     4. Use move_task to reorder or change a task's parent
@@ -452,6 +460,17 @@ mcp.tool(
     ),
 )(list_tags)
 mcp.tool(
+    name="morgen_get_tag",
+    tags={"tags", "read"},
+    timeout=30.0,
+    annotations=ToolAnnotations(
+        title="Get Tag",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=True,
+    ),
+)(get_tag)
+mcp.tool(
     name="morgen_create_tag",
     tags={"tags", "write"},
     timeout=30.0,
@@ -584,6 +603,7 @@ _CACHEABLE_READ_TOOLS = [
     "morgen_list_tasks",
     "morgen_get_task",
     "morgen_list_tags",
+    "morgen_get_tag",
 ]
 _CACHE_TTL_S = 60
 
@@ -687,7 +707,7 @@ def main() -> None:
         help=(
             "Default `limit` sent to /tasks/list when a caller does not specify "
             "one (1-100). Also settable via MORGENMCP_TASKS_LIMIT; the flag wins. "
-            "Defaults to 100, Morgen's documented default."
+            "Defaults to 100; Morgen's own default is 1."
         ),
     )
     parser.add_argument(

@@ -1,17 +1,20 @@
 """MCP tools for Morgen tag operations."""
 
+from __future__ import annotations
+
 from typing import cast
 
 from fastmcp.exceptions import ToolError
 
 from morgenmcp.client import get_client
 from morgenmcp.models import (
+    MorgenAPIError,
     Tag,
     TagCreateRequest,
     TagDeleteRequest,
     TagUpdateRequest,
 )
-from morgenmcp.tools.id_registry import register_id, resolve_id
+from morgenmcp.tools.id_registry import IDNotFoundError, register_id, resolve_id
 from morgenmcp.tools.outputs import (
     CreateTagResult,
     ListTagsResult,
@@ -63,6 +66,33 @@ async def list_tags(
         "tags": [_format_tag(t) for t in tags],
         "count": len(tags),
     }
+
+
+@handle_tool_errors
+async def get_tag(tag_id: str) -> TagItem:
+    """Retrieve a single tag by virtual ID.
+
+    Args:
+        tag_id: Virtual ID of the tag.
+
+    Returns:
+        Dictionary with tag details (id, name, color, updated, deleted).
+    """
+    if not tag_id or not tag_id.strip():
+        raise ToolError("tag_id cannot be empty")
+
+    try:
+        real_id = resolve_id(tag_id)
+    except IDNotFoundError as e:
+        raise ToolError(f"Tag with ID '{tag_id}' not found") from e
+
+    client = get_client()
+    try:
+        tag = await client.get_tag(real_id)
+    except MorgenAPIError as e:
+        raise ToolError(f"Failed to retrieve tag: {e}") from e
+
+    return _format_tag(tag)
 
 
 @handle_tool_errors
