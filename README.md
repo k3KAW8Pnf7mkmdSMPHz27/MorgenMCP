@@ -48,14 +48,14 @@ block above, then restart Claude Desktop.
 
 ## Available Tools
 
-22 tools across accounts, calendars, events, tasks, and tags — 6 read-only, 16 mutating:
+Tools across accounts, calendars, events, tasks, and tags — read-only and mutating:
 
 - **Accounts & calendars**: `list_accounts`, `list_calendars`, `update_calendar_metadata`
 - **Events**: `list_events`, `create_event`, `update_event`, `delete_event`, `batch_update_events`, `batch_delete_events`
 - **Tasks**: `list_tasks`, `get_task`, `create_task`, `update_task`, `move_task`, `complete_task`, `reopen_task`, `delete_task`, `batch_delete_tasks`
-- **Tags**: `list_tags`, `create_tag`, `update_tag`, `delete_tag`
+- **Tags**: `list_tags`, `get_tag`, `create_tag`, `update_tag`, `delete_tag`
 
-Pass `--read-only` (or set `MORGENMCP_READ_ONLY=1`) to expose only the 6 read-only tools. For the exact live list with schemas and annotations, connect any MCP client or run the [MCP Inspector](#local-debugging-with-mcp-inspector).
+Pass `--read-only` (or set `MORGENMCP_READ_ONLY=1`) to expose only the read-only tools. For the exact live list with schemas and annotations, connect any MCP client or run the [MCP Inspector](#local-debugging-with-mcp-inspector).
 
 ## Configuration
 
@@ -65,7 +65,7 @@ equivalent CLI flag, and the flag wins over the environment variable.
 | Environment variable | CLI flag | Default | Description |
 |---|---|---|---|
 | `MORGEN_API_KEY` | — | *(required)* | Morgen API key. The server refuses to start without it. |
-| `MORGENMCP_READ_ONLY` | `--read-only` | off | Truthy (`1`/`true`/`yes`/`on`) exposes only the 6 read tools, disabling all 16 mutating ones. |
+| `MORGENMCP_READ_ONLY` | `--read-only` | off | Truthy (`1`/`true`/`yes`/`on`) exposes only the read tools, disabling every mutating one. |
 | `MORGENMCP_TASKS_LIMIT` | `--tasks-limit N` | `100` | Default `limit` sent to `/tasks/list`. Integer 1–100. |
 | `MORGENMCP_TAGS_LIMIT` | `--tags-limit N` | *(unset)* | Default `limit` sent to `/tags/list`. Integer ≥ 1, no upper bound. Unset returns all tags. |
 | `MORGENMCP_DISPLAY_TZ` | — | system local | IANA timezone (e.g. `America/Chicago`) for rendering compact event times. |
