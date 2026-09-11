@@ -7,15 +7,14 @@ An MCP server for the [Morgen](https://morgen.so) calendar API.
 - [uv](https://docs.astral.sh/uv/) - [Install](https://docs.astral.sh/uv/getting-started/installation/) with `curl -LsSf https://astral.sh/uv/install.sh | sh`, `brew install uv`, or `winget install astral-sh.uv`
 - [mise](https://mise.jdx.dev/) *(optional)* - [Install](https://mise.jdx.dev/getting-started.html) with `curl https://mise.run | sh`, `brew install mise`, or `winget install jdx.mise`. Convenient for local development: it puts the right Python on `PATH` in a plain shell and fails fast with setup instructions when `MORGEN_API_KEY` is unset. Everything works with uv alone — see [Environment Setup](#environment-setup).
 - A Morgen API key - Get one from [Morgen Developer Portal](https://platform.morgen.so/developers-api)
-- Python 3.14 or newer — Only needed when working from a clone (`uv` and `mise` provision this automatically from `.python-version`). End users running via `uvx` require no setup.
+- Python 3.12 or newer — Only needed when working from a clone (`uv` and `mise` provision this automatically from `.python-version`). End users running via `uvx` require no setup.
 
 ## Installation
 
-No installation required! MCP clients run the server directly from GitHub.
+No installation required — MCP clients run the server directly from GitHub.
 
-### Claude Desktop
-
-Add to your Claude Desktop configuration (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+Most clients use the same `mcpServers` JSON shape. Add this entry to your
+client's MCP configuration:
 
 ```json
 {
@@ -34,7 +33,18 @@ Add to your Claude Desktop configuration (`~/Library/Application Support/Claude/
 }
 ```
 
+The server speaks stdio, so no port or URL is involved. If your client asks for
+a command rather than JSON, it is `uvx` with those arguments and
+`MORGEN_API_KEY` in the environment. If it cannot find `uvx`, see
+[Troubleshooting](#troubleshooting).
+
 To pin to a specific version, replace `@main` with a version tag (e.g., `@v0.1.0`).
+
+### Claude Desktop
+
+The config file lives at `~/Library/Application Support/Claude/claude_desktop_config.json`
+on macOS, or `%APPDATA%\Claude\claude_desktop_config.json` on Windows. Paste the
+block above, then restart Claude Desktop.
 
 ## Available Tools
 
@@ -83,6 +93,30 @@ overrides both the flag and the environment variable.
 > suited to the request, and a per-call value always wins. Set this variable to
 > bound what a model can pull in one call, not to express a typical page size.
 
+## Troubleshooting
+
+**`MORGEN_API_KEY is not set`** — the key goes in the `env` block of your MCP
+client's server entry, not in a shell profile: the client launches the server
+itself and does not inherit your terminal's environment. Get a key from the
+[Morgen Developer Portal](https://platform.morgen.so/developers-api).
+
+**`uvx: command not found`, or the server never starts** — desktop clients are
+launched by the OS, not by your shell, so they see a minimal `PATH` that
+usually excludes `~/.local/bin`, `/opt/homebrew/bin`, and version-manager
+shims. Use an absolute path instead:
+
+```bash
+which uvx   # e.g. /opt/homebrew/bin/uvx
+```
+
+```json
+"command": "/opt/homebrew/bin/uvx"
+```
+
+**Nothing appears in the client** — check the client's MCP log. Both failures
+above surface there and nowhere else, because a stdio server's stderr goes to
+the client, not to a terminal.
+
 ## Development
 
 ```bash
@@ -120,7 +154,7 @@ mise set --file mise.local.toml MORGEN_API_KEY=your_api_key
 uv run morgenmcp
 ```
 
-mise also puts the interpreter from `.python-version` on `PATH` in a plain shell, so a bare `python3` in a clone is the right one — useful because the source requires Python 3.14 (see [Requirements](#requirements)).
+mise also puts the interpreter from `.python-version` on `PATH` in a plain shell, so a bare `python3` in a clone is the right one — useful because the source requires Python 3.12 or newer (see [Requirements](#requirements)).
 
 ### Local Debugging with MCP Inspector
 

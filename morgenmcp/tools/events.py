@@ -1,5 +1,7 @@
 """MCP tools for Morgen event operations."""
 
+from __future__ import annotations
+
 import os
 from collections import defaultdict
 from datetime import datetime, timedelta, tzinfo
@@ -91,7 +93,7 @@ def _format_compact_event(event: Event, display_tz: tzinfo) -> str:
         try:
             dt = datetime.fromisoformat(event.start)
             date_str = dt.strftime("%b %d")
-        except ValueError, TypeError:
+        except (ValueError, TypeError):
             date_str = event.start
         return f"{date_str} (all-day): {title} [{virtual_id}]"
 
@@ -137,7 +139,7 @@ def _format_compact_event(event: Event, display_tz: tzinfo) -> str:
             f"{date_prefix} {start_str}-{end_label} {_tz_label(start_dt, display_tz)}: "
             f"{title} [{virtual_id}]"
         )
-    except ValueError, TypeError:
+    except (ValueError, TypeError):
         return f"{event.start}: {title} [{virtual_id}]"
 
 

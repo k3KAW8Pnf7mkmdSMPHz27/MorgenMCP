@@ -1,5 +1,7 @@
 """MCP tools for Morgen calendar operations."""
 
+from __future__ import annotations
+
 from typing import cast
 
 from fastmcp.exceptions import ToolError

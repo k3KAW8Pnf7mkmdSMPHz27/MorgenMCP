@@ -124,7 +124,7 @@ Virtual IDs are **deterministic** (`MD5(real_id)`) and **persisted to disk** via
 
 ### Environment
 
-- Python `>= 3.14` (set in `pyproject.toml`)
+- Python `>= 3.12` (set in `pyproject.toml`)
 - `fastmcp>=3.4,<3.5` — pinned to 3.4.x patch range
 
 ## Versioning & Release

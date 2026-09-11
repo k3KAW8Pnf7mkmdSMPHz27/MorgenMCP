@@ -1,5 +1,7 @@
 """MCP tools for Morgen API."""
 
+from __future__ import annotations
+
 from morgenmcp.tools.accounts import list_accounts
 from morgenmcp.tools.calendars import list_calendars, update_calendar_metadata
 from morgenmcp.tools.events import (
