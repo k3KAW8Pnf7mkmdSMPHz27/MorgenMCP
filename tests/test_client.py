@@ -793,7 +793,7 @@ class TestConfigurableListLimits:
 
     @respx.mock
     async def test_tasks_defaults_to_documented_100(self):
-        """Unset config still sends 100 — the endpoint's own default is broken."""
+        """Unset config still sends 100 — Morgen does not honour its documented default."""
         route = self._tasks_route()
         async with MorgenClient(api_key="k") as client:
             await client.list_tasks()

@@ -152,16 +152,6 @@ class TestListTaskLists:
         assert result["task_lists"][0]["name"] == "Acc1 Space"
         assert result["task_lists"][0]["task_count"] == 1
 
-    async def test_list_task_lists_fallback_client_list_tasks(self, mock_task_client):
-        del mock_task_client.list_tasks_and_spaces
-        t1 = Task(id="t1", task_list_id="space_a", title="T1")
-        mock_task_client.list_tasks.return_value = [t1]
-
-        result = await list_task_lists()
-        assert result["count"] == 1
-        assert result["task_lists"][0]["task_count"] == 1
-        assert len(result["task_lists"][0]["id"]) == 7
-
     async def test_list_task_lists_api_error(self, mock_task_client):
         mock_task_client.list_tasks_and_spaces.side_effect = MorgenAPIError(
             "failed", status_code=500

@@ -89,8 +89,8 @@ _HEARTBEAT_INTERVAL_S = (
 def _require_api_key() -> None:
     """Fail fast when MORGEN_API_KEY is missing.
 
-    Without this, a misconfigured server starts cleanly, advertises all 23
-    tools, and only errors on the first tool call — a confusing lazy failure.
+    Without this, a misconfigured server starts cleanly, advertises its full
+    tool set, and only errors on the first tool call — a confusing lazy failure.
     """
     if not os.environ.get("MORGEN_API_KEY", "").strip():
         raise RuntimeError(

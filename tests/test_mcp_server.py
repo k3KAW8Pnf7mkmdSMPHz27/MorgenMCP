@@ -454,13 +454,13 @@ class TestReadOnlyMode:
             assert _read_only_requested() is False
 
     async def test_default_lists_all_tools(self):
-        """Without read-only mode, all 23 tools are visible."""
+        """Without read-only mode, every tool is visible."""
         async with Client(mcp) as client:
             tools = await client.list_tools()
-            assert len(tools) == 23
+            assert len(tools) == 24
 
     async def test_read_only_hides_mutating_tools(self):
-        """After _apply_read_only, only the 7 read tools are visible, and each
+        """After _apply_read_only, only the read tools are visible, and each
         mutating tool is both unlisted and uncallable.
 
         Also guards the cache fix: ``ResponseCachingMiddleware`` caches
@@ -486,7 +486,7 @@ class TestReadOnlyMode:
 
         # enable() restore is visible immediately (list_tools is not cached).
         async with Client(mcp) as client:
-            assert len({t.name for t in await client.list_tools()}) == 23
+            assert len({t.name for t in await client.list_tools()}) == 24
 
 
 class TestRequireApiKey:

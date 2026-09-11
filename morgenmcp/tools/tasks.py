@@ -16,7 +16,6 @@ from morgenmcp.models import (
     TaskMoveRequest,
     TaskRelation,
     TaskReopenRequest,
-    TasksListResponse,
     TaskUpdateRequest,
 )
 from morgenmcp.tools.id_registry import register_id, resolve_id, resolve_ids
@@ -106,17 +105,9 @@ async def list_task_lists(
     client = get_client()
     real_account_id = resolve_id(account_id) if account_id is not None else None
 
-    if hasattr(client, "list_tasks_and_spaces"):
-        res = await client.list_tasks_and_spaces()
-        if isinstance(res, TasksListResponse):
-            tasks = res.tasks
-            spaces = res.spaces or []
-        else:
-            tasks = getattr(res, "tasks", [])
-            spaces = getattr(res, "spaces", []) or []
-    else:
-        tasks = await client.list_tasks()
-        spaces = []
+    res = await client.list_tasks_and_spaces()
+    tasks = res.tasks
+    spaces = res.spaces or []
 
     if real_account_id is not None:
         spaces = [s for s in spaces if s.account_id == real_account_id]
