@@ -426,3 +426,10 @@ class TestTaskModel:
         )
 
         assert task.position == 1.5
+
+    def test_task_keeps_links(self):
+        """links (an object keyed by link ID) is kept, not dropped."""
+        links = {"link_1": {"href": "https://example.com", "title": "Spec"}}
+        task = Task.model_validate({"id": "task_1", "title": "Linked", "links": links})
+
+        assert task.links == links

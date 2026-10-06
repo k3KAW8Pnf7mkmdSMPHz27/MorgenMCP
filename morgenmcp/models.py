@@ -6,7 +6,7 @@ See: https://docs.morgen.so
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -351,6 +351,7 @@ class Task(MorgenModel):
         None
     )
     tags: list[str] | None = None
+    links: dict[str, Any] | None = None
     derived: Annotated[TaskDerived | None, Field(alias="morgen.so:derived")] = None
 
 
