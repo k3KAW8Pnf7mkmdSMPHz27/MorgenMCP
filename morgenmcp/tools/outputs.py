@@ -269,10 +269,10 @@ class TaskItem(TypedDict):
     estimatedDuration: NotRequired[str]
     priority: NotRequired[int]
     progress: NotRequired[str]
-    position: NotRequired[int]
+    position: NotRequired[float]
     relatedTo: NotRequired[dict[str, TaskRelationRef]]
     tags: NotRequired[list[str]]
-    scheduled: NotRequired[str]
+    scheduled: NotRequired[bool]
     created: NotRequired[str]
     updated: NotRequired[str]
 
