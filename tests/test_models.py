@@ -21,6 +21,7 @@ from morgenmcp.models import (
     ParticipantRoles,
     RateLimitInfo,
     RecurrenceRule,
+    Task,
 )
 
 
@@ -413,3 +414,15 @@ class TestModelEdgeCases:
 
         assert "participants" in data
         assert data["participants"]["remove@example.com"] is None
+
+
+class TestTaskModel:
+    """Tests for Task fields as Morgen returns them."""
+
+    def test_task_accepts_fractional_position(self):
+        """Morgen returns float positions after a manual reorder."""
+        task = Task.model_validate(
+            {"id": "task_1", "title": "Reordered", "position": 1.5}
+        )
+
+        assert task.position == 1.5

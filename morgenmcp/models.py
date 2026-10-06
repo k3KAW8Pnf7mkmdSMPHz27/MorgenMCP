@@ -346,7 +346,7 @@ class Task(MorgenModel):
     estimated_duration: Annotated[str | None, Field(alias="estimatedDuration")] = None
     priority: int | None = None
     progress: str | None = None
-    position: int | None = None
+    position: float | None = None
     related_to: Annotated[dict[str, TaskRelation] | None, Field(alias="relatedTo")] = (
         None
     )
