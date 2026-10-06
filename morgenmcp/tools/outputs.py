@@ -272,7 +272,7 @@ class TaskItem(TypedDict):
     position: NotRequired[float]
     relatedTo: NotRequired[dict[str, TaskRelationRef]]
     tags: NotRequired[list[str]]
-    scheduled: NotRequired[str]
+    scheduled: NotRequired[bool]
     created: NotRequired[str]
     updated: NotRequired[str]
 

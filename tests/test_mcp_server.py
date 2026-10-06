@@ -133,6 +133,30 @@ class TestMCPServer:
                 result = await client.call_tool("morgen_list_accounts", {})
                 assert result is not None
 
+    async def test_list_tasks_output_matches_schema_for_live_shapes(self):
+        """A reordered, scheduled task passes the tool's output schema."""
+        from morgenmcp.models import Task
+
+        task = Task.model_validate(
+            {
+                "id": "task_1",
+                "title": "Reordered and scheduled",
+                "position": 1.5,
+                "morgen.so:derived": {"scheduled": True},
+            }
+        )
+        with patch("morgenmcp.tools.tasks.get_client") as mock:
+            client_mock = AsyncMock()
+            client_mock.list_tasks.return_value = [task]
+            mock.return_value = client_mock
+
+            async with Client(mcp) as client:
+                result = await client.call_tool("morgen_list_tasks", {})
+
+        item = result.structured_content["tasks"][0]
+        assert item["position"] == 1.5
+        assert item["scheduled"] is True
+
     async def test_initialize_advertises_morgenmcp_version(self):
         """serverInfo on initialize carries morgenmcp's __version__, not FastMCP's."""
         from morgenmcp import __version__
