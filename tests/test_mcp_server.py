@@ -5,6 +5,7 @@ import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
+import respx
 from fastmcp import Client
 from fastmcp.client.logging import LogMessage
 
@@ -132,6 +133,30 @@ class TestMCPServer:
             async with Client(mcp) as client:
                 result = await client.call_tool("morgen_list_accounts", {})
                 assert result is not None
+
+    async def test_list_tasks_output_matches_schema_for_live_shapes(self):
+        """A reordered, scheduled task passes the tool's output schema."""
+        from morgenmcp.models import Task
+
+        task = Task.model_validate(
+            {
+                "id": "task_1",
+                "title": "Reordered and scheduled",
+                "position": 1.5,
+                "morgen.so:derived": {"scheduled": True},
+            }
+        )
+        with patch("morgenmcp.tools.tasks.get_client") as mock:
+            client_mock = AsyncMock()
+            client_mock.list_tasks.return_value = [task]
+            mock.return_value = client_mock
+
+            async with Client(mcp) as client:
+                result = await client.call_tool("morgen_list_tasks", {})
+
+        item = result.structured_content["tasks"][0]
+        assert item["position"] == 1.5
+        assert item["scheduled"] is True
 
     async def test_initialize_advertises_morgenmcp_version(self):
         """serverInfo on initialize carries morgenmcp's __version__, not FastMCP's."""
@@ -416,6 +441,96 @@ class TestTypedOutputSchemas:
         assert updated["busy"] is False
         assert updated["overrideColor"] is None
         assert updated["overrideName"] is None
+
+    # Live /tasks/list shape, synthetic values. `links` was never seen live,
+    # so it uses the JSCalendar (RFC 8984) Link shape.
+    _LIVE_TASK = {
+        "@type": "Task",
+        "id": "task-live-shape",
+        "integrationId": "morgen",
+        "taskListId": "default",
+        "title": "Live-shaped task",
+        "priority": 0,
+        "progress": "needs-action",
+        "position": 1768469400000,
+        "tags": [],
+        "created": "2026-01-15T09:30:00Z",
+        "updated": "2026-01-15T09:30:00Z",
+        "morgen.so:derived": {"scheduled": True},
+        "links": {"link-1": {"@type": "Link", "href": "https://example.com/spec"}},
+    }
+
+    async def _call_task_tool(self, monkeypatch, tool: str, task: dict) -> dict:
+        """Serve ``task`` from a respx-mocked Morgen API and return the tool's item.
+
+        Only HTTP is mocked, so the real client, envelope parse, ``Task`` model,
+        ``_format_task`` and output-schema validation all run.
+        """
+        from morgenmcp import client as client_module
+        from morgenmcp.tools.id_registry import register_id
+
+        monkeypatch.setattr(
+            client_module, "_client", client_module.MorgenClient(api_key="test-key")
+        )
+        if tool == "morgen_get_task":
+            args = {"task_id": register_id(task["id"])}
+        else:
+            args = {"limit": 5}
+        with respx.mock(assert_all_called=False) as api:
+            api.get(host="api.morgen.so", path="/v3/tasks/list").respond(
+                json={"data": {"tasks": [task], "labelDefs": [], "spaces": []}}
+            )
+            api.get(host="api.morgen.so", path="/v3/tasks").respond(
+                json={"data": {"task": task, "labelDefs": []}}
+            )
+            async with Client(mcp) as client:
+                result = await client.call_tool(tool, args, raise_on_error=False)
+
+        assert result.is_error is False, result.content[0].text
+        payload = result.structured_content
+        return payload["tasks"][0] if tool == "morgen_list_tasks" else payload["task"]
+
+    @pytest.mark.parametrize("tool", ["morgen_list_tasks", "morgen_get_task"])
+    @pytest.mark.parametrize(
+        ("field", "json_type"), [("position", "number"), ("scheduled", "boolean")]
+    )
+    async def test_task_item_schema_types(self, tool, field, json_type):
+        """Both task tools advertise the JSON types Morgen actually sends."""
+        async with Client(mcp) as client:
+            by_name = {t.name: t for t in await client.list_tools()}
+        props = by_name[tool].outputSchema["properties"]
+        item = props["tasks"]["items"] if tool == "morgen_list_tasks" else props["task"]
+        assert item["properties"][field]["type"] == json_type
+
+    @pytest.mark.parametrize("tool", ["morgen_list_tasks", "morgen_get_task"])
+    async def test_live_shaped_task_passes_output_validation(self, monkeypatch, tool):
+        """A scheduled task in the live /tasks/list shape validates end to end."""
+        item = await self._call_task_tool(monkeypatch, tool, self._LIVE_TASK)
+
+        assert item["scheduled"] is True
+
+    @pytest.mark.parametrize("tool", ["morgen_list_tasks", "morgen_get_task"])
+    @pytest.mark.parametrize(
+        ("position", "json_type"),
+        [(1713627622646, int), (1713627622646.5, float)],  # fractional value from #3
+        ids=["integer", "fractional"],
+    )
+    async def test_task_position_keeps_its_json_type(
+        self, monkeypatch, tool, position, json_type
+    ):
+        """Integer positions stay integers, and fractional ones are accepted.
+
+        Compares with ``type(...) is``, not ``==``: ``1713627622646.0`` equals
+        ``1713627622646`` in Python but renders differently to clients. The
+        task carries no ``morgen.so:derived``, so position is all it tests.
+        """
+        task = {k: v for k, v in self._LIVE_TASK.items() if k != "morgen.so:derived"}
+        item = await self._call_task_tool(
+            monkeypatch, tool, {**task, "position": position}
+        )
+
+        assert item["position"] == position
+        assert type(item["position"]) is json_type
 
 
 class TestReadOnlyMode:
