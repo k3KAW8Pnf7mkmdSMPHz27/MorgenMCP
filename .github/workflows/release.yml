@@ -5,20 +5,24 @@ on:
     tags:
       - 'v*'
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  MCPB_VERSION: '2.1.2'
+
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-      
-      - name: Install dependencies
-        run: uv sync --all-extras
-      
-      - name: Run tests
-        run: uv run pytest
+      - uses: astral-sh/setup-uv@v7
+      - run: uv sync --all-extras
+      - run: uv run pytest
 
   release:
     needs: test
@@ -27,22 +31,78 @@ jobs:
     permissions:
       contents: write
       id-token: write
-
+      attestations: write
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Install pinned bundle tooling
+        run: npm install --global --ignore-scripts "@anthropic-ai/mcpb@$MCPB_VERSION"
 
       - name: Build sdist and wheel
         run: uv build
 
-      - name: Create GitHub Release
+      - name: Stage, validate, and pack desktop bundle
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          wheels=(dist/*.whl)
+          test "${#wheels[@]}" -eq 1
+          uv run --no-project python -m scripts.build_bundle \
+            --wheel "${wheels[0]}" --tag "$RELEASE_TAG" --destination build/desktop
+          mcpb validate build/desktop/manifest.json
+          mcpb pack build/desktop "dist/morgenmcp-${RELEASE_TAG#v}.mcpb"
+
+      - name: Checksum final release files
+        working-directory: dist
+        run: sha256sum *.whl *.tar.gz *.mcpb > SHA256SUMS
+
+      - name: Sign release provenance with Sigstore
+        id: provenance
+        uses: actions/attest@v4
+        with:
+          create-storage-record: false
+          subject-path: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/*.mcpb
+            dist/SHA256SUMS
+
+      - name: Save verification material alongside release files
+        env:
+          BUNDLE_PATH: ${{ steps.provenance.outputs.bundle-path }}
+        run: cp "$BUNDLE_PATH" dist/provenance.sigstore.json
+
+      - name: Require verified provenance before publication
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create ${{ github.ref_name }} dist/* --generate-notes --title "${{ github.ref_name }}"
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_COMMIT: ${{ github.sha }}
+        run: |
+          uv run --no-project python -m scripts.verify_release \
+            --bundle dist/provenance.sigstore.json \
+            --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" \
+            --repository "$GITHUB_REPOSITORY" \
+            dist/*.whl dist/*.tar.gz dist/*.mcpb dist/SHA256SUMS
 
-      - name: Publish to PyPI
-        run: uv publish
+      - name: Preserve verified release files for recovery
+        uses: actions/upload-artifact@v4
+        with:
+          name: verified-release-${{ github.ref_name }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish Python distributions with trusted publishing
+        run: uv publish dist/*.whl dist/*.tar.gz
+
+      - name: Publish GitHub Release with provenance verification material
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh release create "$RELEASE_TAG" dist/* --verify-tag --generate-notes --title "$RELEASE_TAG"

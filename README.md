@@ -1,30 +1,136 @@
 # MorgenMCP
 
+[![PyPI version](https://img.shields.io/pypi/v/morgenmcp)](https://pypi.org/project/morgenmcp/)
+
 An unofficial MCP server for the [Morgen](https://morgen.so) calendar API.
 
 > [!NOTE]
 > This is an independent, community-maintained project and is not affiliated with, endorsed by, or sponsored by Morgen AG. Morgen is a trademark of Morgen AG.
 
-## Requirements
-
-- [uv](https://docs.astral.sh/uv/) - [Install](https://docs.astral.sh/uv/getting-started/installation/) with `curl -LsSf https://astral.sh/uv/install.sh | sh`, `brew install uv`, or `winget install astral-sh.uv`
-- [mise](https://mise.jdx.dev/) *(optional)* - [Install](https://mise.jdx.dev/getting-started.html) with `curl https://mise.run | sh`, `brew install mise`, or `winget install jdx.mise`. Convenient for local development: it puts the right Python on `PATH` in a plain shell and fails fast with setup instructions when `MORGEN_API_KEY` is unset. Everything works with uv alone — see [Environment Setup](#environment-setup).
-- A Morgen API key - Get one from [Morgen Developer Portal](https://platform.morgen.so/developers-api)
-- Python 3.12 or newer — Only needed when working from a clone (`uv` and `mise` provision this automatically from `.python-version`). End users running via `uvx` require no setup.
-
 ## Installation
 
-No installation required — MCP clients run the server directly via `uvx` (published on [PyPI](https://pypi.org/project/morgenmcp/)).
+Run MorgenMCP locally from [PyPI](https://pypi.org/project/morgenmcp/), without
+cloning this repository.
 
-Most clients use the same `mcpServers` JSON shape. Add this entry to your
-client's MCP configuration:
+1. Install [uv](https://docs.astral.sh/uv/getting-started/installation/):
+   `brew install uv` on macOS, or `winget install astral-sh.uv` on Windows.
+   For Linux and other installation methods, follow the uv link.
+2. Get an API key from the [Morgen Developer Portal](https://platform.morgen.so/developers-api).
+3. Choose your client below. uv manages the required Python version (3.12 or newer).
+
+| Client | Setup |
+|---|---|
+| Claude Desktop | [Configuration file](#claude-desktop) |
+| Claude Code | [CLI command](#claude-code) |
+| Cursor | [Install button and configuration](#cursor) |
+| VS Code | [Install button and configuration](#vs-code) |
+| Other MCP clients | [Generic stdio configuration](#other-mcp-clients) |
+
+The server uses stdio: your client starts `uvx morgenmcp`; no server URL or
+port is needed. If it cannot find `uvx`, use its absolute path as described in
+[Troubleshooting](#troubleshooting).
+
+### Claude Desktop
+
+Open **Settings → Developer → Edit Config**. The file is
+`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS,
+or `%APPDATA%\Claude\claude_desktop_config.json` on Windows.
+
+Merge the [generic configuration](#other-mcp-clients) into the file, replace
+`your_api_key_here` with your key, and restart Claude Desktop. Preserve any
+other servers already configured. Then [verify the connection](#verify-the-connection).
+
+### Claude Code
+
+Replace the placeholder and run this command in your terminal:
+
+```sh
+claude mcp add --scope user --env MORGEN_API_KEY=your_api_key_here --transport stdio morgen -- uvx morgenmcp
+```
+
+This adds MorgenMCP to your personal configuration across projects. The key is
+stored in that configuration; entering it literally can also leave it in shell
+history. Use your shell's private-input mechanism if needed. In Claude Code,
+run `/mcp` to check the server status, then
+[verify the connection](#verify-the-connection).
+
+See the [Claude Code MCP guide](https://code.claude.com/docs/en/mcp) for scopes
+and environment-variable configuration.
+
+### Cursor
+
+[![Install in Cursor](https://img.shields.io/badge/Install_in-Cursor-black)](https://cursor.com/en/install-mcp?name=morgen&config=eyJjb21tYW5kIjoidXZ4IiwiYXJncyI6WyJtb3JnZW5tY3AiXSwiZW52Ijp7Ik1PUkdFTl9BUElfS0VZIjoieW91cl9hcGlfa2V5X2hlcmUifX0%3D)
+
+The button opens Cursor with a proposed local server configuration. Replace
+`your_api_key_here` in the server's `env` configuration with your Morgen key
+before using it. The button contains only a placeholder; never put a real key
+in a shared install link.
+
+For manual setup, open **Cursor Settings → Tools & MCP**, or edit your personal
+`~/.cursor/mcp.json`. Merge the [generic configuration](#other-mcp-clients),
+replace the key placeholder, and enable the server. Keep credentials in your
+personal configuration rather than a committed project file. Then
+[verify the connection](#verify-the-connection).
+
+See [Cursor's MCP documentation](https://cursor.com/docs/mcp) and
+[install-link format](https://cursor.com/docs/mcp/install-links).
+
+### VS Code
+
+[![Install in VS Code](https://img.shields.io/badge/Install_in-VS_Code-007ACC)](https://vscode.dev/redirect/mcp/install?%7B%22name%22%3A%22morgen%22%2C%22type%22%3A%22stdio%22%2C%22command%22%3A%22uvx%22%2C%22args%22%3A%5B%22morgenmcp%22%5D%2C%22env%22%3A%7B%22MORGEN_API_KEY%22%3A%22%24%7Binput%3Amorgen-api-key%7D%22%7D%2C%22inputs%22%3A%5B%7B%22type%22%3A%22promptString%22%2C%22id%22%3A%22morgen-api-key%22%2C%22description%22%3A%22Morgen%20API%20key%22%2C%22password%22%3Atrue%7D%5D%7D)
+
+The button opens VS Code's installation flow with a password input for your
+Morgen API key. Review the configuration and install it in your user profile.
+If the browser does not open the app, use the manual setup below.
+
+Run **MCP: Open User Configuration** from the Command Palette and merge this
+configuration, preserving any existing servers and inputs:
+
+```json
+{
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "morgen-api-key",
+      "description": "Morgen API key",
+      "password": true
+    }
+  ],
+  "servers": {
+    "morgen": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "morgenmcp"
+      ],
+      "env": {
+        "MORGEN_API_KEY": "${input:morgen-api-key}"
+      }
+    }
+  }
+}
+```
+
+Start `morgen` from the MCP configuration editor and enter your key when
+prompted. Then [verify the connection](#verify-the-connection).
+
+These input prompts are supported in VS Code's Local harness; servers requiring
+interactive inputs are not forwarded to Copilot harness sessions. See the
+[VS Code configuration reference](https://code.visualstudio.com/docs/agents/reference/mcp-configuration)
+for supported credential options in your session.
+
+### Other MCP clients
+
+Merge this into your client's MCP configuration and replace the key placeholder:
 
 ```json
 {
   "mcpServers": {
     "morgen": {
       "command": "uvx",
-      "args": ["morgenmcp"],
+      "args": [
+        "morgenmcp"
+      ],
       "env": {
         "MORGEN_API_KEY": "your_api_key_here"
       }
@@ -33,18 +139,27 @@ client's MCP configuration:
 }
 ```
 
-The server speaks stdio, so no port or URL is involved. If your client asks for
-a command rather than JSON, it is `uvx morgenmcp` with
-`MORGEN_API_KEY` in the environment. If it cannot find `uvx`, see
-[Troubleshooting](#troubleshooting).
+If your client asks for separate fields, use command `uvx`, arguments
+`morgenmcp`, and environment variable `MORGEN_API_KEY`. Follow your client's
+configuration format; not every client uses the `mcpServers` wrapper.
 
-To pin to a specific version, pass the version in `args` (e.g. `["morgenmcp==0.2.1"]`). You can also run unreleased commits directly from GitHub: `["--from", "git+https://github.com/k3KAW8Pnf7mkmdSMPHz27/MorgenMCP@main", "morgenmcp"]`.
+### Verify the connection
 
-### Claude Desktop
+Ask your assistant: **“List my Morgen calendars.”** Check that it invokes
+`list_accounts` and/or `list_calendars` and returns your calendars. You can
+also try **“What is on my Morgen calendar today?”**
 
-The config file lives at `~/Library/Application Support/Claude/claude_desktop_config.json`
-on macOS, or `%APPDATA%\Claude\claude_desktop_config.json` on Windows. Paste the
-block above, then restart Claude Desktop.
+If startup fails or the tools do not appear, see [Troubleshooting](#troubleshooting).
+
+### Read-only mode and version pinning
+
+To expose only read tools, change `args` to
+`["morgenmcp", "--read-only"]`. For the Claude Code command, append
+`--read-only` after `uvx morgenmcp`.
+
+To pin a release, use `["morgenmcp==0.2.1"]` (replace the version with your
+chosen release). To run an unreleased commit, use
+`["--from", "git+https://github.com/k3KAW8Pnf7mkmdSMPHz27/MorgenMCP@main", "morgenmcp"]`.
 
 ## Available Tools
 
@@ -95,9 +210,9 @@ overrides both the flag and the environment variable.
 
 ## Troubleshooting
 
-**`MORGEN_API_KEY is not set`** — the key goes in the `env` block of your MCP
-client's server entry, not in a shell profile: the client launches the server
-itself and does not inherit your terminal's environment. Get a key from the
+**`MORGEN_API_KEY is not set`** — provide the key through your client's setup
+above: the `env` block, VS Code password prompt, or Claude Code configuration.
+Desktop clients may not inherit your terminal's environment. Get a key from the
 [Morgen Developer Portal](https://platform.morgen.so/developers-api).
 
 **`uvx: command not found`, or the server never starts** — desktop clients are
@@ -118,6 +233,10 @@ above surface there and nowhere else, because a stdio server's stderr goes to
 the client, not to a terminal.
 
 ## Development
+
+Use Python 3.12 or newer. uv provisions the version pinned in
+`.python-version` for this checkout. [mise](https://mise.jdx.dev/) is optional;
+see [Environment Setup](#environment-setup) if you already use it.
 
 ```bash
 # Clone the repository
@@ -154,7 +273,7 @@ mise set --file mise.local.toml MORGEN_API_KEY=your_api_key
 uv run morgenmcp
 ```
 
-mise also puts the interpreter from `.python-version` on `PATH` in a plain shell, so a bare `python3` in a clone is the right one — useful because the source requires Python 3.12 or newer (see [Requirements](#requirements)).
+mise also puts the interpreter from `.python-version` on `PATH` in a plain shell, so a bare `python3` in a clone is the right one — useful because the source requires Python 3.12 or newer (see [Development](#development)).
 
 ### Local Debugging with MCP Inspector
 
@@ -175,7 +294,12 @@ git tag -a v0.2.1 -m "Release v0.2.1"
 git push origin v0.2.1
 ```
 
-Pushing a tag triggers the GitHub Actions release workflow, which runs tests, builds wheel and sdist distributions, creates a GitHub Release, and publishes to PyPI automatically.
+Stable `vX.Y.Z` tags trigger the GitHub Actions release workflow, which runs
+tests, builds wheel and sdist distributions and a desktop bundle, and requires
+verified Sigstore provenance for every release artifact before publishing to
+PyPI and GitHub Releases. Releases include `provenance.sigstore.json` and
+`SHA256SUMS`. See [Release provenance](desktop/RELEASING.md) for download
+verification, GitHub configuration, and desktop installation testing.
 
 ## Contributing
 

@@ -1,0 +1,41 @@
+{
+  "manifest_version": "0.4",
+  "name": "morgenmcp",
+  "display_name": "MorgenMCP",
+  "version": "0.0.0",
+  "description": "Unofficial MCP server for Morgen calendars, events, tasks, and tags.",
+  "author": {"name": "The Morgen MCP Authors"},
+  "homepage": "https://github.com/k3KAW8Pnf7mkmdSMPHz27/MorgenMCP",
+  "license": "Apache-2.0",
+  "server": {
+    "type": "uv",
+    "entry_point": "server.py",
+    "mcp_config": {
+      "command": "uv",
+      "args": ["run", "--directory", "${__dirname}", "server.py"],
+      "env": {
+        "MORGEN_API_KEY": "${user_config.api_key}",
+        "MORGENMCP_READ_ONLY": "${user_config.read_only}"
+      }
+    }
+  },
+  "compatibility": {
+    "platforms": ["darwin", "win32"],
+    "runtimes": {"python": ">=3.12"}
+  },
+  "user_config": {
+    "api_key": {
+      "type": "string",
+      "title": "Morgen API key",
+      "description": "Get a key at https://platform.morgen.so/developers-api",
+      "required": true,
+      "sensitive": true
+    },
+    "read_only": {
+      "type": "boolean",
+      "title": "Read-only mode",
+      "description": "Expose only tools that read your Morgen data.",
+      "default": false
+    }
+  }
+}
