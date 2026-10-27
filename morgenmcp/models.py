@@ -148,6 +148,24 @@ class EventMetadata(MorgenModel):
     category_color: Annotated[str | None, Field(alias="categoryColor")] = None
     progress: str | None = None  # "needs-action", "completed"
     task_id: Annotated[str | None, Field(alias="taskId")] = None
+    # Undocumented but returned on every event that carries a metadata object.
+    # The API reference (docs/morgen-dev-docs/content/events.mdx:201) lists only
+    # categoryId/categoryName/categoryColor/progress/taskId, and these three
+    # appear in no commit of the docs repo. Their meaning comes from Morgen's
+    # product docs instead:
+    #   canBeCompleted -> a Routine occurrence (https://www.morgen.so/routines):
+    #     a recurring block you check off, "displayed like tasks but do not
+    #     clutter the task sidebar". Mutually exclusive with taskId upstream --
+    #     Morgen rejects create with both ("An event with canBeCompleted cannot
+    #     have a taskId").
+    #   isAutoScheduled -> Morgen auto-scheduled this block, so it can move.
+    #   isFlexible -> meaning unconfirmed; nothing classifies on it yet.
+    # Optional (not `bool = False`) so "absent" stays distinguishable from
+    # "explicitly false"; if Morgen drops one, it degrades to None rather than
+    # asserting a wrong default.
+    can_be_completed: Annotated[bool | None, Field(alias="canBeCompleted")] = None
+    is_auto_scheduled: Annotated[bool | None, Field(alias="isAutoScheduled")] = None
+    is_flexible: Annotated[bool | None, Field(alias="isFlexible")] = None
 
 
 class Event(MorgenModel):
