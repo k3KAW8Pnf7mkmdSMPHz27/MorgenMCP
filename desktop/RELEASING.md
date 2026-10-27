@@ -100,10 +100,10 @@ an optional subsequent check using a real key, not part of automated CI.
 
 ## Checks and recovery
 
-`provenance-trial.yml` provides a separate non-publishing Actions trial: it
+`provenance-trial.yml` provides a manual, non-publishing Actions trial: it
 builds version `0.0.0`, attests all four subjects, verifies its own workflow/ref/commit
 identity, and requires rejection of a tampered bundle. Its attestations identify
-the trial workflow and branch, so the production release verifier intentionally
+the trial workflow and source ref, so the production release verifier intentionally
 does not accept them as stable releases. Download its seven-day Actions artifact
 for desktop installation testing.
 

@@ -28,8 +28,13 @@ name, successful packaging, or a successful command-line launch.
 - Artifacts: wheel, source archive, `.mcpb`, and `SHA256SUMS`
 - Attestation: `application/vnd.dev.sigstore.bundle.v0.3+json`
 - Actions verified all four subjects and rejected a modified bundle
-- Downloaded `.mcpb` verified locally with GitHub CLI 2.102.0, including the
-  exact repository, trial workflow, branch, commit, and GitHub OIDC issuer
+- All four downloaded subjects verified locally with GitHub CLI 2.102.0,
+  including the exact repository, trial workflow, branch, commit, and GitHub
+  OIDC issuer
+- The production release verifier rejected the trial attestation, as expected: it
+  requires the release workflow identity and a stable release tag
+- [Actions run 40577343071](https://github.com/k3KAW8Pnf7mkmdSMPHz27/MorgenMCP/actions/runs/40577343071)
+  also passed after updating the artifact uploader to Node.js 24
 - The trial created no GitHub Release and published nothing to PyPI
 - The separate attestation does not establish a Claude Desktop publisher display;
   that installation check remains pending
@@ -47,5 +52,5 @@ name, successful packaging, or a successful command-line launch.
 
 | Platform | Attestation verification | Installation | Publisher display | Settings |
 |---|---|---|---|---|
-| macOS | Pending Actions run | Pending | Pending | Pending |
-| Windows | Pending Actions run | Pending | Pending | Pending |
+| macOS | Trial passed locally; release pending | Pending | Pending | Pending |
+| Windows | Pending | Pending | Pending | Pending |

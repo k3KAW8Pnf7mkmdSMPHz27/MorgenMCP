@@ -2,14 +2,6 @@ name: Sigstore provenance trial
 
 on:
   workflow_dispatch:
-  push:
-    branches: [improve-discovery-and-installation]
-    paths:
-      - '.github/workflows/provenance-trial.yml'
-      - '.github/workflows/release.yml'
-      - 'scripts/**'
-      - 'desktop/**'
-      - 'tests/test_release_bundle.py'
 
 permissions:
   contents: read
