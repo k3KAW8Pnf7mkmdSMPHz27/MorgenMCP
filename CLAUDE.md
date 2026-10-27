@@ -129,14 +129,14 @@ Virtual IDs are **deterministic** (`MD5(real_id)`) and **persisted to disk** via
 
 ## Versioning & Release
 
-Versions are managed via git tags. No build step required.
+Versions are managed via git tags.
 
 ```bash
-git tag -a v0.1.0 -m "Release v0.1.0"
-git push origin v0.1.0
+git tag -a v0.2.1 -m "Release v0.2.1"
+git push origin v0.2.1
 ```
 
-Users reference tags in their MCP client config: `git+https://github.com/k3KAW8Pnf7mkmdSMPHz27/MorgenMCP@v0.1.0`
+Pushing a tag triggers `.github/workflows/release.yml`, which runs tests, builds wheel and sdist distributions, creates a GitHub Release, and publishes to PyPI via Trusted Publishing. Users can run the server via `uvx morgenmcp` or pin a version with `uvx morgenmcp==<version>`.
 
 ## Documentation Resources
 
