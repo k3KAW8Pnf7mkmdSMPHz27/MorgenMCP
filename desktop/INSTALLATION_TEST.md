@@ -16,7 +16,8 @@ name, successful packaging, or a successful command-line launch.
 - Installation and publisher display: the bundle was opened with Claude Desktop,
   but macOS denied assistive access (`osascript` error -1728); manual inspection
   was subsequently confirmed from a user-provided screenshot (see below)
-- API-key/read-only controls: manual inspection pending
+- API-key/read-only controls: confirmed in a user-provided configuration screenshot;
+  saving configuration and server startup remain untested
 - Live Morgen API calls: not performed
 
 ## User-observed installer screen
@@ -36,6 +37,19 @@ A user-provided screenshot on 2026-10-27 confirms:
 This observation does not establish whether a CA-backed embedded signature
 would alter Claude's warning. Sigstore provenance verification remains an
 external verification step.
+
+## User-observed configuration screen
+
+A second user-provided screenshot on 2026-10-27 confirms:
+
+- The installer reaches **Configure MorgenMCP**.
+- The Morgen API key is marked required, with the developer portal URL shown.
+- The API-key field is empty and **Save** is disabled in this state.
+- The **Read-only mode** toggle is present and initially off.
+- No credential was shared in the screenshot. Credential masking, saving,
+  server startup, and live calendar access are not established by this image.
+- The displayed help text matches the initial bundle; the later presentation
+  changes still require a separate visual check.
 
 ## Sigstore Actions trial
 
@@ -70,5 +84,5 @@ external verification step.
 
 | Platform | Attestation verification | Installation | Publisher display | Settings |
 |---|---|---|---|---|
-| macOS | Trial passed locally; release pending | Installer opens; completion pending | Developer information unverified by Anthropic | Pending |
+| macOS | Trial passed locally; release pending | Configuration reached; save/startup pending | Developer information unverified by Anthropic | Required key and read-only toggle confirmed |
 | Windows | Pending | Pending | Pending | Pending |
