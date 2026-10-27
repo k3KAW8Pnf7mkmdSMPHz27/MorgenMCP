@@ -19,6 +19,21 @@ name, successful packaging, or a successful command-line launch.
 - API-key/read-only controls: manual inspection pending
 - Live Morgen API calls: not performed
 
+## Sigstore Actions trial
+
+- [Actions run 40576996109](https://github.com/k3KAW8Pnf7mkmdSMPHz27/MorgenMCP/actions/runs/40576996109): passed
+- Workflow: `.github/workflows/provenance-trial.yml`
+- Source ref: `refs/heads/improve-discovery-and-installation`
+- Commit: `0a268e5dc099f3ed559f24af721692dd05b7d75a`
+- Artifacts: wheel, source archive, `.mcpb`, and `SHA256SUMS`
+- Attestation: `application/vnd.dev.sigstore.bundle.v0.3+json`
+- Actions verified all four subjects and rejected a modified bundle
+- Downloaded `.mcpb` verified locally with GitHub CLI 2.102.0, including the
+  exact repository, trial workflow, branch, commit, and GitHub OIDC issuer
+- The trial created no GitHub Release and published nothing to PyPI
+- The separate attestation does not establish a Claude Desktop publisher display;
+  that installation check remains pending
+
 ## First attested release
 
 1. Download the `.mcpb` and `provenance.sigstore.json` from the same release.
