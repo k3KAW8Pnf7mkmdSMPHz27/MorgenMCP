@@ -1,9 +1,32 @@
 [project]
 name = "morgenmcp"
 dynamic = ["version"]
-description = "MCP server for Morgen calendar API"
+description = "Unofficial MCP server for the Morgen calendar API"
+readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.12"
+authors = [
+    { name = "The Morgen MCP Authors" },
+]
+keywords = [
+    "mcp",
+    "model-context-protocol",
+    "morgen",
+    "calendar",
+    "fastmcp",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Office/Business :: Scheduling",
+]
 dependencies = [
     "fastmcp>=3.4,<3.5",
     "httpx>=0.28",
@@ -11,6 +34,12 @@ dependencies = [
     "pydantic>=2.12",
     "tzdata>=2025.1",
 ]
+
+[project.urls]
+Homepage = "https://github.com/k3KAW8Pnf7mkmdSMPHz27/MorgenMCP"
+Repository = "https://github.com/k3KAW8Pnf7mkmdSMPHz27/MorgenMCP"
+Issues = "https://github.com/k3KAW8Pnf7mkmdSMPHz27/MorgenMCP/issues"
+Documentation = "https://github.com/k3KAW8Pnf7mkmdSMPHz27/MorgenMCP#readme"
 
 [project.optional-dependencies]
 dev = [
@@ -55,7 +84,7 @@ target-version = "py312"
 line-length = 88
 
 # ruff 0.16 formats Markdown code blocks; neither tree is ours to reformat.
-exclude = ["docs", ".claude"]
+exclude = ["docs", ".claude", "skills"]
 
 [tool.ruff.lint]
 select = [

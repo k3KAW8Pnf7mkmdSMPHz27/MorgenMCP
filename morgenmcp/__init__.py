@@ -1,4 +1,4 @@
-"""MCP server for Morgen calendar API."""
+"""Unofficial MCP server for the Morgen calendar API."""
 
 from __future__ import annotations
 

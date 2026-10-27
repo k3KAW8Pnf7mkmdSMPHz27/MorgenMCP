@@ -1,6 +1,9 @@
 # MorgenMCP
 
-An MCP server for the [Morgen](https://morgen.so) calendar API.
+An unofficial MCP server for the [Morgen](https://morgen.so) calendar API.
+
+> [!NOTE]
+> This is an independent, community-maintained project and is not affiliated with, endorsed by, or sponsored by Morgen AG. Morgen is a trademark of Morgen AG.
 
 ## Requirements
 
@@ -11,7 +14,7 @@ An MCP server for the [Morgen](https://morgen.so) calendar API.
 
 ## Installation
 
-No installation required — MCP clients run the server directly from GitHub.
+No installation required — MCP clients run the server directly via `uvx` (published on [PyPI](https://pypi.org/project/morgenmcp/)).
 
 Most clients use the same `mcpServers` JSON shape. Add this entry to your
 client's MCP configuration:
@@ -21,10 +24,7 @@ client's MCP configuration:
   "mcpServers": {
     "morgen": {
       "command": "uvx",
-      "args": [
-        "--from", "git+https://github.com/k3KAW8Pnf7mkmdSMPHz27/MorgenMCP@main",
-        "morgenmcp"
-      ],
+      "args": ["morgenmcp"],
       "env": {
         "MORGEN_API_KEY": "your_api_key_here"
       }
@@ -34,11 +34,11 @@ client's MCP configuration:
 ```
 
 The server speaks stdio, so no port or URL is involved. If your client asks for
-a command rather than JSON, it is `uvx` with those arguments and
+a command rather than JSON, it is `uvx morgenmcp` with
 `MORGEN_API_KEY` in the environment. If it cannot find `uvx`, see
 [Troubleshooting](#troubleshooting).
 
-To pin to a specific version, replace `@main` with a version tag (e.g., `@v0.1.0`).
+To pin to a specific version, pass the version in `args` (e.g. `["morgenmcp==0.2.1"]`). You can also run unreleased commits directly from GitHub: `["--from", "git+https://github.com/k3KAW8Pnf7mkmdSMPHz27/MorgenMCP@main", "morgenmcp"]`.
 
 ### Claude Desktop
 
@@ -171,11 +171,11 @@ Opens at http://localhost:6274
 Releases are managed via git tags:
 
 ```bash
-git tag -a v0.1.0 -m "Release v0.1.0"
-git push origin v0.1.0
+git tag -a v0.2.1 -m "Release v0.2.1"
+git push origin v0.2.1
 ```
 
-Users can then reference the specific version in their MCP client configuration.
+Pushing a tag triggers the GitHub Actions release workflow, which runs tests, builds wheel and sdist distributions, creates a GitHub Release, and publishes to PyPI automatically.
 
 ## Contributing
 
