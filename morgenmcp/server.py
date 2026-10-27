@@ -1,4 +1,4 @@
-"""FastMCP server for Morgen calendar API."""
+"""Unofficial FastMCP server for the Morgen calendar API."""
 
 from __future__ import annotations
 
@@ -193,7 +193,7 @@ mcp = FastMCP(
     lifespan=lifespan,
     on_duplicate="error",
     instructions=f"""
-    Morgen Calendar MCP Server provides access to Morgen's unified calendar,
+    Unofficial Morgen Calendar MCP Server provides access to Morgen's unified calendar,
     task, and tag API.
 
     All IDs are 7-character virtual IDs (e.g., "aB-9xZ_") for token efficiency.

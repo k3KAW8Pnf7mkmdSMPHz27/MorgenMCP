@@ -1,6 +1,9 @@
 # MorgenMCP
 
-An MCP server for the [Morgen](https://morgen.so) calendar API.
+An unofficial MCP server for the [Morgen](https://morgen.so) calendar API.
+
+> [!NOTE]
+> This is an independent, community-maintained project and is not affiliated with, endorsed by, or sponsored by Morgen AG. Morgen is a trademark of Morgen AG.
 
 ## Requirements
 

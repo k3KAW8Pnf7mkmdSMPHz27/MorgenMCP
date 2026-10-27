@@ -1,7 +1,7 @@
 [project]
 name = "morgenmcp"
 dynamic = ["version"]
-description = "MCP server for Morgen calendar API"
+description = "Unofficial MCP server for the Morgen calendar API"
 readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.12"
@@ -23,7 +23,8 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
-    "Topic :: Communications",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Office/Business :: Scheduling",
 ]
 dependencies = [
