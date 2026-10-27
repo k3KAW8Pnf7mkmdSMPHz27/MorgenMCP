@@ -83,8 +83,11 @@ See [GitHub CLI verification options](https://cli.github.com/manual/gh_attestati
 
 The `.mcpb` has Sigstore provenance in a separate file. It has no embedded MCPB
 CMS signature. Claude Desktop should not be described as recognizing a trusted
-publisher on the basis of this attestation; that behavior must be tested in the
-actual desktop client. The manifest's author field is descriptive metadata.
+publisher on the basis of this attestation. The observed macOS installer
+displays a warning that developer information has not been verified by Anthropic,
+while still offering installation. This does not establish whether an embedded
+CA-backed signature would change that warning. The manifest's author field is
+descriptive metadata.
 
 After provenance verification, open the bundle in Claude Desktop. Record the
 app version, operating system, any publisher or signature warning, whether

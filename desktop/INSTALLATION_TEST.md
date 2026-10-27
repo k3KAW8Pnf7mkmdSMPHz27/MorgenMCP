@@ -15,9 +15,27 @@ name, successful packaging, or a successful command-line launch.
 - Launcher: isolated uv dependency installation and `server.py --help` succeeded
 - Installation and publisher display: the bundle was opened with Claude Desktop,
   but macOS denied assistive access (`osascript` error -1728); manual inspection
-  is pending
+  was subsequently confirmed from a user-provided screenshot (see below)
 - API-key/read-only controls: manual inspection pending
 - Live Morgen API calls: not performed
+
+## User-observed installer screen
+
+A user-provided screenshot on 2026-10-27 confirms:
+
+- The MorgenMCP installer opens and reports **All requirements met**.
+- The **Install** button is available; completed installation is not established.
+- Claude displays a warning that installation grants access to the computer and
+  that developer information has not been verified by Anthropic.
+- The author is shown as **The Morgen MCP Authors**, with Apache-2.0 and version
+  `0.0.0`. No verified-publisher indicator is visible in this screen.
+- The generic icon and repeated short description make the initial presentation
+  sparse. The manifest has since gained a detailed description, setup guidance,
+  project links, and tool summaries; the updated rendering needs visual review.
+
+This observation does not establish whether a CA-backed embedded signature
+would alter Claude's warning. Sigstore provenance verification remains an
+external verification step.
 
 ## Sigstore Actions trial
 
@@ -37,7 +55,7 @@ name, successful packaging, or a successful command-line launch.
   also passed after updating the artifact uploader to Node.js 24
 - The trial created no GitHub Release and published nothing to PyPI
 - The separate attestation does not establish a Claude Desktop publisher display;
-  that installation check remains pending
+  the user-observed screen above records the initial installer presentation
 
 ## First attested release
 
@@ -52,5 +70,5 @@ name, successful packaging, or a successful command-line launch.
 
 | Platform | Attestation verification | Installation | Publisher display | Settings |
 |---|---|---|---|---|
-| macOS | Trial passed locally; release pending | Pending | Pending | Pending |
+| macOS | Trial passed locally; release pending | Installer opens; completion pending | Developer information unverified by Anthropic | Pending |
 | Windows | Pending | Pending | Pending | Pending |
