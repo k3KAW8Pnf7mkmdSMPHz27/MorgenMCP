@@ -12,7 +12,8 @@ WORKFLOW = ".github/workflows/release.yml"
 
 
 def verify_release(
-    artifacts: list[Path],
+    first_artifact: Path,
+    *artifacts: Path,
     bundle: Path,
     tag: str,
     commit: str,
@@ -24,12 +25,10 @@ def verify_release(
         raise ValueError("Expected the full 40-character release commit SHA")
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
         raise ValueError("Expected a GitHub owner/repository")
-    if not artifacts:
-        raise ValueError("At least one release artifact is required")
-    for path in [bundle, *artifacts]:
+    for path in (bundle, first_artifact, *artifacts):
         if not path.is_file() or not path.stat().st_size:
             raise ValueError(f"Missing or empty verification input: {path}")
-    for artifact in artifacts:
+    for artifact in (first_artifact, *artifacts):
         subprocess.run(
             [
                 "gh",
@@ -64,4 +63,10 @@ if __name__ == "__main__":
     parser.add_argument("--repository", default=REPOSITORY)
     parser.add_argument("artifacts", type=Path, nargs="+")
     args = parser.parse_args()
-    verify_release(args.artifacts, args.bundle, args.tag, args.commit, args.repository)
+    verify_release(
+        *args.artifacts,
+        bundle=args.bundle,
+        tag=args.tag,
+        commit=args.commit,
+        repository=args.repository,
+    )

@@ -26,6 +26,9 @@ def stage_bundle(wheel: Path, tag: str, destination: Path) -> None:
         metadata = BytesParser().parsebytes(archive.read(metadata_paths[0]))
     if metadata["Name"] != "morgenmcp" or metadata["Version"] != version:
         raise ValueError("Wheel name/version does not match the MorgenMCP release tag")
+    requires_python = metadata.get("Requires-Python")
+    if not requires_python:
+        raise ValueError("Wheel metadata must declare Requires-Python")
 
     # Use a fresh directory and an explicit allowlist, never the repository root.
     destination.mkdir(parents=True, exist_ok=False)
@@ -34,17 +37,21 @@ def stage_bundle(wheel: Path, tag: str, destination: Path) -> None:
     for name in ("LICENSE", "NOTICE"):
         shutil.copy2(ROOT / name, destination / name)
     shutil.copy2(ROOT / "desktop/server.py", destination / "server.py")
-    manifest = json.loads((ROOT / "desktop/manifest.json").read_text())
+    manifest = json.loads((ROOT / "desktop/manifest.json").read_text(encoding="utf-8"))
     manifest["version"] = version
-    (destination / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    manifest["compatibility"]["runtimes"] = {"python": requires_python}
+    (destination / "manifest.json").write_text(
+        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
     (destination / "pyproject.toml").write_text(
         "[project]\n"
         'name = "morgenmcp-desktop"\n'
         f'version = "{version}"\n'
-        'requires-python = ">=3.12"\n'
+        f"requires-python = {json.dumps(requires_python)}\n"
         f'dependencies = ["morgenmcp=={version}"]\n\n'
         "[tool.uv.sources]\n"
-        f'morgenmcp = {{ path = "wheels/{wheel.name}" }}\n'
+        f'morgenmcp = {{ path = "wheels/{wheel.name}" }}\n',
+        encoding="utf-8",
     )
 
 

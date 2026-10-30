@@ -4,7 +4,7 @@
   "display_name": "MorgenMCP",
   "version": "0.0.0",
   "description": "Connect Claude to your Morgen calendars, events, and tasks.",
-  "long_description": "Bring your Morgen day into Claude: check your schedule, review tasks, and manage calendar events in a conversation.\n\n### What you can do\n- See today's agenda and upcoming events across your Morgen calendars.\n- Review tasks, task lists, and tags.\n- Create and update events and tasks when read-only mode is off.\n\n### Get started\n1. Get your API key from the [Morgen Developer Portal](https://platform.morgen.so/developers-api).\n2. Install the extension and enter your key in its settings. Enable **Read-only mode** if you only want to view your data.\n3. Ask Claude: **“What is on my Morgen calendar today?”**\n\n### About the project\nMorgenMCP is open source and community maintained. It runs on your computer and connects to the Morgen API using your key. It is not affiliated with or endorsed by Morgen AG.\n\n[Setup guide](https://github.com/k3KAW8Pnf7mkmdSMPHz27/MorgenMCP#installation) · [Source code](https://github.com/k3KAW8Pnf7mkmdSMPHz27/MorgenMCP) · [Report a problem](https://github.com/k3KAW8Pnf7mkmdSMPHz27/MorgenMCP/issues)\n\nRelease downloads include signed build provenance. See [Verify a download](https://github.com/k3KAW8Pnf7mkmdSMPHz27/MorgenMCP/blob/main/desktop/RELEASING.md#verify-a-downloaded-bundle) for instructions.",
+  "long_description": "Bring your Morgen day into Claude: check your schedule, review tasks, and manage calendar events in a conversation.\n\n### What you can do\n- See today's agenda and upcoming events across your Morgen calendars.\n- Review tasks, task lists, and tags.\n- Create and update events and tasks when read-only mode is off.\n\n### Get started\n1. Get your API key from the [Morgen Developer Portal](https://platform.morgen.so/developers-api).\n2. Install the extension and enter your key in its settings. Enable **Read-only mode** if you only want to view your data.\n3. Ask Claude: **“What is on my Morgen calendar today?”**\n\n### About the project\nMorgenMCP is open source and community maintained. It runs on your computer and connects to the Morgen API using your key. It is not affiliated with or endorsed by Morgen AG.\n\n[Setup guide](https://github.com/k3KAW8Pnf7mkmdSMPHz27/MorgenMCP#installation) · [Source code](https://github.com/k3KAW8Pnf7mkmdSMPHz27/MorgenMCP) · [Report a problem](https://github.com/k3KAW8Pnf7mkmdSMPHz27/MorgenMCP/issues)\n\nRelease downloads include signed build provenance. See [Verify a download](https://github.com/k3KAW8Pnf7mkmdSMPHz27/MorgenMCP#verify-a-release-download) for instructions.",
   "author": {
     "name": "The Morgen MCP Authors",
     "url": "https://github.com/k3KAW8Pnf7mkmdSMPHz27/MorgenMCP/graphs/contributors"
@@ -32,10 +32,7 @@
     "platforms": [
       "darwin",
       "win32"
-    ],
-    "runtimes": {
-      "python": ">=3.12"
-    }
+    ]
   },
   "user_config": {
     "api_key": {

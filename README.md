@@ -297,9 +297,36 @@ git push origin v0.2.1
 Stable `vX.Y.Z` tags trigger the GitHub Actions release workflow, which runs
 tests, builds wheel and sdist distributions and a desktop bundle, and requires
 verified Sigstore provenance for every release artifact before publishing to
-PyPI and GitHub Releases. Releases include `provenance.sigstore.json` and
-`SHA256SUMS`. See [Release provenance](desktop/RELEASING.md) for download
-verification, GitHub configuration, and desktop installation testing.
+PyPI and GitHub Releases. The workflow uses the existing `pypi` environment
+and PyPI trusted publishing. Verified files are retained as an Actions artifact
+for 30 days if publication needs recovery.
+
+### Verify a release download
+
+Release assets include `provenance.sigstore.json` and `SHA256SUMS`. With a recent
+[GitHub CLI](https://cli.github.com/), replace `vX.Y.Z` below with your release:
+
+```sh
+REPO=k3KAW8Pnf7mkmdSMPHz27/MorgenMCP
+TAG=vX.Y.Z
+COMMIT="$(gh api "repos/$REPO/commits/$TAG" --jq .sha)"
+gh release download "$TAG" --repo "$REPO" --dir release-download \
+  --pattern '*.mcpb' --pattern provenance.sigstore.json
+
+gh attestation verify "release-download/morgenmcp-${TAG#v}.mcpb" \
+  --bundle release-download/provenance.sigstore.json \
+  --repo "$REPO" --signer-workflow "$REPO/.github/workflows/release.yml" \
+  --source-ref "refs/tags/$TAG" --source-digest "$COMMIT" \
+  --cert-oidc-issuer https://token.actions.githubusercontent.com \
+  --predicate-type https://slsa.dev/provenance/v1 --deny-self-hosted-runners
+```
+
+Proceed only if verification succeeds. Use a separately reviewed commit SHA
+for `COMMIT` if you want to pin it independently of the current GitHub tag.
+The same command can verify a downloaded wheel, source archive, or checksums file.
+Sigstore verifies build provenance; it does not confer Anthropic-verified
+publisher status in Claude Desktop. The manual `provenance-trial.yml` workflow
+exercises signing, verification, and tamper rejection without publishing a release.
 
 ## Contributing
 
