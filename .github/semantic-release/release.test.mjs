@@ -28,6 +28,7 @@ for (const [message, expected] of [
       HOME: process.env.HOME,
       TRIAL_DISPATCH_LOG: dispatchLog,
       GIT_CONFIG_NOSYSTEM: "1",
+      GIT_CONFIG_GLOBAL: "/dev/null",
       GIT_AUTHOR_NAME: "Release test",
       GIT_AUTHOR_EMAIL: "release-test@example.invalid",
       GIT_COMMITTER_NAME: "Release test",
@@ -38,7 +39,7 @@ for (const [message, expected] of [
       await mkdir(cwd);
       await mkdir(bin);
       await writeFile(join(bin, "gh"), '#!/bin/sh\nprintf "%s\\n" "$@" > "$TRIAL_DISPATCH_LOG"\n', {mode: 0o755});
-      git("init", "--bare", remote);
+      git("init", "--bare", "--initial-branch=main", remote);
       git("init", "--initial-branch=main");
       git("config", "commit.gpgsign", "false");
       git("config", "tag.gpgsign", "false");
