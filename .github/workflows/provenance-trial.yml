@@ -1,0 +1,90 @@
+name: Sigstore provenance trial
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  trial:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Install pinned bundle tooling
+        run: npm install --global --ignore-scripts @anthropic-ai/mcpb@2.1.2
+      - name: Build trial Python distributions
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION: '0.0.0'
+        run: uv build
+      - name: Stage and pack development bundle
+        run: |
+          set -euo pipefail
+          uv run --no-project python -m scripts.build_bundle \
+            --wheel dist/morgenmcp-0.0.0-py3-none-any.whl \
+            --tag v0.0.0 --destination build/desktop
+          mcpb validate build/desktop/manifest.json
+          mcpb pack build/desktop dist/morgenmcp-0.0.0.mcpb
+          (cd dist && sha256sum *.whl *.tar.gz *.mcpb > SHA256SUMS)
+      - name: Create trial Sigstore provenance
+        id: provenance
+        uses: actions/attest@v4
+        with:
+          create-storage-record: false
+          subject-path: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/*.mcpb
+            dist/SHA256SUMS
+      - name: Save and verify trial provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUNDLE_PATH: ${{ steps.provenance.outputs.bundle-path }}
+        run: |
+          set -euo pipefail
+          cp "$BUNDLE_PATH" dist/provenance.sigstore.json
+          for artifact in dist/*.whl dist/*.tar.gz dist/*.mcpb dist/SHA256SUMS; do
+            gh attestation verify "$artifact" \
+              --bundle dist/provenance.sigstore.json \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/provenance-trial.yml" \
+              --source-ref "$GITHUB_REF" --source-digest "$GITHUB_SHA" \
+              --cert-oidc-issuer https://token.actions.githubusercontent.com \
+              --predicate-type https://slsa.dev/provenance/v1 \
+              --deny-self-hosted-runners
+          done
+      - name: Require rejection of a modified bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cp dist/morgenmcp-0.0.0.mcpb "$RUNNER_TEMP/tampered.mcpb"
+          printf 'tampered' >> "$RUNNER_TEMP/tampered.mcpb"
+          if gh attestation verify "$RUNNER_TEMP/tampered.mcpb" \
+            --bundle dist/provenance.sigstore.json \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/provenance-trial.yml" \
+            --source-ref "$GITHUB_REF" --source-digest "$GITHUB_SHA" \
+            --cert-oidc-issuer https://token.actions.githubusercontent.com \
+            --predicate-type https://slsa.dev/provenance/v1 \
+            --deny-self-hosted-runners; then
+            echo 'ERROR: verifier accepted a modified bundle' >&2
+            exit 1
+          fi
+      - name: Upload verified trial files without publishing a release
+        uses: actions/upload-artifact@v7
+        with:
+          name: sigstore-provenance-trial
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
