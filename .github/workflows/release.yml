@@ -19,6 +19,12 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
+      - name: Validate stable release tag
+        run: |
+          if [[ ! "${{ github.ref_name }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Release workflow only supports stable vX.Y.Z tags. Got: ${{ github.ref_name }}"
+            exit 1
+          fi
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
       - run: uv sync --all-extras
@@ -33,6 +39,12 @@ jobs:
       id-token: write
       attestations: write
     steps:
+      - name: Validate stable release tag
+        run: |
+          if [[ ! "${{ github.ref_name }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Release workflow only supports stable vX.Y.Z tags. Got: ${{ github.ref_name }}"
+            exit 1
+          fi
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0

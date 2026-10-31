@@ -20,7 +20,7 @@ cloning this repository.
 
 | Client | Setup |
 |---|---|
-| Claude Desktop | [Configuration file](#claude-desktop) |
+| Claude Desktop | [Extension bundle or configuration file](#claude-desktop) |
 | Claude Code | [CLI command](#claude-code) |
 | Cursor | [Install button and configuration](#cursor) |
 | VS Code | [Install button and configuration](#vs-code) |
@@ -31,6 +31,19 @@ port is needed. If it cannot find `uvx`, use its absolute path as described in
 [Troubleshooting](#troubleshooting).
 
 ### Claude Desktop
+
+You can install MorgenMCP as a desktop extension bundle or configure it manually.
+
+#### Desktop extension (.mcpb)
+
+1. Download the `morgenmcp-X.Y.Z.mcpb` bundle from the latest [GitHub Release](https://github.com/k3KAW8Pnf7mkmdSMPHz27/MorgenMCP/releases).
+2. [Verify the download](#verify-a-release-download) against its signed Sigstore provenance.
+3. Open the `.mcpb` file in Claude Desktop.
+4. Enter your API key when prompted in the extension settings (and optionally enable **Read-only mode**).
+
+Claude displays an installation warning that developer info has not been verified by Anthropic; this is expected for community extensions. Then [verify the connection](#verify-the-connection).
+
+#### Manual configuration
 
 Open **Settings → Developer → Edit Config**. The file is
 `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS,

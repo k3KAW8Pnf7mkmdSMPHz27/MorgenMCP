@@ -132,3 +132,12 @@ def test_missing_bundle_fails_before_invoking_verifier(tmp_path: Path) -> None:
             tag="v1.2.3",
             commit="a" * 40,
         )
+
+
+@pytest.mark.parametrize("tag", ["v1.2.3rc1", "v1.2.3-beta", "1.2.3", "v1.2"])
+def test_verify_release_rejects_nonstable_tag(tmp_path: Path, tag: str) -> None:
+    artifact, bundle = tmp_path / "release.mcpb", tmp_path / "provenance.sigstore.json"
+    artifact.write_text("test fixture")
+    bundle.write_text("test fixture")
+    with pytest.raises(ValueError, match="stable release tag"):
+        verify_release(artifact, bundle=bundle, tag=tag, commit="a" * 40)
