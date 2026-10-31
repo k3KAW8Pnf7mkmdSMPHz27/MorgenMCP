@@ -1,0 +1,55 @@
+name: Semantic release
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+concurrency:
+  group: semantic-release-main
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+      - name: Skip stale CI runs
+        id: current
+        run: |
+          if [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]]; then
+            echo 'head=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'head=false' >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-node@v6
+        if: steps.current.outputs.head == 'true'
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: .github/semantic-release/package-lock.json
+      - name: Install release tooling
+        if: steps.current.outputs.head == 'true'
+        run: npm ci --ignore-scripts --prefix .github/semantic-release
+      - name: Test versioning before tagging
+        if: steps.current.outputs.head == 'true'
+        run: npm test --prefix .github/semantic-release
+      - name: Version and dispatch verified release
+        if: steps.current.outputs.head == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: .github/semantic-release/node_modules/.bin/semantic-release --extends ./.github/semantic-release/release.config.cjs
