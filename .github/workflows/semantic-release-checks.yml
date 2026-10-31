@@ -1,0 +1,23 @@
+name: Semantic release checks
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  release-tools:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: .github/semantic-release/package-lock.json
+      - run: npm ci --ignore-scripts --prefix .github/semantic-release
+      - run: npm test --prefix .github/semantic-release

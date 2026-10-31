@@ -300,12 +300,16 @@ Opens at http://localhost:6274
 
 ## Releasing
 
-Releases are managed via git tags:
+After main-branch CI passes, semantic-release reads Conventional Commits since
+the last release: `feat:` bumps the minor version, `fix:` bumps the patch,
+and `!` or `BREAKING CHANGE:` bumps the major version. Documentation and chores
+alone do not release. Use these prefixes on PR titles when squash merging.
 
-```bash
-git tag -a v0.2.1 -m "Release v0.2.1"
-git push origin v0.2.1
-```
+The automation creates a stable version tag and explicitly dispatches the release
+workflow at that tag using `GITHUB_TOKEN`; no additional release secret is needed.
+Manual stable tag pushes remain supported. If dispatch or publication fails after
+a tag was created, retry that tag with `gh workflow run release.yml --ref vX.Y.Z`
+rather than creating another version.
 
 Stable `vX.Y.Z` tags trigger the GitHub Actions release workflow, which runs
 tests, builds wheel and sdist distributions and a desktop bundle, and requires
