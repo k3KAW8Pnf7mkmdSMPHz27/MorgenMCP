@@ -1,0 +1,40 @@
+name: Desktop bundle checks
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Install pinned bundle tooling
+        run: npm install --global --ignore-scripts @anthropic-ai/mcpb@2.1.2
+      - run: uv sync --all-extras
+      - name: Test staging and provenance verification gate
+        run: uv run pytest tests/test_release_bundle.py
+      - name: Build a development wheel for packaging checks
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION: '0.0.0'
+        run: uv build --wheel
+      - name: Validate and pack development bundle
+        run: |
+          set -euo pipefail
+          wheels=(dist/*.whl)
+          test "${#wheels[@]}" -eq 1
+          uv run python -m scripts.build_bundle \
+            --wheel "${wheels[0]}" --tag v0.0.0 --destination build/desktop
+          mcpb validate build/desktop/manifest.json
+          mcpb pack build/desktop build/development.mcpb
+      - name: Check isolated bundle launcher without API calls
+        run: uv run --directory build/desktop server.py --help
