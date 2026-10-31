@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import sys
 import tomllib
 import zipfile
 from pathlib import Path
 
 import pytest
+import yaml
 
 from scripts.build_bundle import ROOT, stage_bundle
 from scripts.verify_release import verify_release
@@ -141,3 +144,36 @@ def test_verify_release_rejects_nonstable_tag(tmp_path: Path, tag: str) -> None:
     bundle.write_text("test fixture")
     with pytest.raises(ValueError, match="stable release tag"):
         verify_release(artifact, bundle=bundle, tag=tag, commit="a" * 40)
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="Release guards run in Bash on Ubuntu"
+)
+@pytest.mark.parametrize(
+    ("tag", "expected_status"),
+    [
+        ("v1.2.3", 0),
+        ("v1.2.3rc1", 1),
+        ("1.2.3", 1),
+        ("v$(touch${IFS}injected;printf${IFS}1.2.3)", 1),
+        ("v`touch${IFS}injected;printf${IFS}1.2.3`", 1),
+    ],
+)
+def test_workflow_tag_guards_do_not_execute_tag_contents(
+    tmp_path: Path, tag: str, expected_status: int
+) -> None:
+    workflow = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text())
+    for job in ("test", "release"):
+        # Reproduce Actions substitution too, so direct interpolation regresses.
+        script = workflow["jobs"][job]["steps"][0]["run"].replace(
+            "${{ github.ref_name }}", tag
+        )
+        result = subprocess.run(
+            ["bash", "-e", "-c", script],
+            cwd=tmp_path,
+            env={**os.environ, "GITHUB_REF_NAME": tag},
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == expected_status, result.stderr
+        assert not (tmp_path / "injected").exists()
