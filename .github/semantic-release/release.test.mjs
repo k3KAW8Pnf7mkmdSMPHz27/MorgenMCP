@@ -12,10 +12,11 @@ const configPath = fileURLToPath(new URL("./release.config.cjs", import.meta.url
 for (const [message, expected] of [
   ["feat: add calendar search", "0.3.0"],
   ["fix: correct event parsing", "0.2.2"],
-  ["feat!: remove an old tool", "1.0.0"],
+  ["feat!: remove an old tool", "0.3.0"],
   ["docs: clarify setup", null],
   ["chore: update tooling", null],
-  ["fix: change output\n\nBREAKING CHANGE: remove a field", "1.0.0"],
+  ["fix: change output\n\nBREAKING CHANGE: remove a field", "0.3.0"],
+  ["docs: explain removal\n\nBREAKING CHANGE: remove an old tool", "0.3.0"],
 ]) {
   test(message, async () => {
     const root = await mkdtemp(join(tmpdir(), "morgenmcp-version-"));
