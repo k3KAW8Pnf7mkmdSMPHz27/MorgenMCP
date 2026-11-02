@@ -28,12 +28,9 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
-      - uses: astral-sh/setup-uv@v7
-        with:
-          python-version: '3.12'
       - name: Version and dispatch verified release
         env:
           GH_TOKEN: ${{ github.token }}
           GIT_COMMITTER_NAME: github-actions[bot]
           GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
-        run: uv run --no-project --no-config --python 3.12 python -m scripts.release_tag
+        run: python3 -m scripts.release_tag
