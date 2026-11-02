@@ -51,6 +51,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
+      - name: Install locked bundle tooling
+        run: npm ci --ignore-scripts --prefix .github/mcpb
       - name: Build a development wheel for packaging checks
         env:
           SETUPTOOLS_SCM_PRETEND_VERSION: '0.0.0'
@@ -62,7 +64,6 @@ jobs:
           test "${#wheels[@]}" -eq 1
           python3 -m scripts.build_bundle \
             --wheel "${wheels[0]}" --tag v0.0.0 --destination build/desktop
-          npm exec --yes --ignore-scripts --package=@anthropic-ai/mcpb@2.1.2 -- \
-            mcpb pack build/desktop build/development.mcpb
+          .github/mcpb/node_modules/.bin/mcpb pack build/desktop build/development.mcpb
       - name: Check isolated bundle launcher without API calls
         run: uv run --directory build/desktop server.py --help

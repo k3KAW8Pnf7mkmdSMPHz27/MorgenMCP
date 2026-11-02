@@ -18,6 +18,8 @@ jobs:
         with:
           fetch-depth: 0
       - uses: astral-sh/setup-uv@v7
+      - name: Install locked bundle tooling
+        run: npm ci --ignore-scripts --prefix .github/mcpb
       - name: Build trial Python distributions
         env:
           SETUPTOOLS_SCM_PRETEND_VERSION: '0.0.0'
@@ -28,8 +30,7 @@ jobs:
           python3 -m scripts.build_bundle \
             --wheel dist/morgenmcp-0.0.0-py3-none-any.whl \
             --tag v0.0.0 --destination build/desktop
-          npm exec --yes --ignore-scripts --package=@anthropic-ai/mcpb@2.1.2 -- \
-            mcpb pack build/desktop dist/morgenmcp-0.0.0.mcpb
+          .github/mcpb/node_modules/.bin/mcpb pack build/desktop dist/morgenmcp-0.0.0.mcpb
           (cd dist && sha256sum *.whl *.tar.gz *.mcpb > SHA256SUMS)
       - name: Create trial Sigstore provenance
         id: provenance

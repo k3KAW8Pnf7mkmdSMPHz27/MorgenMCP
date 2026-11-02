@@ -56,6 +56,8 @@ jobs:
           fetch-depth: 0
       - uses: astral-sh/setup-uv@v7
 
+      - name: Install locked bundle tooling
+        run: npm ci --ignore-scripts --prefix .github/mcpb
       - name: Build sdist and wheel
         run: uv build
 
@@ -68,8 +70,7 @@ jobs:
           test "${#wheels[@]}" -eq 1
           python3 -m scripts.build_bundle \
             --wheel "${wheels[0]}" --tag "$RELEASE_TAG" --destination build/desktop
-          npm exec --yes --ignore-scripts --package=@anthropic-ai/mcpb@2.1.2 -- \
-            mcpb pack build/desktop "dist/morgenmcp-${RELEASE_TAG#v}.mcpb"
+          .github/mcpb/node_modules/.bin/mcpb pack build/desktop "dist/morgenmcp-${RELEASE_TAG#v}.mcpb"
 
       - name: Checksum final release files
         working-directory: dist
