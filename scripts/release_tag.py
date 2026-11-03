@@ -5,40 +5,86 @@ from __future__ import annotations
 import argparse
 import re
 import subprocess
+from enum import IntEnum
+from typing import NamedTuple
 
-VERSION = re.compile(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
-HEADER = re.compile(r"([a-z]+)(?:\([^()\r\n]+\))?(!)?: [^\r\n]+")
+VERSION = re.compile(
+    r"v(?P<major>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)\.(?P<patch>0|[1-9]\d*)"
+)
+HEADER = re.compile(r"(?P<type>[a-z]+)(?:\([^()\r\n]+\))?(?P<breaking>!)?: [^\r\n]+")
 BREAKING = re.compile(r"^BREAKING(?: CHANGE|-CHANGE):[ \t]+\S", re.MULTILINE)
 
 
+class Bump(IntEnum):
+    NONE = 0
+    PATCH = 1
+    MINOR = 2
+    MAJOR = 3
+
+
+class Version(NamedTuple):
+    major: int
+    minor: int
+    patch: int
+
+    @classmethod
+    def parse(cls, tag: str) -> Version:
+        match = VERSION.fullmatch(tag)
+        if not match:
+            raise ValueError("Expected a stable vX.Y.Z release tag")
+        return cls(int(match["major"]), int(match["minor"]), int(match["patch"]))
+
+    def bump_major(self) -> Version:
+        return Version(self.major + 1, 0, 0)
+
+    def bump_minor(self) -> Version:
+        return Version(self.major, self.minor + 1, 0)
+
+    def bump_patch(self) -> Version:
+        return Version(self.major, self.minor, self.patch + 1)
+
+    def to_tag(self) -> str:
+        return f"v{self.major}.{self.minor}.{self.patch}"
+
+
 def run(*args: str) -> str:
-    return subprocess.check_output(
-        args, text=True, encoding="utf-8", errors="replace"
-    ).strip()
+    result = subprocess.run(
+        args,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    return result.stdout.strip()
 
 
 def next_tag(latest: str, messages: list[str]) -> str | None:
-    match = VERSION.fullmatch(latest)
-    if not match:
-        raise ValueError("Expected a stable vX.Y.Z release tag")
-    major, minor, patch = map(int, match.groups())
-    bump = 0
+    version = Version.parse(latest)
+    bump = Bump.NONE
+
     for message in messages:
         message = message.strip()
         header = HEADER.fullmatch(message.split("\n", 1)[0])
         if not header:
             continue
-        if header[2] or BREAKING.search(message):
-            bump = max(bump, 3 if major else 2)
-        elif header[1] == "feat":
-            bump = max(bump, 2)
-        elif header[1] == "fix":
-            bump = max(bump, 1)
-    if bump == 3:
-        return f"v{major + 1}.0.0"
-    if bump == 2:
-        return f"v{major}.{minor + 1}.0"
-    return f"v{major}.{minor}.{patch + 1}" if bump else None
+
+        if header.group("breaking") or BREAKING.search(message):
+            bump = max(bump, Bump.MAJOR if version.major else Bump.MINOR)
+        elif header.group("type") == "feat":
+            bump = max(bump, Bump.MINOR)
+        elif header.group("type") == "fix":
+            bump = max(bump, Bump.PATCH)
+
+    match bump:
+        case Bump.MAJOR:
+            return version.bump_major().to_tag()
+        case Bump.MINOR:
+            return version.bump_minor().to_tag()
+        case Bump.PATCH:
+            return version.bump_patch().to_tag()
+        case Bump.NONE:
+            return None
 
 
 def release_tag(*, dry_run: bool = False) -> str | None:
@@ -47,19 +93,23 @@ def release_tag(*, dry_run: bool = False) -> str | None:
     if commit != run("git", "rev-parse", "FETCH_HEAD"):
         print("Skipping stale CI run: tested commit is no longer origin/main.")
         return None
+
     tags = run("git", "tag", "--merged", commit, "--list", "v*").splitlines()
     stable = [tag for tag in tags if VERSION.fullmatch(tag)]
     if not stable:
         raise ValueError("No reachable stable release tag; seed vX.Y.Z manually first")
-    latest = max(stable, key=lambda tag: tuple(map(int, tag[1:].split("."))))
+
+    latest = max(stable, key=Version.parse)
     messages = run("git", "log", f"{latest}..{commit}", "--format=%B%x00").split("\0")
     tag = next_tag(latest, messages)
+
     if tag is None:
         print(
             f"No new release since {latest}. To retry publication of that tag: "
             f"gh workflow run release.yml --ref {latest}"
         )
         return None
+
     print(f"Next release: {latest} -> {tag} at {commit}")
     if not dry_run:
         run("git", "tag", "-a", tag, commit, "-m", f"Release {tag}")
@@ -69,6 +119,7 @@ def release_tag(*, dry_run: bool = False) -> str | None:
             run("git", "tag", "-d", tag)
             raise
         run("gh", "workflow", "run", "release.yml", "--ref", tag)
+
     return tag
 
 
