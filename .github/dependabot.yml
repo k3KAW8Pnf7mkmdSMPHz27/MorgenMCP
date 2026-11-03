@@ -30,14 +30,3 @@ updates:
     groups:
       actions:
         patterns: ["*"]
-
-  - package-ecosystem: npm
-    directory: /.github/mcpb
-    schedule:
-      interval: monthly
-    open-pull-requests-limit: 3
-    commit-message:
-      prefix: "chore(deps)"
-    groups:
-      mcpb:
-        patterns: ["*"]
