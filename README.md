@@ -300,20 +300,16 @@ Opens at http://localhost:6274
 
 ## Releasing
 
-After main-branch CI (including desktop bundle checks) passes,
-`scripts/release_tag.py` reads Conventional Commits since the last release:
-`feat:` bumps the minor
-version, `fix:` bumps the patch, and `!` or `BREAKING CHANGE:` bumps the minor
-version while the project is below 1.0. Starting 1.0 requires an explicit manual
-release; breaking changes bump the major version thereafter.
-Documentation and chores alone do not release. Use these prefixes on PR titles
-when squash merging.
+After main-branch CI (including desktop bundle checks) passes, Conventional
+Commits determine the next release: `feat:` bumps minor and `fix:` bumps patch.
+Breaking changes (`!` or `BREAKING CHANGE:`) bump minor below 1.0 and major
+thereafter; start 1.0 with a deliberate manual release. Other commits do not
+release. Use these prefixes on PR titles when squash merging.
 
-The automation creates an annotated stable version tag and explicitly dispatches
-the release workflow at that tag using `GITHUB_TOKEN`; no additional release secret is needed.
-Manual stable tag pushes remain supported. If dispatch or publication fails after
-a tag was created, retry that tag with `gh workflow run release.yml --ref vX.Y.Z`
-rather than creating another version.
+The automation creates an annotated tag and dispatches `release.yml` using
+`GITHUB_TOKEN`. Manual stable tag pushes also work. If dispatch or publication
+fails after tagging, retry with `gh workflow run release.yml --ref vX.Y.Z`
+instead of creating another version.
 
 Stable `vX.Y.Z` tags trigger the GitHub Actions release workflow, which runs
 tests, builds wheel and sdist distributions and a desktop bundle, and requires
