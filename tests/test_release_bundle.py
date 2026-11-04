@@ -150,17 +150,18 @@ def test_verify_release_rejects_nonstable_tag(tmp_path: Path, tag: str) -> None:
     sys.platform == "win32", reason="Release guards run in Bash on Ubuntu"
 )
 @pytest.mark.parametrize(
-    ("tag", "expected_status"),
+    ("tag", "ref_type", "expected_status"),
     [
-        ("v1.2.3", 0),
-        ("v1.2.3rc1", 1),
-        ("1.2.3", 1),
-        ("v$(touch${IFS}injected;printf${IFS}1.2.3)", 1),
-        ("v`touch${IFS}injected;printf${IFS}1.2.3`", 1),
+        ("v1.2.3", "tag", 0),
+        ("v1.2.3", "branch", 1),
+        ("v1.2.3rc1", "tag", 1),
+        ("1.2.3", "tag", 1),
+        ("v$(touch${IFS}injected;printf${IFS}1.2.3)", "tag", 1),
+        ("v`touch${IFS}injected;printf${IFS}1.2.3`", "tag", 1),
     ],
 )
 def test_workflow_tag_guards_do_not_execute_tag_contents(
-    tmp_path: Path, tag: str, expected_status: int
+    tmp_path: Path, tag: str, ref_type: str, expected_status: int
 ) -> None:
     workflow = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text())
     for job in ("test", "release"):
@@ -171,7 +172,7 @@ def test_workflow_tag_guards_do_not_execute_tag_contents(
         result = subprocess.run(
             ["bash", "-e", "-c", script],
             cwd=tmp_path,
-            env={**os.environ, "GITHUB_REF_NAME": tag},
+            env={**os.environ, "GITHUB_REF_NAME": tag, "GITHUB_REF_TYPE": ref_type},
             capture_output=True,
             text=True,
         )

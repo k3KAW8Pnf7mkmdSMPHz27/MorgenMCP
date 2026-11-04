@@ -300,12 +300,16 @@ Opens at http://localhost:6274
 
 ## Releasing
 
-Releases are managed via git tags:
+After main-branch CI (including desktop bundle checks) passes, Conventional
+Commits determine the next release: `feat:` bumps minor and `fix:` bumps patch.
+Breaking changes (`!` or `BREAKING CHANGE:`) bump minor below 1.0 and major
+thereafter; start 1.0 with a deliberate manual release. Other commits do not
+release. Use these prefixes on PR titles when squash merging.
 
-```bash
-git tag -a v0.2.1 -m "Release v0.2.1"
-git push origin v0.2.1
-```
+The automation creates an annotated tag and dispatches `release.yml` using
+`GITHUB_TOKEN`. Manual stable tag pushes also work. If dispatch or publication
+fails after tagging, retry with `gh workflow run release.yml --ref vX.Y.Z`
+instead of creating another version.
 
 Stable `vX.Y.Z` tags trigger the GitHub Actions release workflow, which runs
 tests, builds wheel and sdist distributions and a desktop bundle, and requires

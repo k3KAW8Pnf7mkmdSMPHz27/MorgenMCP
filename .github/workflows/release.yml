@@ -1,6 +1,7 @@
 name: Release
 
 on:
+  workflow_dispatch:
   push:
     tags:
       - 'v*'
@@ -12,15 +13,16 @@ concurrency:
 permissions:
   contents: read
 
-env:
-  MCPB_VERSION: '2.1.2'
-
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - name: Validate stable release tag
         run: |
+          if [[ "$GITHUB_REF_TYPE" != tag ]]; then
+            echo "::error::Release workflow requires a tag reference."
+            exit 1
+          fi
           if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::Release workflow only supports stable vX.Y.Z tags. Got: $GITHUB_REF_NAME"
             exit 1
@@ -41,6 +43,10 @@ jobs:
     steps:
       - name: Validate stable release tag
         run: |
+          if [[ "$GITHUB_REF_TYPE" != tag ]]; then
+            echo "::error::Release workflow requires a tag reference."
+            exit 1
+          fi
           if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::Release workflow only supports stable vX.Y.Z tags. Got: $GITHUB_REF_NAME"
             exit 1
@@ -49,11 +55,6 @@ jobs:
         with:
           fetch-depth: 0
       - uses: astral-sh/setup-uv@v7
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '22'
-      - name: Install pinned bundle tooling
-        run: npm install --global --ignore-scripts "@anthropic-ai/mcpb@$MCPB_VERSION"
 
       - name: Build sdist and wheel
         run: uv build
@@ -65,10 +66,10 @@ jobs:
           set -euo pipefail
           wheels=(dist/*.whl)
           test "${#wheels[@]}" -eq 1
-          uv run --no-project python -m scripts.build_bundle \
+          python3 -m scripts.build_bundle \
             --wheel "${wheels[0]}" --tag "$RELEASE_TAG" --destination build/desktop
-          mcpb validate build/desktop/manifest.json
-          mcpb pack build/desktop "dist/morgenmcp-${RELEASE_TAG#v}.mcpb"
+          npm exec --yes --ignore-scripts --package=@anthropic-ai/mcpb@2 -- \
+            mcpb pack build/desktop "dist/morgenmcp-${RELEASE_TAG#v}.mcpb"
 
       - name: Checksum final release files
         working-directory: dist
@@ -96,7 +97,7 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
           RELEASE_COMMIT: ${{ github.sha }}
         run: |
-          uv run --no-project python -m scripts.verify_release \
+          python3 -m scripts.verify_release \
             --bundle dist/provenance.sigstore.json \
             --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" \
             --repository "$GITHUB_REPOSITORY" \

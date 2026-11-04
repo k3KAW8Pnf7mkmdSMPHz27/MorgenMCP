@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ${{ matrix.os }}
@@ -41,3 +44,25 @@ jobs:
 
       - name: Run tests
         run: uv run pytest
+
+  bundle:
+    name: Desktop bundle checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - name: Build a development wheel for packaging checks
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION: '0.0.0'
+        run: uv build --wheel
+      - name: Validate and pack development bundle
+        run: |
+          set -euo pipefail
+          wheels=(dist/*.whl)
+          test "${#wheels[@]}" -eq 1
+          python3 -m scripts.build_bundle \
+            --wheel "${wheels[0]}" --tag v0.0.0 --destination build/desktop
+          npm exec --yes --ignore-scripts --package=@anthropic-ai/mcpb@2 -- \
+            mcpb pack build/desktop build/development.mcpb
+      - name: Check isolated bundle launcher without API calls
+        run: uv run --directory build/desktop server.py --help

@@ -18,11 +18,6 @@ jobs:
         with:
           fetch-depth: 0
       - uses: astral-sh/setup-uv@v7
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '22'
-      - name: Install pinned bundle tooling
-        run: npm install --global --ignore-scripts @anthropic-ai/mcpb@2.1.2
       - name: Build trial Python distributions
         env:
           SETUPTOOLS_SCM_PRETEND_VERSION: '0.0.0'
@@ -30,11 +25,11 @@ jobs:
       - name: Stage and pack development bundle
         run: |
           set -euo pipefail
-          uv run --no-project python -m scripts.build_bundle \
+          python3 -m scripts.build_bundle \
             --wheel dist/morgenmcp-0.0.0-py3-none-any.whl \
             --tag v0.0.0 --destination build/desktop
-          mcpb validate build/desktop/manifest.json
-          mcpb pack build/desktop dist/morgenmcp-0.0.0.mcpb
+          npm exec --yes --ignore-scripts --package=@anthropic-ai/mcpb@2 -- \
+            mcpb pack build/desktop dist/morgenmcp-0.0.0.mcpb
           (cd dist && sha256sum *.whl *.tar.gz *.mcpb > SHA256SUMS)
       - name: Create trial Sigstore provenance
         id: provenance
