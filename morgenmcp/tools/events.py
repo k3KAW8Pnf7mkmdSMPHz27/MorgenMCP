@@ -76,6 +76,44 @@ def _tz_label(dt: datetime, tz: tzinfo) -> str:
     return f"{abbrev} ({iana})"
 
 
+def _classify_event(event: Event) -> str:
+    """Return a ``" kind"`` suffix rendered INSIDE the ID brackets, or ``""``.
+
+    The caller emits ``[{virtual_id}{kind}]``, e.g. ``[aB-9xZ_ task,free]``.
+
+    Ordinary busy events get no tag: they are the large majority of any listing,
+    and compact output exists to save tokens. A tag marks an item the client
+    should *not* treat as a hard commitment.
+
+    ``task`` and ``routine`` are mutually exclusive upstream: creating an event
+    with both ``canBeCompleted`` and a ``taskId`` is rejected with HTTP 400,
+    "An event with canBeCompleted cannot have a taskId" (reproduced against the
+    live API 2026-09-11). The fallthrough order therefore matches the API's own
+    constraint, and the ``elif`` chain is a belt-and-braces tiebreak rather than
+    a case Morgen can actually produce. A "routine" is Morgen's recurring
+    check-off-able block (https://www.morgen.so/routines), displayed like a task
+    but carrying no task ID. ``flexible`` marks a Morgen auto-scheduled block,
+    which can be moved.
+
+    Completing a routine does NOT clear the tag: a checked-off routine keeps
+    ``canBeCompleted=True`` and sets ``progress="completed"`` (verified live).
+    The tag says what the item is; ``progress`` says whether it is done.
+
+    No space after the comma, so the bracket content stays two tokens at most.
+    """
+    meta = event.metadata
+    parts: list[str] = []
+    if meta and meta.task_id:
+        parts.append("task")
+    elif meta and meta.can_be_completed:
+        parts.append("routine")
+    elif meta and meta.is_auto_scheduled:
+        parts.append("flexible")
+    if event.free_busy_status == "free":
+        parts.append("free")
+    return f" {','.join(parts)}" if parts else ""
+
+
 def _format_compact_event(event: Event, display_tz: tzinfo) -> str:
     """Format an event as a compact one-liner: ``"Jul 15 09:15-10:00 CDT (America/Chicago): Title [id]"``.
 
@@ -84,9 +122,21 @@ def _format_compact_event(event: Event, display_tz: tzinfo) -> str:
     `display_tz` and tagged with the abbreviation plus IANA name. Floating
     events (no source timezone) are tagged "(floating)" and not converted.
     All-day events use ``"MMM DD (all-day)"`` form.
+
+    A kind tag may appear INSIDE the ID brackets (see ``_classify_event``):
+    ``[id task]``, ``routine``, ``flexible``, ``free``, or a pair such as
+    ``[id task,free]``. An untagged line is an ordinary busy commitment -- the
+    common case, left untagged to keep compact output cheap.
+
+    Parsing note: match the trailing ``[<7-char id>( <tag>)?]`` anchored at end
+    of line. The tag lives inside the brackets so that a title cannot spoof it:
+    with the tag outside, a title ending in ``{free}`` on a busy event rendered
+    byte-identically to a genuinely free event, which would lead a client to
+    schedule over a hard conflict.
     """
     virtual_id = register_id(event.id)
     title = event.title or "(No title)"
+    kind = _classify_event(event)
 
     if event.show_without_time:
         # All-day event: "Jul 15 (all-day): Holiday [abc123]"
@@ -95,7 +145,7 @@ def _format_compact_event(event: Event, display_tz: tzinfo) -> str:
             date_str = dt.strftime("%b %d")
         except (ValueError, TypeError):
             date_str = event.start
-        return f"{date_str} (all-day): {title} [{virtual_id}]"
+        return f"{date_str} (all-day): {title} [{virtual_id}{kind}]"
 
     try:
         start_naive = datetime.fromisoformat(event.start)
@@ -120,12 +170,15 @@ def _format_compact_event(event: Event, display_tz: tzinfo) -> str:
             end_str = end_naive.strftime("%H:%M")
             cross = end_naive.date() != start_naive.date()
             end_label = f"{end_naive.strftime('%b %d')} {end_str}" if cross else end_str
-            return f"{date_prefix} {start_str}-{end_label} (floating): {title} [{virtual_id}]"
+            return (
+                f"{date_prefix} {start_str}-{end_label} (floating): "
+                f"{title} [{virtual_id}{kind}]"
+            )
 
         try:
             source_tz = ZoneInfo(event.time_zone)
         except Exception:
-            return f"{event.start} {event.time_zone}: {title} [{virtual_id}]"
+            return f"{event.start} {event.time_zone}: {title} [{virtual_id}{kind}]"
 
         start_dt = start_naive.replace(tzinfo=source_tz).astimezone(display_tz)
         end_dt = end_naive.replace(tzinfo=source_tz).astimezone(display_tz)
@@ -137,10 +190,10 @@ def _format_compact_event(event: Event, display_tz: tzinfo) -> str:
         end_label = f"{end_dt.strftime('%b %d')} {end_str}" if cross else end_str
         return (
             f"{date_prefix} {start_str}-{end_label} {_tz_label(start_dt, display_tz)}: "
-            f"{title} [{virtual_id}]"
+            f"{title} [{virtual_id}{kind}]"
         )
     except (ValueError, TypeError):
-        return f"{event.start}: {title} [{virtual_id}]"
+        return f"{event.start}: {title} [{virtual_id}{kind}]"
 
 
 def _format_recurrence_rule(rule: Any) -> dict[str, Any]:
@@ -214,6 +267,9 @@ def _format_full_event(event: Event) -> EventItem:
                 "taskId": register_id(metadata.task_id)
                 if metadata and metadata.task_id
                 else None,
+                "progress": metadata.progress if metadata else None,
+                "canBeCompleted": metadata.can_be_completed if metadata else None,
+                "isAutoScheduled": metadata.is_auto_scheduled if metadata else None,
                 "virtualRoomUrl": (
                     event.derived.virtual_room.url
                     if event.derived and event.derived.virtual_room
@@ -243,7 +299,13 @@ async def list_events(
         end: End of time window in LocalDateTime format. Max 6 months from start.
         calendar_ids: Optional list of virtual calendar IDs. If omitted, queries all calendars.
         compact: If True, returns compact one-liner format to reduce tokens.
-            Format: "09:15-10:00 CDT (America/Chicago): Meeting [event_id]"
+            Format: "Jul 15 09:15-10:00 CDT (America/Chicago): Meeting [event_id]"
+            A kind tag may appear inside the ID brackets, e.g.
+            "[abc123 task]": task (linked to a Morgen task), routine (a
+            check-off-able Morgen Routine), flexible (Morgen auto-scheduled, so
+            movable), free (does not mark you busy), or a pair like
+            "[abc123 task,free]". No tag means an ordinary busy commitment.
+            Only task/routine/flexible are mutually exclusive.
         display_timezone: Optional IANA timezone (e.g. "America/Chicago") used to
             render compact times. Defaults to the MORGENMCP_DISPLAY_TZ env var,
             or the system local timezone if unset. Only affects compact=True
