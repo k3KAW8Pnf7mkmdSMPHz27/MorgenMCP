@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
@@ -44,10 +45,24 @@ def test_major_releases_only_after_manual_one_point_zero() -> None:
     assert release_tag.next_tag("v1.2.3", ["fix!: remove a field"]) == "v2.0.0"
 
 
-@pytest.mark.parametrize("tag", ["v01.2.3", "v1.2.3rc1", "1.2.3", "v1.2"])
+@pytest.mark.parametrize(
+    "tag",
+    ["v01.2.3", "v1.2.3rc1", "1.2.3", "v1.2", "v1٢.2.3", "v1.2٢.3", "v1.2.3٢"],
+)
 def test_invalid_baseline(tag: str) -> None:
     with pytest.raises(ValueError, match="stable"):
         release_tag.next_tag(tag, ["feat: search"])
+
+
+def test_run_preserves_failure_diagnostics(capfd: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(subprocess.CalledProcessError) as error:
+        release_tag.run(
+            sys.executable,
+            "-c",
+            "import sys; print('command failed', file=sys.stderr); sys.exit(7)",
+        )
+    assert error.value.returncode == 7
+    assert "command failed" in capfd.readouterr().err
 
 
 @pytest.fixture
@@ -127,7 +142,7 @@ def test_dry_run_does_not_tag_or_dispatch(
 def test_latest_reachable_stable_version_is_numeric(
     repo: Callable[..., str], dispatch: list[tuple[str, ...]]
 ) -> None:
-    for tag in ("v0.9.0", "v0.10.0", "v9.0.0rc1"):
+    for tag in ("v0.9.0", "v0.10.0", "v9.0.0rc1", "v9٩.0.0"):
         repo("tag", tag)
     repo("push", "origin", "--tags")
     repo("switch", "-c", "unreleased")

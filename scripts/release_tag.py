@@ -9,7 +9,8 @@ from enum import IntEnum
 from typing import NamedTuple
 
 VERSION = re.compile(
-    r"v(?P<major>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)\.(?P<patch>0|[1-9]\d*)"
+    r"v(?P<major>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)\.(?P<patch>0|[1-9]\d*)",
+    re.ASCII,
 )
 HEADER = re.compile(r"(?P<type>[a-z]+)(?:\([^()\r\n]+\))?(?P<breaking>!)?: [^\r\n]+")
 BREAKING = re.compile(r"^BREAKING(?: CHANGE|-CHANGE):[ \t]+\S", re.MULTILINE)
@@ -51,7 +52,7 @@ def run(*args: str) -> str:
     result = subprocess.run(
         args,
         check=True,
-        capture_output=True,
+        stdout=subprocess.PIPE,
         text=True,
         encoding="utf-8",
         errors="replace",
