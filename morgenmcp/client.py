@@ -507,14 +507,14 @@ class MorgenClient:
         )
         return data.tasks
 
-    async def get_task(self, task_id: str) -> Task:
+    async def get_task(self, task_id: str) -> Task | None:
         """Retrieve a single task by ID.
 
         Args:
             task_id: The Morgen ID of the task.
 
         Returns:
-            The Task object.
+            The Task object, or None if the task does not exist or is not owned.
         """
         response = await self.client.get("/tasks", params={"id": task_id})
         self._handle_error(response)

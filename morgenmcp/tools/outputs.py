@@ -281,6 +281,7 @@ class TaskItem(TypedDict):
     scheduled: NotRequired[bool]
     created: NotRequired[str]
     updated: NotRequired[str]
+    deleted: NotRequired[bool]
 
 
 class ListTasksResult(TypedDict):
