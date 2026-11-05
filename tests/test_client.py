@@ -652,8 +652,46 @@ class TestTaskEndpoints:
         )
         async with MorgenClient(api_key="k") as client:
             task = await client.get_task("task1")
+        assert task is not None
         assert task.id == "task1"
         assert task.title == "Hello"
+        assert task.deleted is None
+
+    @respx.mock
+    async def test_get_task_deleted(self):
+        respx.get("https://api.morgen.so/v3/tasks").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "task": {
+                            "@type": "Task",
+                            "id": "task1",
+                            "title": "Hello",
+                            "deleted": True,
+                        },
+                        "labelDefs": [],
+                    }
+                },
+            )
+        )
+        async with MorgenClient(api_key="k") as client:
+            task = await client.get_task("task1")
+        assert task is not None
+        assert task.id == "task1"
+        assert task.deleted is True
+
+    @respx.mock
+    async def test_get_task_unknown_returns_none(self):
+        respx.get("https://api.morgen.so/v3/tasks").mock(
+            return_value=httpx.Response(
+                200,
+                json={"data": {"task": None, "labelDefs": []}},
+            )
+        )
+        async with MorgenClient(api_key="k") as client:
+            task = await client.get_task("unknown_task")
+        assert task is None
 
     @respx.mock
     async def test_create_task(self):

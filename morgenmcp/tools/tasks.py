@@ -18,7 +18,12 @@ from morgenmcp.models import (
     TaskReopenRequest,
     TaskUpdateRequest,
 )
-from morgenmcp.tools.id_registry import register_id, resolve_id, resolve_ids
+from morgenmcp.tools.id_registry import (
+    IDNotFoundError,
+    register_id,
+    resolve_id,
+    resolve_ids,
+)
 from morgenmcp.tools.outputs import (
     BatchDeleteResult,
     CreateTaskResult,
@@ -77,6 +82,7 @@ def _format_task(task: Task) -> TaskItem:
                 "scheduled": task.derived.scheduled if task.derived else None,
                 "created": task.created,
                 "updated": task.updated,
+                "deleted": task.deleted,
             }
         ),
     )
@@ -247,9 +253,18 @@ async def get_task(task_id: str) -> GetTaskResult:
     Returns:
         Dictionary with the task fields.
     """
-    real_id = resolve_id(task_id)
+    if not task_id or not task_id.strip():
+        raise ToolError("task_id cannot be empty")
+
+    try:
+        real_id = resolve_id(task_id)
+    except IDNotFoundError as e:
+        raise ToolError(f"Task with ID '{task_id}' not found") from e
+
     client = get_client()
     task = await client.get_task(real_id)
+    if task is None:
+        raise ToolError(f"Task with ID '{task_id}' not found")
     return {"task": _format_task(task)}
 
 
