@@ -2,7 +2,7 @@
 
 [![PyPI version](https://img.shields.io/pypi/v/morgenmcp)](https://pypi.org/project/morgenmcp/)
 
-An unofficial MCP server for the [Morgen](https://morgen.so) calendar API.
+An unofficial MCP server for the [Morgen](https://morgen.so) calendar and task management API. Unify and manage your Google Calendar, Microsoft Outlook, and iCloud calendars and tasks through AI assistants.
 
 > [!NOTE]
 > This is an independent, community-maintained project and is not affiliated with, endorsed by, or sponsored by Morgen AG. Morgen is a trademark of Morgen AG.
