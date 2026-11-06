@@ -285,6 +285,33 @@ class TestGetTask:
         mock_task_client.get_task.assert_awaited_once_with(sample_task.id)
         assert result["task"]["id"] == virtual
 
+    async def test_get_task_empty_id(self, mock_task_client):
+        with pytest.raises(ToolError, match="task_id cannot be empty"):
+            await get_task("")
+        with pytest.raises(ToolError, match="task_id cannot be empty"):
+            await get_task("   ")
+
+    async def test_get_task_not_found_unregistered(self, mock_task_client):
+        with pytest.raises(ToolError, match="Task with ID 'nonexist' not found"):
+            await get_task("nonexist")
+
+    async def test_get_task_not_found_api_null(self, mock_task_client, sample_task):
+        virtual = register_id(sample_task.id)
+        mock_task_client.get_task.return_value = None
+
+        with pytest.raises(ToolError, match=f"Task with ID '{virtual}' not found"):
+            await get_task(virtual)
+        mock_task_client.get_task.assert_awaited_once_with(sample_task.id)
+
+    async def test_get_task_deleted(self, mock_task_client, sample_task):
+        sample_task.deleted = True
+        virtual = register_id(sample_task.id)
+        mock_task_client.get_task.return_value = sample_task
+
+        result = await get_task(virtual)
+        assert result["task"]["id"] == virtual
+        assert result["task"]["deleted"] is True
+
 
 class TestCreateTask:
     async def test_create_task_returns_virtual_id(self, mock_task_client):
