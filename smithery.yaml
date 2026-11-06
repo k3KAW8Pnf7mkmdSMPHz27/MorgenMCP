@@ -1,0 +1,32 @@
+# Smithery configuration file -- https://smithery.ai
+startCommand:
+  type: stdio
+
+configSchema:
+  type: object
+  required:
+    - morgenApiKey
+  properties:
+    morgenApiKey:
+      type: string
+      title: "Morgen API Key"
+      description: "API key from the Morgen Developer Portal (https://platform.morgen.so/developers-api)"
+    readOnly:
+      type: boolean
+      title: "Read-only mode"
+      default: false
+      description: "Expose only query tools; disable all mutating actions"
+
+commandFunction: |-
+  (config) => ({
+    command: 'uvx',
+    args: config.readOnly ? ['morgenmcp', '--read-only'] : ['morgenmcp'],
+    env: {
+      MORGEN_API_KEY: config.morgenApiKey,
+      ...(config.readOnly ? { MORGENMCP_READ_ONLY: '1' } : {})
+    }
+  })
+
+exampleConfig:
+  morgenApiKey: "your-morgen-api-key"
+  readOnly: false

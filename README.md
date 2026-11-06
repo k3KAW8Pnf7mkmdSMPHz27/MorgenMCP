@@ -1,8 +1,9 @@
 # MorgenMCP
 
 [![PyPI version](https://img.shields.io/pypi/v/morgenmcp)](https://pypi.org/project/morgenmcp/)
+[![Smithery Badge](https://smithery.ai/badge/@k3KAW8Pnf7mkmdSMPHz27/MorgenMCP)](https://smithery.ai/server/@k3KAW8Pnf7mkmdSMPHz27/MorgenMCP)
 
-An unofficial MCP server for the [Morgen](https://morgen.so) calendar API.
+An unofficial MCP server for the [Morgen](https://morgen.so) calendar and task management API. Unify and manage your Google Calendar, Microsoft Outlook, and Apple Calendar events and tasks through AI assistants.
 
 > [!NOTE]
 > This is an independent, community-maintained project and is not affiliated with, endorsed by, or sponsored by Morgen AG. Morgen is a trademark of Morgen AG.
@@ -24,6 +25,7 @@ cloning this repository.
 | Claude Code | [CLI command](#claude-code) |
 | Cursor | [Install button and configuration](#cursor) |
 | VS Code | [Install button and configuration](#vs-code) |
+| Smithery | [CLI command](#smithery) |
 | Other MCP clients | [Generic stdio configuration](#other-mcp-clients) |
 
 The server uses stdio: your client starts `uvx morgenmcp`; no server URL or
@@ -131,6 +133,14 @@ These input prompts are supported in VS Code's Local harness; servers requiring
 interactive inputs are not forwarded to Copilot harness sessions. See the
 [VS Code configuration reference](https://code.visualstudio.com/docs/agents/reference/mcp-configuration)
 for supported credential options in your session.
+
+### Smithery
+
+To automatically install MorgenMCP for Claude Desktop via [Smithery](https://smithery.ai/server/@k3KAW8Pnf7mkmdSMPHz27/MorgenMCP):
+
+```sh
+npx -y @smithery/cli install @k3KAW8Pnf7mkmdSMPHz27/MorgenMCP --client claude
+```
 
 ### Other MCP clients
 
