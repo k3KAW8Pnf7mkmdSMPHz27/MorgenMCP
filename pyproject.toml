@@ -1,7 +1,7 @@
 [project]
 name = "morgenmcp"
 dynamic = ["version"]
-description = "Unofficial MCP server for Morgen: unified calendar, scheduling, and task management (Google Calendar, Outlook, Apple Calendar)"
+description = "Unofficial MCP server for Morgen: unified calendar, scheduling, and task management (Google Calendar, Outlook, iCloud)"
 readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.12"
@@ -22,8 +22,6 @@ keywords = [
     "google-calendar",
     "outlook",
     "fastmcp",
-    "claude",
-    "cursor",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
