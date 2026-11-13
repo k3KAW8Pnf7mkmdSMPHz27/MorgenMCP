@@ -51,6 +51,7 @@ from morgenmcp.validators import (
     validate_email,
     validate_local_datetime,
     validate_timezone,
+    validate_utc_window_bound,
 )
 
 _DISPLAY_TZ_ENV = "MORGENMCP_DISPLAY_TZ"
@@ -283,10 +284,13 @@ async def list_events(
 
     Recurring events are automatically expanded to individual occurrences.
     Deleted or cancelled events are not included.
+    Convert local window bounds to UTC before formatting them.
 
     Args:
-        start: Start of time window in LocalDateTime format (e.g., "2023-03-01T00:00:00").
-        end: End of time window in LocalDateTime format. Max 6 months from start.
+        start: Start of the UTC window in YYYY-MM-DDTHH:mm:ss format without a Z
+            suffix or numeric offset (e.g., "2023-03-01T00:00:00").
+        end: End of the UTC window in YYYY-MM-DDTHH:mm:ss format without a Z
+            suffix or numeric offset. Max 6 months from start.
         calendar_ids: Optional list of virtual calendar IDs. If omitted, queries all calendars.
         compact: If True, returns compact one-liner format to reduce tokens.
             Format: "Jul 15 09:15-10:00 CDT (America/Chicago): Meeting [event_id]"
@@ -304,8 +308,8 @@ async def list_events(
     Returns:
         Dictionary with 'events' key containing list of event objects (or strings if compact).
     """
-    validate_local_datetime(start, "start")
-    validate_local_datetime(end, "end")
+    validate_utc_window_bound(start, "start")
+    validate_utc_window_bound(end, "end")
     validate_date_range(start, end)
     validate_timezone(display_timezone)
 

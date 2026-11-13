@@ -319,12 +319,22 @@ def validate_recurrence_rule(rule: dict) -> None:
                 )
 
 
+def validate_utc_window_bound(value: str, field_name: str) -> None:
+    """Validate the suffixless UTC format used by the event listing tool."""
+    if not LOCAL_DATETIME_PATTERN.match(value):
+        raise ValidationError(
+            f"Invalid {field_name} format: '{value}'. "
+            "Use UTC in YYYY-MM-DDTHH:mm:ss format without a Z suffix or numeric "
+            "offset. Convert local times to UTC before formatting."
+        )
+
+
 def validate_date_range(start: str, end: str, max_days: int = 180) -> None:
     """Validate that a date range is valid and within limits.
 
     Args:
-        start: Start datetime in LocalDateTime format.
-        end: End datetime in LocalDateTime format.
+        start: Start datetime in suffixless UTC format.
+        end: End datetime in suffixless UTC format.
         max_days: Maximum allowed range in days (default: 180 = ~6 months).
 
     Raises:
