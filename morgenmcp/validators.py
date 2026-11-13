@@ -11,7 +11,7 @@ import re
 from zoneinfo import available_timezones
 
 # Pre-compile regex patterns for performance
-LOCAL_DATETIME_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$")
+SUFFIXLESS_DATETIME_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$")
 ISO_DURATION_PATTERN = re.compile(
     r"^P(?:\d+Y)?(?:\d+M)?(?:\d+W)?(?:\d+D)?(?:T(?:\d+H)?(?:\d+M)?(?:\d+(?:\.\d+)?S)?)?$"
 )
@@ -72,7 +72,7 @@ def validate_local_datetime(value: str, field_name: str = "datetime") -> str:
             "The timezone should be specified separately in the timeZone parameter."
         )
 
-    if not LOCAL_DATETIME_PATTERN.match(value):
+    if not SUFFIXLESS_DATETIME_PATTERN.match(value):
         raise ValidationError(
             f"Invalid {field_name} format: '{value}'. "
             f"Expected LocalDateTime format: YYYY-MM-DDTHH:mm:ss (e.g., '2023-03-01T10:00:00')"
@@ -321,10 +321,12 @@ def validate_recurrence_rule(rule: dict) -> None:
 
 def validate_utc_window_bound(value: str, field_name: str) -> None:
     """Validate the suffixless UTC format used by the event listing tool."""
-    if not LOCAL_DATETIME_PATTERN.match(value):
+    # Morgen accepts offsets. The MCP tool requires both bounds to be suffixless
+    # so validate_date_range can compare them without mixing naive and aware datetimes.
+    if not SUFFIXLESS_DATETIME_PATTERN.match(value):
         raise ValidationError(
             f"Invalid {field_name} format: '{value}'. "
-            "Use UTC in YYYY-MM-DDTHH:mm:ss format without a Z suffix or numeric "
+            "This tool expects UTC in YYYY-MM-DDTHH:mm:ss format without a Z suffix or numeric "
             "offset. Convert local times to UTC before formatting."
         )
 

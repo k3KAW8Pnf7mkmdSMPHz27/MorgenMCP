@@ -302,8 +302,9 @@ async def list_events(
             Only task/routine/flexible are mutually exclusive.
         display_timezone: Optional IANA timezone (e.g. "America/Chicago") used to
             render compact times. Defaults to the MORGENMCP_DISPLAY_TZ env var,
-            or the system local timezone if unset. Only affects compact=True
-            output; floating events are tagged "(floating)".
+            or the system local timezone if unset. Applies only to compact output.
+            The queried window uses UTC independently of this setting.
+            Floating events are tagged "(floating)".
 
     Returns:
         Dictionary with 'events' key containing list of event objects (or strings if compact).

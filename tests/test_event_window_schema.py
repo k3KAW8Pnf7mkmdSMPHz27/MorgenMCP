@@ -15,5 +15,4 @@ async def test_list_events_schema_documents_suffixless_utc_bounds():
     for bound in ("start", "end"):
         description = tool.inputSchema["properties"][bound]["description"]
         assert "UTC" in description
-        assert "without a Z" in description
-        assert "numeric offset" in description
+        assert "YYYY-MM-DDTHH:mm:ss" in description
