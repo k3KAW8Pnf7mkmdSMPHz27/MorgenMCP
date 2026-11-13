@@ -373,6 +373,7 @@ class Task(MorgenModel):
     tags: list[str] | None = None
     links: dict[str, Any] | None = None
     derived: Annotated[TaskDerived | None, Field(alias="morgen.so:derived")] = None
+    deleted: bool | None = None
 
 
 class TaskCreateRequest(MorgenModel):
@@ -462,7 +463,7 @@ class TasksListResponse(BaseModel):
 class TaskGetResponse(BaseModel):
     """Response from a single-task get endpoint."""
 
-    task: Task
+    task: Task | None = None
 
 
 class TaskCreateResponse(BaseModel):

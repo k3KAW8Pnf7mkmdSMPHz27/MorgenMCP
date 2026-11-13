@@ -557,7 +557,12 @@ class TestTypedOutputSchemas:
 
     @pytest.mark.parametrize("tool", ["morgen_list_tasks", "morgen_get_task"])
     @pytest.mark.parametrize(
-        ("field", "json_type"), [("position", "number"), ("scheduled", "boolean")]
+        ("field", "json_type"),
+        [
+            ("position", "number"),
+            ("scheduled", "boolean"),
+            ("deleted", "boolean"),
+        ],
     )
     async def test_task_item_schema_types(self, tool, field, json_type):
         """Both task tools advertise the JSON types Morgen actually sends."""
@@ -596,6 +601,38 @@ class TestTypedOutputSchemas:
 
         assert item["position"] == position
         assert type(item["position"]) is json_type
+
+    async def test_get_task_deleted_passes_output_validation(self, monkeypatch):
+        """A soft-deleted task returns with deleted: True and passes output validation."""
+        item = await self._call_task_tool(
+            monkeypatch, "morgen_get_task", {**self._LIVE_TASK, "deleted": True}
+        )
+        assert item["deleted"] is True
+
+    async def test_get_task_unknown_returns_tool_error(self, monkeypatch):
+        """When Morgen API returns data.task = null, morgen_get_task returns a clean ToolError."""
+        from morgenmcp import client as client_module
+        from morgenmcp.tools.id_registry import register_id
+
+        monkeypatch.setattr(
+            client_module, "_client", client_module.MorgenClient(api_key="test-key")
+        )
+        task_id = "fb0ff56a-24f0-40d0-844a-14c6de79c576"
+        virtual_id = register_id(task_id)
+
+        with respx.mock(assert_all_called=False) as api:
+            api.get(host="api.morgen.so", path="/v3/tasks").respond(
+                json={"data": {"task": None, "labelDefs": []}}
+            )
+            async with Client(mcp) as client:
+                result = await client.call_tool(
+                    "morgen_get_task", {"task_id": virtual_id}, raise_on_error=False
+                )
+
+        assert result.is_error is True
+        text = getattr(result.content[0], "text", "")
+        assert f"Task with ID '{virtual_id}' not found" in text
+        assert task_id not in text
 
 
 class TestReadOnlyMode:
@@ -726,9 +763,11 @@ class TestResponseCaching:
         assert "morgen_list_task_lists" in included
         assert "morgen_list_tasks" in included
         assert "morgen_list_tags" in included
-        assert "morgen_get_task" in included
         assert "morgen_get_tag" in included
-        # Writes must NOT be in the allowlist
+        # `morgen_get_task` and writes must NOT be in the allowlist
+        assert "morgen_get_task" not in included, (
+            "morgen_get_task must not be cached (breaks post-mutation verification)"
+        )
         for write_tool in (
             "morgen_create_event",
             "morgen_update_event",
@@ -760,6 +799,34 @@ class TestResponseCaching:
                 await client.call_tool("morgen_list_calendars", {})
 
             assert client_mock.list_calendars.await_count == 1
+
+    async def test_get_task_is_not_cached_after_mutation(self):
+        """morgen_get_task bypasses the 60s cache so post-delete reads see deleted=True."""
+        from morgenmcp.models import Task
+        from morgenmcp.tools.id_registry import register_id
+
+        real_id = "task-uncached-after-delete"
+        virtual_id = register_id(real_id)
+        active = Task(id=real_id, title="Verify me")
+        deleted = Task(id=real_id, title="Verify me", deleted=True)
+
+        with patch("morgenmcp.tools.tasks.get_client") as mock:
+            client_mock = AsyncMock()
+            client_mock.get_task.side_effect = [active, deleted]
+            mock.return_value = client_mock
+
+            async with Client(mcp) as client:
+                before = await client.call_tool(
+                    "morgen_get_task", {"task_id": virtual_id}
+                )
+                await client.call_tool("morgen_delete_task", {"task_id": virtual_id})
+                after = await client.call_tool(
+                    "morgen_get_task", {"task_id": virtual_id}
+                )
+
+            assert client_mock.get_task.await_count == 2
+            assert before.structured_content["task"].get("deleted") is None
+            assert after.structured_content["task"]["deleted"] is True
 
     async def test_write_tool_is_not_cached(self):
         """Two identical calls to a write tool MUST hit the underlying client twice.

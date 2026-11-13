@@ -595,8 +595,10 @@ mcp.resource(
 #
 # Allowlist-only on tools — writes (create/update/delete/complete/reopen/move)
 # MUST never be cached: same args returning a cached "success" silently turns
-# duplicate writes into no-ops. The list below is conservative; everything not
-# listed bypasses the cache.
+# duplicate writes into no-ops. `morgen_get_task` is also excluded so
+# read-after-write verification (e.g. checking `"deleted": True` after
+# `delete_task`) never serves stale pre-mutation state. The list below is
+# conservative; everything not listed bypasses the cache.
 #
 # 60s TTL is short enough that a write the user just made appears almost
 # immediately, and long enough to dedupe rapid repeat reads inside one
@@ -609,7 +611,6 @@ _CACHEABLE_READ_TOOLS = [
     "morgen_list_events",
     "morgen_list_task_lists",
     "morgen_list_tasks",
-    "morgen_get_task",
     "morgen_list_tags",
     "morgen_get_tag",
 ]

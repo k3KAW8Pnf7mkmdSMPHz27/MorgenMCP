@@ -285,6 +285,33 @@ class TestGetTask:
         mock_task_client.get_task.assert_awaited_once_with(sample_task.id)
         assert result["task"]["id"] == virtual
 
+    async def test_get_task_empty_id(self, mock_task_client):
+        with pytest.raises(ToolError, match="task_id cannot be empty"):
+            await get_task("")
+        with pytest.raises(ToolError, match="task_id cannot be empty"):
+            await get_task("   ")
+
+    async def test_get_task_not_found_unregistered(self, mock_task_client):
+        with pytest.raises(ToolError, match="Task with ID 'nonexist' not found"):
+            await get_task("nonexist")
+
+    async def test_get_task_not_found_api_null(self, mock_task_client, sample_task):
+        virtual = register_id(sample_task.id)
+        mock_task_client.get_task.return_value = None
+
+        with pytest.raises(ToolError, match=f"Task with ID '{virtual}' not found"):
+            await get_task(virtual)
+        mock_task_client.get_task.assert_awaited_once_with(sample_task.id)
+
+    async def test_get_task_deleted(self, mock_task_client, sample_task):
+        sample_task.deleted = True
+        virtual = register_id(sample_task.id)
+        mock_task_client.get_task.return_value = sample_task
+
+        result = await get_task(virtual)
+        assert result["task"]["id"] == virtual
+        assert result["task"]["deleted"] is True
+
 
 class TestCreateTask:
     async def test_create_task_returns_virtual_id(self, mock_task_client):
@@ -323,6 +350,15 @@ class TestCreateTask:
         await create_task(title="X", tag_ids=[tag_virtual])
         sent: TaskCreateRequest = mock_task_client.create_task.call_args.args[0]
         assert sent.tags == ["real_tag_id"]
+
+    async def test_create_task_rejects_bad_parent_task_id(self, mock_task_client):
+        with pytest.raises(ToolError, match="parent_task_id cannot be empty"):
+            await create_task(title="Sub", parent_task_id="")
+        with pytest.raises(ToolError, match="parent_task_id cannot be empty"):
+            await create_task(title="Sub", parent_task_id="   ")
+        with pytest.raises(ToolError, match="Task with ID 'nonexist' not found"):
+            await create_task(title="Sub", parent_task_id="nonexist")
+        mock_task_client.create_task.assert_not_called()
 
 
 class TestUpdateTask:
@@ -387,6 +423,18 @@ class TestMoveTask:
         with pytest.raises(ToolError, match="conflicts"):
             await move_task(v, move_to_first=True, previous_task_id=u)
 
+    async def test_move_rejects_bad_target_ids(self, mock_task_client):
+        v = register_id("task_a")
+        with pytest.raises(ToolError, match="previous_task_id cannot be empty"):
+            await move_task(v, previous_task_id="  ")
+        with pytest.raises(ToolError, match="parent_task_id cannot be empty"):
+            await move_task(v, parent_task_id="")
+        with pytest.raises(ToolError, match="Task with ID 'nonexist' not found"):
+            await move_task(v, previous_task_id="nonexist")
+        with pytest.raises(ToolError, match="Task with ID 'nonexist' not found"):
+            await move_task(v, parent_task_id="nonexist")
+        mock_task_client.move_task.assert_not_called()
+
 
 class TestCompleteAndReopen:
     async def test_complete_task(self, mock_task_client):
@@ -442,9 +490,12 @@ class TestDeleteTask:
         assert result["failed"] == []
 
     async def test_batch_delete_unresolvable_id(self, mock_task_client):
-        result = await batch_delete_tasks(["xxxxxxx"])
+        result = await batch_delete_tasks(["xxxxxxx", ""])
         assert result["deleted"] == []
-        assert result["failed"][0]["id"] == "xxxxxxx"
+        assert result["failed"] == [
+            {"id": "xxxxxxx", "error": "Task with ID 'xxxxxxx' not found"},
+            {"id": "", "error": "task_id cannot be empty"},
+        ]
 
     async def test_batch_delete_concurrency_is_bounded(self, mock_task_client):
         """Batch fan-out never exceeds BATCH_CONCURRENCY simultaneous calls."""
@@ -470,6 +521,34 @@ class TestDeleteTask:
         assert len(result["deleted"]) == len(task_ids)
         assert max_in_flight <= BATCH_CONCURRENCY
         assert max_in_flight > 1  # still actually parallel
+
+
+class TestSingleTaskIdValidation:
+    _CASES = [
+        (get_task, {}),
+        (update_task, {"title": "New"}),
+        (move_task, {"move_to_root": True}),
+        (complete_task, {}),
+        (reopen_task, {}),
+        (delete_task, {}),
+    ]
+
+    @pytest.mark.parametrize(("tool_fn", "kwargs"), _CASES)
+    @pytest.mark.parametrize("bad_id", ["", "   "])
+    async def test_empty_task_id_rejected(
+        self, mock_task_client, tool_fn, kwargs, bad_id
+    ):
+        with pytest.raises(ToolError, match="task_id cannot be empty"):
+            await tool_fn(bad_id, **kwargs)
+        assert mock_task_client.method_calls == []
+
+    @pytest.mark.parametrize(("tool_fn", "kwargs"), _CASES)
+    async def test_unknown_virtual_task_id_rejected(
+        self, mock_task_client, tool_fn, kwargs
+    ):
+        with pytest.raises(ToolError, match="Task with ID 'nonexist' not found"):
+            await tool_fn("nonexist", **kwargs)
+        assert mock_task_client.method_calls == []
 
 
 class TestListTags:
