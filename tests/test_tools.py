@@ -1000,18 +1000,24 @@ class TestListEvents:
                 calendar_ids=[virtual_cal],
             )
 
+    @pytest.mark.parametrize(
+        ("start", "end"),
+        [
+            ("2023-03-01T00:00:00Z", "2023-03-02T00:00:00"),
+            ("2023-03-01T00:00:00", "2023-03-02T00:00:00-06:00"),
+        ],
+    )
     async def test_list_events_validation_error(
-        self, mock_morgen_client, sample_calendar_id
+        self, mock_morgen_client, sample_calendar_id, start, end
     ):
-        """Test event listing with validation error (Z suffix)."""
         virtual_cal = register_id(sample_calendar_id)
 
-        with pytest.raises(ToolError, match="Validation error.*Z"):
-            await list_events(
-                start="2023-03-01T00:00:00Z",
-                end="2023-03-02T00:00:00",
-                calendar_ids=[virtual_cal],
-            )
+        with pytest.raises(ToolError, match="Validation error") as error:
+            await list_events(start=start, end=end, calendar_ids=[virtual_cal])
+
+        assert "UTC" in str(error.value)
+        assert "timeZone" not in str(error.value)
+        mock_morgen_client.list_events.assert_not_awaited()
 
     async def test_list_events_all_calendars(
         self, mock_morgen_client, sample_event, sample_calendar
