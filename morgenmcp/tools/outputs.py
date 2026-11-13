@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from typing import Annotated, NotRequired, TypedDict
 
-from pydantic import MISSING, BaseModel, WithJsonSchema
+from pydantic import MISSING, BaseModel, Field, WithJsonSchema
 
 # ---------------------------------------------------------------------------
 # Accounts
@@ -257,7 +257,11 @@ class TaskListListOutput(BaseModel):
 class TaskRelationRef(BaseModel):
     """Relation flags inside ``TaskItem.relatedTo`` (JSCalendar ``Relation.relation``)."""
 
-    relation: dict[str, bool] | MISSING = MISSING
+    relation: dict[str, bool] | MISSING = Field(
+        default=MISSING,
+        description="Relationship flags for the referenced task. For example, "
+        '{"parent": true} identifies it as this task’s parent.',
+    )
 
 
 class TaskItem(BaseModel):
@@ -278,7 +282,10 @@ class TaskItem(BaseModel):
     position: Annotated[int | float, WithJsonSchema({"type": "number"})] | MISSING = (
         MISSING
     )
-    relatedTo: dict[str, TaskRelationRef] | MISSING = MISSING
+    relatedTo: dict[str, TaskRelationRef] | MISSING = Field(
+        default=MISSING,
+        description="Relationships keyed by the virtual IDs of the referenced tasks.",
+    )
     tags: list[str] | MISSING = MISSING
     scheduled: bool | MISSING = MISSING
     created: str | MISSING = MISSING
