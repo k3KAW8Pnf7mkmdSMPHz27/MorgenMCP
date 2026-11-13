@@ -238,15 +238,18 @@ def _format_full_event(event: Event) -> EventItem:
                 "status": event.free_busy_status,
                 "privacy": event.privacy,
                 "locations": [
-                    {"name": loc.name} for loc in (event.locations or {}).values()
+                    filter_none_values({"name": loc.name})
+                    for loc in (event.locations or {}).values()
                 ],
                 "participants": [
-                    {
-                        "name": p.name,
-                        "email": p.email,
-                        "status": p.participation_status,
-                        "isOrganizer": p.roles.owner if p.roles else False,
-                    }
+                    filter_none_values(
+                        {
+                            "name": p.name,
+                            "email": p.email,
+                            "status": p.participation_status,
+                            "isOrganizer": p.roles.owner if p.roles else False,
+                        }
+                    )
                     for p in (event.participants or {}).values()
                 ],
                 "isRecurring": event.recurrence_rules is not None,

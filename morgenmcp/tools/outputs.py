@@ -5,9 +5,10 @@ permissive ``{"type": "object", "additionalProperties": true}`` that a bare
 ``-> dict`` annotation produces. FastMCP 3.4.x validates each tool's return
 against this schema at runtime.
 
-**Why so many `NotRequired` fields:** every list/item payload is built through
-``filter_none_values`` (``tools/utils.py``), which drops any key whose value is
-None or ``[]``. A field marked *required* here that gets filtered out at runtime
+**Why so many `NotRequired` fields:** item builders use ``filter_none_values``
+(``tools/utils.py``) to drop keys whose values are None or ``[]``. This helper
+is shallow: nested item builders must filter their own optional fields too.
+A field marked *required* here that gets filtered out at runtime
 would raise ``ToolError: Output validation error: '<field>' is a required
 property`` on perfectly normal responses (an account with no display name, an
 event with no description). So any field that ``filter_none_values`` — or
