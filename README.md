@@ -250,14 +250,18 @@ overrides both the flag and the environment variable.
 > suited to the request, and a per-call value always wins. Set this variable to
 > bound what a model can pull in one call, not to express a typical page size.
 
-Task tools and resources include a `coverage` object with the effective
-`fetch_limit`, the upstream `fetched_count` before local filtering,
-`limit_reached`, and `completeness: "unknown"`. The `count` field counts
-returned items. Each `task_count` in `morgen_list_task_lists` counts fetched
-tasks assigned to that list. A zero count means zero matches in the fetched
-rows. Morgen can omit tasks even below the limit, and the limit applies
-before filters such as task list or due date. Tag listings include the same
-coverage fields when a tag limit is set.
+Morgen lists open tasks by default. Supplying `updated_after` uses a
+timestamp-based view that can also include completed and soft-deleted tasks.
+Both modes are capped at the requested limit. In live probes, rows with an
+update timestamp were ordered newest first.
+
+Task tools and resources report `coverage.fetch_limit` and
+`coverage.limit_reached`. When `limit_reached` is true, the upstream fetch
+may have more matches. If you requested fewer than 100 tasks, raise the
+limit to see more. Morgen provides no continuation cursor. The cap is applied
+before local filters such as task list or due date. `count` counts returned
+items, and each `task_count` counts open tasks observed for that list. Tag
+listings report coverage when a tag limit is set.
 
 ## Troubleshooting
 

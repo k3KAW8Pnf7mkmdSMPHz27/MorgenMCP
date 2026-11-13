@@ -10,7 +10,7 @@ from fastmcp import Client
 from fastmcp.client.logging import LogMessage
 from mcp.types import TextResourceContents
 
-from morgenmcp.client import MorgenClient, _fetch_coverage
+from morgenmcp.client import MorgenClient
 from morgenmcp.models import Calendar, MorgenAPIError
 from morgenmcp.server import mcp
 from morgenmcp.tools.id_registry import clear_registry
@@ -27,7 +27,11 @@ def _use_tmp_data_dir(tmp_path, monkeypatch):
 
 @pytest.fixture
 async def isolated_response_cache():
-    """Evict cached MCP reads between tests that use the same calls."""
+    """Evict cached MCP reads between tests that use the same calls.
+
+    Use keys() and delete() because destroy() clears collection setup and
+    breaks subsequent cache writes.
+    """
     from fastmcp.server.middleware.caching import ResponseCachingMiddleware
 
     cache_mw = next(
@@ -171,9 +175,9 @@ class TestMCPServer:
         with patch("morgenmcp.tools.tasks.get_client") as mock:
             client_mock = AsyncMock()
             data = TasksListResponse(tasks=[task])
-            client_mock.fetch_tasks.return_value = (
+            client_mock.list_tasks_and_spaces.return_value = (
                 data,
-                _fetch_coverage(100, len(data.tasks)),
+                100,
             )
             mock.return_value = client_mock
 
@@ -236,9 +240,7 @@ class TestMCPServer:
 
         coverage = {
             "fetch_limit": limit,
-            "fetched_count": 1,
             "limit_reached": limit == 1,
-            "completeness": "unknown",
         }
         assert route.call_count == 4
         assert lists["count"] == 2
@@ -285,9 +287,7 @@ class TestMCPServer:
         else:
             assert resource["coverage"] == {
                 "fetch_limit": 1,
-                "fetched_count": 1,
                 "limit_reached": True,
-                "completeness": "unknown",
             }
 
     async def test_initialize_advertises_morgenmcp_version(self):
@@ -670,6 +670,23 @@ class TestTypedOutputSchemas:
 
         assert result.is_error is False, result.content[0].text
         return result.structured_content
+
+    async def test_incremental_listing_preserves_completed_and_deleted_tasks(
+        self, monkeypatch
+    ):
+        payload = await self._mocked_task_call(
+            monkeypatch,
+            "morgen_list_tasks",
+            {"limit": 2, "updated_after": "2000-01-01T00:00:00Z"},
+            list_tasks=[
+                {"id": "completed-task", "progress": "completed"},
+                {"id": "deleted-task", "deleted": True},
+            ],
+        )
+        assert payload["count"] == 2
+        assert payload["tasks"][0]["progress"] == "completed"
+        assert payload["tasks"][1]["deleted"] is True
+        assert payload["coverage"] == {"fetch_limit": 2, "limit_reached": True}
 
     async def _call_task_tool(self, monkeypatch, tool: str, task: dict) -> dict:
         """Serve ``task`` from a respx-mocked Morgen API and return the tool's item."""
@@ -1178,14 +1195,14 @@ class TestResponseCaching:
         """Two reads of the same resource URI hit the underlying client once."""
         with patch("morgenmcp.resources.get_client") as mock:
             client_mock = AsyncMock()
-            client_mock.fetch_tags.return_value = [], None
+            client_mock.list_tags.return_value = ([], None)
             mock.return_value = client_mock
 
             async with Client(mcp) as client:
                 await client.read_resource("morgen://tags")
                 await client.read_resource("morgen://tags")
 
-            assert client_mock.fetch_tags.await_count == 1
+            assert client_mock.list_tags.await_count == 1
 
     async def test_different_args_bypass_cache(self):
         """Different arguments produce different cache keys (no false hits)."""

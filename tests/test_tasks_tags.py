@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastmcp.exceptions import ToolError
 
-from morgenmcp.client import _fetch_coverage
 from morgenmcp.models import (
     MorgenAPIError,
     Space,
@@ -115,9 +114,9 @@ class TestListTaskLists:
             tasks=[t1, t2, t3, t4],
             spaces=[space1, space2],
         )
-        mock_task_client.fetch_tasks.return_value = (
+        mock_task_client.list_tasks_and_spaces.return_value = (
             data,
-            _fetch_coverage(100, len(data.tasks)),
+            100,
         )
 
         result = await list_task_lists()
@@ -151,9 +150,9 @@ class TestListTaskLists:
             tasks=[t1, t2],
             spaces=[space1, space2],
         )
-        mock_task_client.fetch_tasks.return_value = (
+        mock_task_client.list_tasks_and_spaces.return_value = (
             data,
-            _fetch_coverage(100, len(data.tasks)),
+            100,
         )
 
         acc1_virtual = register_id("acc_real_1")
@@ -175,9 +174,9 @@ class TestListTaskLists:
             tasks=[Task(id="t1", task_list_id=raw, title="T1")],
             spaces=[],
         )
-        mock_task_client.fetch_tasks.return_value = (
+        mock_task_client.list_tasks_and_spaces.return_value = (
             data,
-            _fetch_coverage(100, len(data.tasks)),
+            100,
         )
 
         result = await list_task_lists()
@@ -200,9 +199,9 @@ class TestListTaskLists:
             Task(id="t2", task_list_id="default", title="Default list"),
         ]
         data = TasksListResponse(tasks=tasks, spaces=[])
-        mock_task_client.fetch_tasks.return_value = (
+        mock_task_client.list_tasks_and_spaces.return_value = (
             data,
-            _fetch_coverage(100, len(data.tasks)),
+            100,
         )
 
         result = await list_task_lists()
@@ -228,9 +227,9 @@ class TestListTaskLists:
         space = Space(id="s1", name="Work Projects", color="#ff0000")
         task = Task(id="t1", task_list_id="s1", account_id="acc_real_1", title="T1")
         data = TasksListResponse(tasks=[task], spaces=[space])
-        mock_task_client.fetch_tasks.return_value = (
+        mock_task_client.list_tasks_and_spaces.return_value = (
             data,
-            _fetch_coverage(100, len(data.tasks)),
+            100,
         )
 
         result = await list_task_lists(account_id=register_id("acc_real_1"))
@@ -241,7 +240,7 @@ class TestListTaskLists:
         assert entry["task_count"] == 1
 
     async def test_list_task_lists_api_error(self, mock_task_client):
-        mock_task_client.fetch_tasks.side_effect = MorgenAPIError(
+        mock_task_client.list_tasks_and_spaces.side_effect = MorgenAPIError(
             "failed", status_code=500
         )
         with pytest.raises(ToolError, match="API error"):
@@ -251,9 +250,9 @@ class TestListTaskLists:
 class TestListTasks:
     async def test_list_tasks_returns_virtual_ids(self, mock_task_client, sample_task):
         data = TasksListResponse(tasks=[sample_task])
-        mock_task_client.fetch_tasks.return_value = (
+        mock_task_client.list_tasks_and_spaces.return_value = (
             data,
-            _fetch_coverage(100, len(data.tasks)),
+            100,
         )
         result = await list_tasks()
         result = result.model_dump()
@@ -265,12 +264,12 @@ class TestListTasks:
 
     async def test_list_tasks_passes_filter_args(self, mock_task_client):
         data = TasksListResponse(tasks=[])
-        mock_task_client.fetch_tasks.return_value = (
+        mock_task_client.list_tasks_and_spaces.return_value = (
             data,
-            _fetch_coverage(100, len(data.tasks)),
+            100,
         )
         await list_tasks(limit=50, updated_after="2026-04-01T00:00:00Z")
-        mock_task_client.fetch_tasks.assert_awaited_once_with(
+        mock_task_client.list_tasks_and_spaces.assert_awaited_once_with(
             limit=50, updated_after="2026-04-01T00:00:00Z"
         )
 
@@ -281,7 +280,7 @@ class TestListTasks:
             await list_tasks(limit=101)
 
     async def test_list_tasks_api_error(self, mock_task_client):
-        mock_task_client.fetch_tasks.side_effect = MorgenAPIError(
+        mock_task_client.list_tasks_and_spaces.side_effect = MorgenAPIError(
             "nope", status_code=500
         )
         with pytest.raises(ToolError, match="API error"):
@@ -293,9 +292,9 @@ class TestListTasks:
         t3 = Task(id="t3", task_list_id="default", title="Task 3")
         t4 = Task(id="t4", task_list_id=None, title="Task 4")
         data = TasksListResponse(tasks=[t1, t2, t3, t4])
-        mock_task_client.fetch_tasks.return_value = (
+        mock_task_client.list_tasks_and_spaces.return_value = (
             data,
-            _fetch_coverage(100, len(data.tasks)),
+            100,
         )
 
         # Filter by virtual ID
@@ -594,16 +593,16 @@ class TestSingleTaskIdValidation:
 
 class TestListTags:
     async def test_list_tags(self, mock_tag_client, sample_tag):
-        mock_tag_client.fetch_tags.return_value = [sample_tag], None
+        mock_tag_client.list_tags.return_value = ([sample_tag], None)
         result = await list_tags()
         assert result["count"] == 1
         assert result["tags"][0]["name"] == "Work"
         assert len(result["tags"][0]["id"]) == 7
 
     async def test_list_tags_with_limit(self, mock_tag_client):
-        mock_tag_client.fetch_tags.return_value = [], None
+        mock_tag_client.list_tags.return_value = ([], None)
         await list_tags(updated_after="2026-04-01T00:00:00Z", limit=10)
-        mock_tag_client.fetch_tags.assert_awaited_once_with(
+        mock_tag_client.list_tags.assert_awaited_once_with(
             limit=10, updated_after="2026-04-01T00:00:00Z"
         )
 

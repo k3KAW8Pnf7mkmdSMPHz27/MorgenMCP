@@ -37,6 +37,7 @@ from morgenmcp.tools.outputs import (
     TaskListListOutput,
     TaskListOutput,
     TaskRelationRef,
+    fetch_coverage,
 )
 from morgenmcp.tools.utils import (
     gather_bounded,
@@ -102,7 +103,7 @@ def _build_related_to(parent_task_id: str | None) -> dict[str, TaskRelation] | N
 async def list_task_lists(
     account_id: str | None = None,
 ) -> TaskListListOutput:
-    """Discover task lists (spaces) and count their fetched tasks.
+    """Discover task lists (spaces) and count open tasks observed in each list.
 
     Args:
         account_id: Optional virtual ID of an account to filter task lists.
@@ -113,7 +114,7 @@ async def list_task_lists(
     client = get_client()
     real_account_id = resolve_id(account_id) if account_id is not None else None
 
-    res, coverage = await client.fetch_tasks()
+    res, fetch_limit = await client.list_tasks_and_spaces()
     tasks = res.tasks
     spaces = res.spaces or []
 
@@ -184,7 +185,9 @@ async def list_task_lists(
         )
 
     return TaskListListOutput(
-        task_lists=task_lists, count=len(task_lists), coverage=coverage
+        task_lists=task_lists,
+        count=len(task_lists),
+        coverage=fetch_coverage(fetch_limit, len(res.tasks)),
     )
 
 
@@ -196,17 +199,18 @@ async def list_tasks(
 ) -> ListTasksResult:
     """List Morgen tasks.
 
+    By default, Morgen lists open tasks. With `updated_after`, the
+    incremental view can include completed and soft-deleted tasks.
     Morgen applies the fetch limit before local task-list filtering.
-    Coverage describes the fetched rows. Even below the limit, an empty
-    or short result can omit tasks from the requested list.
+    A reached limit means additional tasks may exist in the query scope.
 
     Args:
         limit: Max tasks to return (1-100). Defaults to the server's
             configured MORGENMCP_TASKS_LIMIT, else 100. The /tasks/list
             endpoint costs 10 rate-limit points per call regardless of limit,
             so a smaller limit saves tokens but not quota.
-        updated_after: ISO 8601 datetime; when provided, returns tasks
-            updated/created after this timestamp. Useful for incremental sync.
+        updated_after: ISO 8601 timestamp for incremental sync. This
+            view can return completed tasks and rows with deleted=True.
         task_list_id: Filter tasks by task list ID (virtual or real ID).
 
     Returns:
@@ -216,7 +220,9 @@ async def list_tasks(
         raise ToolError("limit must be between 1 and 100")
 
     client = get_client()
-    res, coverage = await client.fetch_tasks(limit=limit, updated_after=updated_after)
+    res, fetch_limit = await client.list_tasks_and_spaces(
+        limit=limit, updated_after=updated_after
+    )
     tasks = res.tasks
 
     if task_list_id is not None:
@@ -237,7 +243,9 @@ async def list_tasks(
         ]
 
     return ListTasksResult(
-        tasks=[_format_task(t) for t in tasks], count=len(tasks), coverage=coverage
+        tasks=[_format_task(t) for t in tasks],
+        count=len(tasks),
+        coverage=fetch_coverage(fetch_limit, len(res.tasks)),
     )
 
 

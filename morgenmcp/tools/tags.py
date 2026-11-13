@@ -20,6 +20,7 @@ from morgenmcp.tools.outputs import (
     ListTagsResult,
     MutateTagResult,
     TagItem,
+    fetch_coverage,
 )
 from morgenmcp.tools.utils import filter_none_values, handle_tool_errors
 from morgenmcp.validators import validate_hex_color
@@ -60,14 +61,14 @@ async def list_tags(
         raise ToolError("limit must be a positive integer")
 
     client = get_client()
-    tags, coverage = await client.fetch_tags(limit=limit, updated_after=updated_after)
+    tags, fetch_limit = await client.list_tags(limit=limit, updated_after=updated_after)
 
     result: ListTagsResult = {
         "tags": [_format_tag(t) for t in tags],
         "count": len(tags),
     }
-    if coverage is not None:
-        result["coverage"] = coverage
+    if fetch_limit is not None:
+        result["coverage"] = fetch_coverage(fetch_limit, len(tags))
     return result
 
 

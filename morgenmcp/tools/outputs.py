@@ -31,7 +31,20 @@ from typing import Annotated, NotRequired, TypedDict
 
 from pydantic import MISSING, BaseModel, Field, WithJsonSchema
 
-from morgenmcp.models import FetchCoverage
+
+class FetchCoverage(TypedDict):
+    fetch_limit: Annotated[int, Field(description="Limit sent to Morgen.")]
+    limit_reached: Annotated[
+        bool,
+        Field(
+            description="The upstream row count reached the limit before local filtering."
+        ),
+    ]
+
+
+def fetch_coverage(limit: int, row_count: int) -> FetchCoverage:
+    return {"fetch_limit": limit, "limit_reached": row_count >= limit}
+
 
 # ---------------------------------------------------------------------------
 # Accounts
@@ -247,7 +260,9 @@ class TaskListOutput(BaseModel):
     id: str
     name: str
     color: str | None
-    task_count: int = Field(description="Fetched tasks assigned to this list.")
+    task_count: int = Field(
+        description="Open tasks observed for this list in the upstream fetch."
+    )
     account_id: str | None
 
 

@@ -9,7 +9,6 @@ from __future__ import annotations
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
-from typing_extensions import TypedDict
 
 
 class MorgenModel(BaseModel):
@@ -452,23 +451,6 @@ class Space(MorgenModel):
     updated: str | None = None
     account_id: Annotated[str | None, Field(alias="accountId")] = None
     integration_id: Annotated[str | None, Field(alias="integrationId")] = None
-
-
-class FetchCoverage(TypedDict):
-    """Coverage of a bounded upstream listing before local filtering."""
-
-    fetch_limit: Annotated[int, Field(description="Limit sent to Morgen.")]
-    fetched_count: Annotated[
-        int, Field(description="Rows received before local filtering.")
-    ]
-    limit_reached: Annotated[
-        bool,
-        Field(description="Whether the upstream row count reached the fetch limit."),
-    ]
-    completeness: Annotated[
-        Literal["unknown"],
-        Field(description="Whether the fetched rows cover the full query scope."),
-    ]
 
 
 class TasksListResponse(BaseModel):

@@ -134,7 +134,7 @@ async def test_list_events_sparse_nested_fields(
 
 
 @pytest.mark.parametrize(
-    "tool, collection, model_name, formatter_name, payload",
+    "tool, collection, model_name, formatter_name, payload, extra_fields",
     [
         (
             "morgen_list_calendars",
@@ -148,6 +148,7 @@ async def test_list_events_sparse_nested_fields(
                 "myRights": {},
                 "morgen.so:metadata": {"busy": False},
             },
+            {},
         ),
         (
             "morgen_list_tasks",
@@ -160,6 +161,7 @@ async def test_list_events_sparse_nested_fields(
                 "deleted": False,
                 "morgen.so:derived": {"scheduled": False},
             },
+            {"coverage": {"fetch_limit": 100, "limit_reached": False}},
         ),
         (
             "morgen_list_tasks",
@@ -170,6 +172,7 @@ async def test_list_events_sparse_nested_fields(
                 "id": "task-contract",
                 "morgen.so:derived": {},
             },
+            {"coverage": {"fetch_limit": 100, "limit_reached": False}},
         ),
         (
             "morgen_list_tags",
@@ -180,6 +183,7 @@ async def test_list_events_sparse_nested_fields(
                 "id": "tag-contract",
                 "deleted": False,
             },
+            {},
         ),
         (
             "morgen_list_events",
@@ -198,6 +202,7 @@ async def test_list_events_sparse_nested_fields(
                 "alerts": {"valid": {"trigger": {"offset": "-PT15M"}}},
                 "recurrenceRules": [{"frequency": "daily"}],
             },
+            {},
         ),
     ],
     ids=[
@@ -214,6 +219,7 @@ async def test_sparse_builders_match_advertised_schema(
     model_name,
     formatter_name,
     payload,
+    extra_fields,
 ):
     """Check nested output against the public schema, including legitimate false values."""
     import jsonschema
@@ -236,14 +242,7 @@ async def test_sparse_builders_match_advertised_schema(
         item = item.model_dump()
     schema = advertised[tool].outputSchema
     assert schema is not None
-    result = {collection: [item], "count": 1}
-    if tool == "morgen_list_tasks":
-        result["coverage"] = {
-            "fetch_limit": 100,
-            "fetched_count": 1,
-            "limit_reached": False,
-            "completeness": "unknown",
-        }
+    result = {collection: [item], "count": 1, **extra_fields}
     jsonschema.validate(result, schema)
     if formatter_name == "calendar":
         assert item["metadata"] == {"busy": False}

@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastmcp.exceptions import ResourceError
 
-from morgenmcp.client import _fetch_coverage
 from morgenmcp.models import Account, Calendar, Event, Tag, Task, TasksListResponse
 from morgenmcp.resources import (
     _LOCAL_DT_FMT,
@@ -317,9 +316,9 @@ class TestTaskResources:
                 Task(id="t3", title="open B", progress=None),
             ]
         )
-        mock_client.fetch_tasks.return_value = (
+        mock_client.list_tasks_and_spaces.return_value = (
             data,
-            _fetch_coverage(100, len(data.tasks)),
+            100,
         )
         body = json.loads(await res_tasks())
         assert body["count"] == 2
@@ -343,9 +342,9 @@ class TestTaskResources:
                 Task(id="t4", title="today done", progress="completed", due=today_iso),
             ]
         )
-        mock_client.fetch_tasks.return_value = (
+        mock_client.list_tasks_and_spaces.return_value = (
             data,
-            _fetch_coverage(100, len(data.tasks)),
+            100,
         )
         body = json.loads(await res_tasks_today())
         assert body["count"] == 1
@@ -374,9 +373,9 @@ class TestTaskResources:
                 )
             ]
         )
-        mock_client.fetch_tasks.return_value = (
+        mock_client.list_tasks_and_spaces.return_value = (
             data,
-            _fetch_coverage(100, len(data.tasks)),
+            100,
         )
         body = json.loads(await resource())
         task = body["tasks"][0]
@@ -395,7 +394,7 @@ class TestTaskResources:
 class TestTagResources:
     @pytest.mark.asyncio
     async def test_res_tags_returns_list(self, mock_client):
-        mock_client.fetch_tags.return_value = (
+        mock_client.list_tags.return_value = (
             [
                 Tag(id="tag-uuid-1", name="errands", color="#abc"),
                 Tag(id="tag-uuid-2", name="reading"),
