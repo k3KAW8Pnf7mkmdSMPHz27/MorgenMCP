@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
+from pydantic import MISSING
 
 from morgenmcp.client import get_client
 from morgenmcp.models import (
@@ -26,6 +27,7 @@ from morgenmcp.tools.id_registry import (
 )
 from morgenmcp.tools.outputs import (
     BatchDeleteResult,
+    CreatedTaskRef,
     CreateTaskResult,
     FailedItem,
     GetTaskResult,
@@ -34,11 +36,12 @@ from morgenmcp.tools.outputs import (
     TaskItem,
     TaskListListOutput,
     TaskListOutput,
+    TaskRelationRef,
 )
 from morgenmcp.tools.utils import (
-    filter_none_values,
     gather_bounded,
     handle_tool_errors,
+    omit_none,
 )
 from morgenmcp.validators import (
     validate_duration,
@@ -51,40 +54,29 @@ from morgenmcp.validators import (
 
 def _format_task(task: Task) -> TaskItem:
     """Format a task for tool output, virtualizing IDs."""
-    related = task.related_to or {}
-    related_out = {
-        register_id(parent_id): {
-            "relation": rel.relation,
+    return TaskItem(
+        id=register_id(task.id),
+        accountId=register_id(task.account_id) if task.account_id else MISSING,
+        integrationId=omit_none(task.integration_id),
+        taskListId=register_id(task.task_list_id) if task.task_list_id else MISSING,
+        title=omit_none(task.title),
+        description=omit_none(task.description),
+        due=omit_none(task.due),
+        timeZone=omit_none(task.time_zone),
+        estimatedDuration=omit_none(task.estimated_duration),
+        priority=omit_none(task.priority),
+        progress=omit_none(task.progress),
+        position=omit_none(task.position),
+        relatedTo={
+            register_id(related_id): TaskRelationRef(relation=relation.relation)
+            for related_id, relation in (task.related_to or {}).items()
         }
-        for parent_id, rel in related.items()
-    }
-
-    return cast(
-        "TaskItem",
-        filter_none_values(
-            {
-                "id": register_id(task.id),
-                "accountId": register_id(task.account_id) if task.account_id else None,
-                "integrationId": task.integration_id,
-                "taskListId": (
-                    register_id(task.task_list_id) if task.task_list_id else None
-                ),
-                "title": task.title,
-                "description": task.description,
-                "due": task.due,
-                "timeZone": task.time_zone,
-                "estimatedDuration": task.estimated_duration,
-                "priority": task.priority,
-                "progress": task.progress,
-                "position": task.position,
-                "relatedTo": related_out or None,
-                "tags": [register_id(t) for t in (task.tags or [])] or None,
-                "scheduled": task.derived.scheduled if task.derived else None,
-                "created": task.created,
-                "updated": task.updated,
-                "deleted": task.deleted,
-            }
-        ),
+        or MISSING,
+        tags=[register_id(tag_id) for tag_id in (task.tags or [])] or MISSING,
+        scheduled=omit_none(task.derived.scheduled) if task.derived else MISSING,
+        created=omit_none(task.created),
+        updated=omit_none(task.updated),
+        deleted=omit_none(task.deleted),
     )
 
 
@@ -146,15 +138,15 @@ async def list_task_lists(
     for space in spaces:
         seen_ids.add(space.id)
         task_lists.append(
-            {
-                "id": register_id(space.id),
-                "name": space.name or "Default",
-                "color": space.color,
-                "task_count": task_counts.get(space.id, 0),
-                "account_id": (
+            TaskListOutput(
+                id=register_id(space.id),
+                name=space.name or "Default",
+                color=space.color,
+                task_count=task_counts.get(space.id, 0),
+                account_id=(
                     register_id(space.account_id) if space.account_id else None
                 ),
-            }
+            )
         )
 
     for raw_id, count in task_counts.items():
@@ -178,23 +170,20 @@ async def list_task_lists(
         known = unfiltered_spaces.get(raw_id)
 
         task_lists.append(
-            {
-                "id": register_id(raw_id),
-                "name": (
+            TaskListOutput(
+                id=register_id(raw_id),
+                name=(
                     (known.name or "Default")
                     if known is not None
                     else ("Default" if raw_id == "default" else "Unnamed list")
                 ),
-                "color": known.color if known is not None else None,
-                "task_count": count,
-                "account_id": (register_id(task_acc_id) if task_acc_id else None),
-            }
+                color=known.color if known is not None else None,
+                task_count=count,
+                account_id=(register_id(task_acc_id) if task_acc_id else None),
+            )
         )
 
-    return {
-        "task_lists": task_lists,
-        "count": len(task_lists),
-    }
+    return TaskListListOutput(task_lists=task_lists, count=len(task_lists))
 
 
 @handle_tool_errors
@@ -247,10 +236,7 @@ async def list_tasks(
             )
         ]
 
-    return {
-        "tasks": [_format_task(t) for t in tasks],
-        "count": len(tasks),
-    }
+    return ListTasksResult(tasks=[_format_task(t) for t in tasks], count=len(tasks))
 
 
 @handle_tool_errors
@@ -273,7 +259,7 @@ async def get_task(task_id: str) -> GetTaskResult:
     task = await client.get_task(real_id)
     if task is None:
         raise ToolError(f"Task with ID '{task_id}' not found")
-    return {"task": _format_task(task)}
+    return GetTaskResult(task=_format_task(task))
 
 
 @handle_tool_errors
@@ -345,11 +331,11 @@ async def create_task(
     client = get_client()
     new_id = await client.create_task(request)
 
-    return {
-        "success": True,
-        "message": "Task created successfully.",
-        "task": {"id": register_id(new_id)},
-    }
+    return CreateTaskResult(
+        success=True,
+        message="Task created successfully.",
+        task=CreatedTaskRef(id=register_id(new_id)),
+    )
 
 
 @handle_tool_errors
@@ -419,11 +405,9 @@ async def update_task(
     client = get_client()
     await client.update_task(request)
 
-    return {
-        "success": True,
-        "message": "Task updated successfully.",
-        "taskId": task_id,
-    }
+    return MutateTaskResult(
+        success=True, message="Task updated successfully.", taskId=task_id
+    )
 
 
 @handle_tool_errors
@@ -478,11 +462,9 @@ async def move_task(
     client = get_client()
     await client.move_task(request)
 
-    return {
-        "success": True,
-        "message": "Task moved successfully.",
-        "taskId": task_id,
-    }
+    return MutateTaskResult(
+        success=True, message="Task moved successfully.", taskId=task_id
+    )
 
 
 @handle_tool_errors
@@ -509,11 +491,9 @@ async def complete_task(
     client = get_client()
     await client.close_task(request)
 
-    return {
-        "success": True,
-        "message": "Task marked complete.",
-        "taskId": task_id,
-    }
+    return MutateTaskResult(
+        success=True, message="Task marked complete.", taskId=task_id
+    )
 
 
 @handle_tool_errors
@@ -540,11 +520,7 @@ async def reopen_task(
     client = get_client()
     await client.reopen_task(request)
 
-    return {
-        "success": True,
-        "message": "Task reopened.",
-        "taskId": task_id,
-    }
+    return MutateTaskResult(success=True, message="Task reopened.", taskId=task_id)
 
 
 @handle_tool_errors
@@ -563,11 +539,7 @@ async def delete_task(task_id: str) -> MutateTaskResult:
     client = get_client()
     await client.delete_task(request)
 
-    return {
-        "success": True,
-        "message": "Task deleted.",
-        "taskId": task_id,
-    }
+    return MutateTaskResult(success=True, message="Task deleted.", taskId=task_id)
 
 
 @handle_tool_errors

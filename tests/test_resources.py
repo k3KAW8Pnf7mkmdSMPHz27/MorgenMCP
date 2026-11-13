@@ -338,7 +338,10 @@ class TestTaskResources:
         assert body["filter"] == "open,due_today"
 
     @pytest.mark.asyncio
-    async def test_res_tasks_preserves_virtualized_related_to(self, mock_client):
+    @pytest.mark.parametrize("resource", [res_tasks, res_tasks_today])
+    async def test_task_resources_preserve_virtualized_related_to(
+        self, mock_client, resource
+    ):
         from morgenmcp.models import TaskRelation
         from morgenmcp.tools.id_registry import register_id
 
@@ -348,11 +351,19 @@ class TestTaskResources:
                 id="child-raw-res-1",
                 title="subtask",
                 progress="needs-action",
+                due=datetime.now().replace(hour=12).isoformat(),
+                priority=0,
+                deleted=False,
                 related_to={parent_raw: TaskRelation(relation={"parent": True})},
             )
         ]
-        body = json.loads(await res_tasks())
-        related_to = body["tasks"][0]["relatedTo"]
+        body = json.loads(await resource())
+        task = body["tasks"][0]
+        assert task["priority"] == 0
+        assert task["deleted"] is False
+        assert "description" not in task
+        assert "tags" not in task
+        related_to = task["relatedTo"]
         assert related_to == {register_id(parent_raw): {"relation": {"parent": True}}}
         assert parent_raw not in related_to
 
