@@ -614,7 +614,9 @@ class TestTaskEndpoints:
         )
 
         async with MorgenClient(api_key="k") as client:
-            tasks = await client.list_tasks()
+            data, limit = await client.list_tasks_and_spaces()
+            tasks = data.tasks
+            assert limit == 100
 
         assert len(tasks) == 1
         assert tasks[0].title == "Hi"
@@ -628,7 +630,9 @@ class TestTaskEndpoints:
         )
 
         async with MorgenClient(api_key="k") as client:
-            await client.list_tasks(limit=10, updated_after="2026-01-01T00:00:00")
+            await client.list_tasks_and_spaces(
+                limit=10, updated_after="2026-01-01T00:00:00"
+            )
 
         url = str(route.calls.last.request.url)
         assert "limit=10" in url
@@ -752,7 +756,8 @@ class TestTagEndpoints:
             )
         )
         async with MorgenClient(api_key="k") as client:
-            tags = await client.list_tags()
+            tags, limit = await client.list_tags()
+            assert limit is None
         assert len(tags) == 1
         assert tags[0].name == "Work"
 
@@ -834,15 +839,6 @@ class TestConfigurableListLimits:
         """Unset config still sends 100 — Morgen does not honour its documented default."""
         route = self._tasks_route()
         async with MorgenClient(api_key="k") as client:
-            await client.list_tasks()
-        assert route.calls.last.request.url.params["limit"] == "100"
-
-    @respx.mock
-    async def test_tasks_and_spaces_defaults_to_documented_100(self):
-        """The limit is resolved in list_tasks_and_spaces, where the HTTP call
-        lives — not in the list_tasks wrapper that delegates to it."""
-        route = self._tasks_route()
-        async with MorgenClient(api_key="k") as client:
             await client.list_tasks_and_spaces()
         assert route.calls.last.request.url.params["limit"] == "100"
 
@@ -858,14 +854,6 @@ class TestConfigurableListLimits:
 
     @respx.mock
     async def test_tasks_env_var_overrides_default(self, monkeypatch):
-        monkeypatch.setenv(TASKS_LIMIT_ENV, "25")
-        route = self._tasks_route()
-        async with MorgenClient(api_key="k") as client:
-            await client.list_tasks()
-        assert route.calls.last.request.url.params["limit"] == "25"
-
-    @respx.mock
-    async def test_tasks_and_spaces_honors_env_var(self, monkeypatch):
         monkeypatch.setenv(TASKS_LIMIT_ENV, "25")
         route = self._tasks_route()
         async with MorgenClient(api_key="k") as client:
@@ -896,7 +884,7 @@ class TestConfigurableListLimits:
         monkeypatch.setenv(TASKS_LIMIT_ENV, "25")
         route = self._tasks_route()
         async with MorgenClient(api_key="k") as client:
-            await client.list_tasks(limit=3)
+            await client.list_tasks_and_spaces(limit=3)
         assert route.calls.last.request.url.params["limit"] == "3"
 
     @respx.mock
@@ -905,7 +893,7 @@ class TestConfigurableListLimits:
         set_limit_override(TASKS_LIMIT_ENV, 40)
         route = self._tasks_route()
         async with MorgenClient(api_key="k") as client:
-            await client.list_tasks()
+            await client.list_tasks_and_spaces()
         assert route.calls.last.request.url.params["limit"] == "40"
 
     @respx.mock
@@ -913,7 +901,7 @@ class TestConfigurableListLimits:
         set_limit_override(TASKS_LIMIT_ENV, 40)
         route = self._tasks_route()
         async with MorgenClient(api_key="k") as client:
-            await client.list_tasks(limit=2)
+            await client.list_tasks_and_spaces(limit=2)
         assert route.calls.last.request.url.params["limit"] == "2"
 
     # --- validation -----------------------------------------------------
@@ -922,20 +910,20 @@ class TestConfigurableListLimits:
         monkeypatch.setenv(TASKS_LIMIT_ENV, "lots")
         with pytest.raises(ValueError, match="must be an integer"):
             async with MorgenClient(api_key="k") as client:
-                await client.list_tasks()
+                await client.list_tasks_and_spaces()
 
     async def test_tasks_env_var_above_documented_max_raises(self, monkeypatch):
         """tasks.mdx caps limit at 100; a larger value fails loudly."""
         monkeypatch.setenv(TASKS_LIMIT_ENV, "500")
         with pytest.raises(ValueError, match="must be <= 100"):
             async with MorgenClient(api_key="k") as client:
-                await client.list_tasks()
+                await client.list_tasks_and_spaces()
 
     async def test_zero_env_var_raises(self, monkeypatch):
         monkeypatch.setenv(TASKS_LIMIT_ENV, "0")
         with pytest.raises(ValueError, match="must be >= 1"):
             async with MorgenClient(api_key="k") as client:
-                await client.list_tasks()
+                await client.list_tasks_and_spaces()
 
     @respx.mock
     async def test_tags_has_no_documented_maximum(self, monkeypatch):
@@ -952,5 +940,5 @@ class TestConfigurableListLimits:
         monkeypatch.setenv(TASKS_LIMIT_ENV, "   ")
         route = self._tasks_route()
         async with MorgenClient(api_key="k") as client:
-            await client.list_tasks()
+            await client.list_tasks_and_spaces()
         assert route.calls.last.request.url.params["limit"] == "100"

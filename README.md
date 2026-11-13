@@ -250,6 +250,20 @@ overrides both the flag and the environment variable.
 > suited to the request, and a per-call value always wins. Set this variable to
 > bound what a model can pull in one call, not to express a typical page size.
 
+In live probes, the default listing returned only open tasks with
+`needs-action` status. The probes included no `in-process` tasks. Supplying
+`updated_after` uses a timestamp-based view that can also include completed
+and soft-deleted tasks. Both modes are capped at the requested limit. In the
+probes, rows with an update timestamp were ordered newest first.
+
+Task tools and resources report `coverage.fetch_limit` and
+`coverage.limit_reached`. When `limit_reached` is true, the upstream fetch
+may have more matches. If you requested fewer than 100 tasks, raise the
+limit to see more. Morgen provides no continuation cursor. The cap is applied
+before local filters such as task list or due date. `count` counts returned
+items, and each `task_count` counts open tasks observed for that list. Tag
+listings report coverage when a tag limit is set.
+
 ## Troubleshooting
 
 **`MORGEN_API_KEY is not set`** — provide the key through your client's setup

@@ -37,6 +37,7 @@ from morgenmcp.tools.outputs import (
     TaskListListOutput,
     TaskListOutput,
     TaskRelationRef,
+    fetch_coverage,
 )
 from morgenmcp.tools.utils import (
     gather_bounded,
@@ -50,6 +51,12 @@ from morgenmcp.validators import (
     validate_progress,
     validate_timezone,
 )
+
+_OPEN_PROGRESS_VALUES = {"needs-action", "in-process", None}
+
+
+def _is_open(task: Task) -> bool:
+    return task.deleted is not True and task.progress in _OPEN_PROGRESS_VALUES
 
 
 def _format_task(task: Task) -> TaskItem:
@@ -102,18 +109,18 @@ def _build_related_to(parent_task_id: str | None) -> dict[str, TaskRelation] | N
 async def list_task_lists(
     account_id: str | None = None,
 ) -> TaskListListOutput:
-    """Discover task lists (spaces) and their task counts.
+    """Discover task lists (spaces) and count open tasks observed in each list.
 
     Args:
         account_id: Optional virtual ID of an account to filter task lists.
 
     Returns:
-        Dictionary with 'task_lists' and 'count'.
+        Task lists, their count, and coverage of the upstream task fetch.
     """
     client = get_client()
     real_account_id = resolve_id(account_id) if account_id is not None else None
 
-    res = await client.list_tasks_and_spaces()
+    res, fetch_limit = await client.list_tasks_and_spaces()
     tasks = res.tasks
     spaces = res.spaces or []
 
@@ -130,7 +137,8 @@ async def list_task_lists(
     task_counts: dict[str | None, int] = {}
     for task in tasks:
         list_key = task.task_list_id if task.task_list_id is not None else "default"
-        task_counts[list_key] = task_counts.get(list_key, 0) + 1
+        # Keep discovering lists even when every fetched task in them is closed.
+        task_counts[list_key] = task_counts.get(list_key, 0) + int(_is_open(task))
 
     task_lists: list[TaskListOutput] = []
     seen_ids: set[str] = set()
@@ -183,7 +191,11 @@ async def list_task_lists(
             )
         )
 
-    return TaskListListOutput(task_lists=task_lists, count=len(task_lists))
+    return TaskListListOutput(
+        task_lists=task_lists,
+        count=len(task_lists),
+        coverage=fetch_coverage(fetch_limit, len(res.tasks)),
+    )
 
 
 @handle_tool_errors
@@ -194,30 +206,32 @@ async def list_tasks(
 ) -> ListTasksResult:
     """List Morgen tasks.
 
-    Set `limit` to what you actually need — a small number for a quick look,
-    up to 100 when you need the full picture. Results are truncated silently:
-    if `count` equals the limit, there may be more tasks you did not see, so
-    do not treat the response as a complete inventory. Narrow with
-    `updated_after` rather than raising the limit where you can.
+    The default view returned only open tasks in live probes. With
+    `updated_after`, the incremental view can include completed and
+    soft-deleted tasks.
+    Morgen applies the fetch limit before local task-list filtering.
+    A reached limit means additional tasks may exist in the query scope.
 
     Args:
         limit: Max tasks to return (1-100). Defaults to the server's
             configured MORGENMCP_TASKS_LIMIT, else 100. The /tasks/list
             endpoint costs 10 rate-limit points per call regardless of limit,
             so a smaller limit saves tokens but not quota.
-        updated_after: ISO 8601 datetime; when provided, returns tasks
-            updated/created after this timestamp. Useful for incremental sync.
+        updated_after: ISO 8601 timestamp for incremental sync. This
+            view can return completed tasks and rows with deleted=True.
         task_list_id: Filter tasks by task list ID (virtual or real ID).
 
     Returns:
-        Dictionary with 'tasks' key containing list of task objects with
-        virtual IDs, plus 'count'.
+        Tasks with virtual IDs, their returned count, and upstream coverage.
     """
     if limit is not None and (limit < 1 or limit > 100):
         raise ToolError("limit must be between 1 and 100")
 
     client = get_client()
-    tasks = await client.list_tasks(limit=limit, updated_after=updated_after)
+    res, fetch_limit = await client.list_tasks_and_spaces(
+        limit=limit, updated_after=updated_after
+    )
+    tasks = res.tasks
 
     if task_list_id is not None:
         try:
@@ -236,7 +250,11 @@ async def list_tasks(
             )
         ]
 
-    return ListTasksResult(tasks=[_format_task(t) for t in tasks], count=len(tasks))
+    return ListTasksResult(
+        tasks=[_format_task(t) for t in tasks],
+        count=len(tasks),
+        coverage=fetch_coverage(fetch_limit, len(res.tasks)),
+    )
 
 
 @handle_tool_errors

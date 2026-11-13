@@ -458,24 +458,22 @@ class MorgenClient:
         self,
         limit: int | None = None,
         updated_after: str | None = None,
-    ) -> TasksListResponse:
-        """List tasks and spaces from /tasks/list.
+    ) -> tuple[TasksListResponse, int]:
+        """List tasks and spaces together with the limit sent to Morgen.
 
         Args:
-            limit: Maximum tasks to return (max 100). Defaults to
-                MORGENMCP_TASKS_LIMIT, else 100 — Morgen's documented default,
-                which the endpoint itself fails to apply.
-            updated_after: ISO 8601 datetime to filter for incremental sync.
-
-        Returns:
-            TasksListResponse containing tasks and spaces.
+            limit: Maximum tasks to fetch (up to 100). Defaults to the
+                configured task limit or 100. Morgen defaults to one task
+                when the request omits the limit.
+            updated_after: ISO 8601 timestamp for the incremental view,
+                which can include completed and soft-deleted tasks.
         """
         resolved = resolve_limit(
             limit, TASKS_LIMIT_ENV, TASKS_DEFAULT_LIMIT, TASKS_MAX_LIMIT
         )
-        params: dict[str, str | int] = {}
-        if resolved is not None:
-            params["limit"] = resolved
+        if resolved is None:
+            raise RuntimeError("Task listing requires a fetch limit")
+        params: dict[str, str | int] = {"limit": resolved}
         if updated_after is not None:
             params["updatedAfter"] = updated_after
 
@@ -484,28 +482,7 @@ class MorgenClient:
 
         data = response.json()
         api_response = APIResponse[TasksListResponse].model_validate(data)
-        return api_response.data
-
-    async def list_tasks(
-        self,
-        limit: int | None = None,
-        updated_after: str | None = None,
-    ) -> list[Task]:
-        """List tasks, optionally filtered by update time.
-
-        Args:
-            limit: Maximum tasks to return (max 100). Defaults to
-                MORGENMCP_TASKS_LIMIT, else 100. Morgen's own default is 1, so
-                a limit is always sent rather than left to the server.
-            updated_after: ISO 8601 datetime to filter for incremental sync.
-
-        Returns:
-            List of Task objects.
-        """
-        data = await self.list_tasks_and_spaces(
-            limit=limit, updated_after=updated_after
-        )
-        return data.tasks
+        return api_response.data, resolved
 
     async def get_task(self, task_id: str) -> Task | None:
         """Retrieve a single task by ID.
@@ -587,17 +564,14 @@ class MorgenClient:
         self,
         limit: int | None = None,
         updated_after: str | None = None,
-    ) -> list[Tag]:
-        """List tags. With updated_after, also returns tags marked deleted.
+    ) -> tuple[list[Tag], int | None]:
+        """List tags and return the limit sent to Morgen, if any.
 
         Args:
-            limit: Maximum tags to return. Defaults to MORGENMCP_TAGS_LIMIT;
-                when neither is set the parameter is omitted, which Morgen
-                documents as returning all tags.
-            updated_after: ISO 8601 datetime for incremental sync.
-
-        Returns:
-            List of Tag objects (deleted ones have deleted=True).
+            limit: Maximum tags to fetch. Defaults to the configured tag
+                limit. Without one, Morgen returns all tags in the query.
+            updated_after: ISO 8601 timestamp for incremental sync, which
+                can include soft-deleted tags.
         """
         resolved = resolve_limit(
             limit, TAGS_LIMIT_ENV, TAGS_DEFAULT_LIMIT, TAGS_MAX_LIMIT
@@ -613,11 +587,11 @@ class MorgenClient:
 
         data = response.json()
         # The tags endpoint returns a bare array, not wrapped in {data: ...}
-        if isinstance(data, list):
-            return [Tag.model_validate(item) for item in data]
-        # Defensive: support {data: [...]} just in case
-        wrapped = data.get("data", []) if isinstance(data, dict) else []
-        return [Tag.model_validate(item) for item in wrapped]
+        if not isinstance(data, list):
+            # Defensive: support {data: [...]} just in case.
+            data = data.get("data", []) if isinstance(data, dict) else []
+        tags = [Tag.model_validate(item) for item in data]
+        return tags, resolved
 
     async def get_tag(self, tag_id: str) -> Tag:
         """Retrieve a single tag by ID."""

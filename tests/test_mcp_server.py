@@ -8,7 +8,9 @@ import pytest
 import respx
 from fastmcp import Client
 from fastmcp.client.logging import LogMessage
+from mcp.types import TextResourceContents
 
+from morgenmcp.client import MorgenClient
 from morgenmcp.models import Calendar, MorgenAPIError
 from morgenmcp.server import mcp
 from morgenmcp.tools.id_registry import clear_registry
@@ -21,6 +23,30 @@ def _use_tmp_data_dir(tmp_path, monkeypatch):
     clear_registry()
     yield
     clear_registry()
+
+
+@pytest.fixture
+async def isolated_response_cache():
+    """Evict cached MCP reads between tests that use the same calls.
+
+    Use keys() and delete() because destroy() clears collection setup and
+    breaks subsequent cache writes.
+    """
+    from fastmcp.server.middleware.caching import ResponseCachingMiddleware
+
+    cache_mw = next(
+        m for m in mcp.middleware if isinstance(m, ResponseCachingMiddleware)
+    )
+    backend = cache_mw._backend
+
+    async def clear():
+        for collection in ("tools/call", "resources/read"):
+            for key in await backend.keys(collection=collection):  # pyright: ignore[reportAttributeAccessIssue]
+                await backend.delete(collection=collection, key=key)
+
+    await clear()
+    yield
+    await clear()
 
 
 class TestMCPServer:
@@ -136,7 +162,7 @@ class TestMCPServer:
 
     async def test_list_tasks_output_matches_schema_for_live_shapes(self):
         """A reordered, scheduled task passes the tool's output schema."""
-        from morgenmcp.models import Task
+        from morgenmcp.models import Task, TasksListResponse
 
         task = Task.model_validate(
             {
@@ -148,7 +174,11 @@ class TestMCPServer:
         )
         with patch("morgenmcp.tools.tasks.get_client") as mock:
             client_mock = AsyncMock()
-            client_mock.list_tasks.return_value = [task]
+            data = TasksListResponse(tasks=[task])
+            client_mock.list_tasks_and_spaces.return_value = (
+                data,
+                100,
+            )
             mock.return_value = client_mock
 
             async with Client(mcp) as client:
@@ -157,6 +187,121 @@ class TestMCPServer:
         item = result.structured_content["tasks"][0]
         assert item["position"] == 1.5
         assert item["scheduled"] is True
+
+    @pytest.mark.usefixtures("isolated_response_cache")
+    @pytest.mark.parametrize("limit", [3, 100])
+    async def test_task_coverage_counts_rows_before_filtering(self, monkeypatch, limit):
+        monkeypatch.setenv("MORGENMCP_TASKS_LIMIT", str(limit))
+        with respx.mock as api:
+            route = api.get(
+                host="api.morgen.so", path="/v3/tasks/list", params={"limit": limit}
+            ).respond(
+                json={
+                    "data": {
+                        "tasks": [
+                            {"id": "fetched", "taskListId": "first"},
+                            {
+                                "id": "closed",
+                                "taskListId": "third",
+                                "progress": "completed",
+                            },
+                            {"id": "deleted", "taskListId": "third", "deleted": True},
+                        ],
+                        "spaces": [
+                            {"id": "first", "name": "First"},
+                            {"id": "second", "name": "Second"},
+                        ],
+                    }
+                }
+            )
+            async with MorgenClient(api_key="test-key") as upstream:
+                with (
+                    patch("morgenmcp.tools.tasks.get_client", return_value=upstream),
+                    patch("morgenmcp.resources.get_client", return_value=upstream),
+                ):
+                    async with Client(mcp) as client:
+                        lists = (
+                            await client.call_tool("morgen_list_task_lists", {})
+                        ).structured_content
+                        assert lists is not None
+                        second = next(
+                            item
+                            for item in lists["task_lists"]
+                            if item["name"] == "Second"
+                        )
+                        filtered = (
+                            await client.call_tool(
+                                "morgen_list_tasks", {"task_list_id": second["id"]}
+                            )
+                        ).structured_content
+                        assert filtered is not None
+                        open_contents = (await client.read_resource("morgen://tasks"))[
+                            0
+                        ]
+                        today_contents = (
+                            await client.read_resource("morgen://tasks/today")
+                        )[0]
+                        assert isinstance(open_contents, TextResourceContents)
+                        assert isinstance(today_contents, TextResourceContents)
+                        opened = json.loads(open_contents.text)
+                        today = json.loads(today_contents.text)
+
+        coverage = {
+            "fetch_limit": limit,
+            "limit_reached": limit == 3,
+        }
+        assert route.call_count == 4
+        assert lists["count"] == 3
+        assert {item["name"]: item["task_count"] for item in lists["task_lists"]} == {
+            "First": 1,
+            "Second": 0,
+            "Unnamed list": 0,
+        }
+        assert second["task_count"] == 0
+        assert opened["count"] == 1
+        assert filtered["count"] == today["count"] == 0
+        for payload in (lists, filtered, opened, today):
+            assert payload["coverage"] == coverage
+
+    @pytest.mark.usefixtures("isolated_response_cache")
+    @pytest.mark.parametrize("limit", [None, 1, 2])
+    async def test_tag_coverage_is_present_only_for_bounded_fetches(
+        self, monkeypatch, limit
+    ):
+        monkeypatch.delenv("MORGENMCP_TAGS_LIMIT", raising=False)
+        if limit is not None:
+            monkeypatch.setenv("MORGENMCP_TAGS_LIMIT", str(limit))
+        with respx.mock as api:
+            route = api.get(host="api.morgen.so", path="/v3/tags/list").respond(
+                json=[{"id": "tag", "name": "Work"}]
+            )
+            async with MorgenClient(api_key="test-key") as upstream:
+                with (
+                    patch("morgenmcp.tools.tags.get_client", return_value=upstream),
+                    patch("morgenmcp.resources.get_client", return_value=upstream),
+                ):
+                    async with Client(mcp) as client:
+                        tool = (
+                            await client.call_tool("morgen_list_tags", {})
+                        ).structured_content
+                        contents = (await client.read_resource("morgen://tags"))[0]
+                        assert isinstance(contents, TextResourceContents)
+                        resource = json.loads(contents.text)
+
+        assert route.call_count == 2
+        expected_params = {} if limit is None else {"limit": str(limit)}
+        assert all(
+            dict(call.request.url.params) == expected_params for call in route.calls
+        )
+        assert tool == resource
+        assert resource["count"] == 1
+        if limit is None:
+            assert "coverage" not in resource
+        else:
+            assert resource["coverage"] == {
+                "fetch_limit": limit,
+                "limit_reached": limit == 1,
+            }
 
     async def test_initialize_advertises_morgenmcp_version(self):
         """serverInfo on initialize carries morgenmcp's __version__, not FastMCP's."""
@@ -328,6 +473,7 @@ class TestMCPServer:
                 assert payload == {"accounts": [], "count": 0}
 
 
+@pytest.mark.usefixtures("isolated_response_cache")
 class TestTypedOutputSchemas:
     """The typed TypedDict returns give each tool a shaped outputSchema, and
     FastMCP validates every return against it at runtime.
@@ -337,31 +483,6 @@ class TestTypedOutputSchemas:
     sparse response would raise ``Output validation error`` in production. A
     future change that over-tightens a field to *required* fails here instead.
     """
-
-    @pytest.fixture(autouse=True)
-    async def _isolate_cache(self):
-        """Evict the shared response cache before each test in this class.
-
-        ``morgen_list_accounts`` takes no arguments, so its cache key (method +
-        args) is identical to the ``morgen_list_accounts`` call in
-        ``TestMCPServer`` — which mocks an *empty* account list. Without eviction
-        the sparse-account test below would be served that stale ``count: 0``
-        payload within the 60s TTL.
-
-        Uses the public ``keys()`` + ``delete()`` API, NOT ``_backend.destroy()``:
-        ``destroy`` tears down the collection-setup state and breaks every
-        subsequent ``put`` in the process (see ``TestResponseCaching``'s note).
-        """
-        from fastmcp.server.middleware.caching import ResponseCachingMiddleware
-
-        cache_mw = next(
-            m for m in mcp.middleware if isinstance(m, ResponseCachingMiddleware)
-        )
-        backend = cache_mw._backend
-        for collection in ("tools/call", "resources/read"):
-            for key in await backend.keys(collection=collection):
-                await backend.delete(collection=collection, key=key)
-        yield
 
     async def test_list_accounts_output_schema_is_shaped(self):
         """The tool advertises a real object schema, not the permissive default."""
@@ -562,6 +683,23 @@ class TestTypedOutputSchemas:
 
         assert result.is_error is False, result.content[0].text
         return result.structured_content
+
+    async def test_incremental_listing_preserves_completed_and_deleted_tasks(
+        self, monkeypatch
+    ):
+        payload = await self._mocked_task_call(
+            monkeypatch,
+            "morgen_list_tasks",
+            {"limit": 2, "updated_after": "2000-01-01T00:00:00Z"},
+            list_tasks=[
+                {"id": "completed-task", "progress": "completed"},
+                {"id": "deleted-task", "deleted": True},
+            ],
+        )
+        assert payload["count"] == 2
+        assert payload["tasks"][0]["progress"] == "completed"
+        assert payload["tasks"][1]["deleted"] is True
+        assert payload["coverage"] == {"fetch_limit": 2, "limit_reached": True}
 
     async def _call_task_tool(self, monkeypatch, tool: str, task: dict) -> dict:
         """Serve ``task`` from a respx-mocked Morgen API and return the tool's item."""
@@ -1070,7 +1208,7 @@ class TestResponseCaching:
         """Two reads of the same resource URI hit the underlying client once."""
         with patch("morgenmcp.resources.get_client") as mock:
             client_mock = AsyncMock()
-            client_mock.list_tags.return_value = []
+            client_mock.list_tags.return_value = ([], None)
             mock.return_value = client_mock
 
             async with Client(mcp) as client:

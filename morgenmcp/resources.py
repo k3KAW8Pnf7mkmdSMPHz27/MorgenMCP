@@ -36,8 +36,9 @@ from morgenmcp.tools.calendars import _format_calendar
 from morgenmcp.tools.events import _format_compact_event, _resolve_display_tz
 from morgenmcp.tools.id_registry import HASH_SPEC, register_id, resolve_id
 from morgenmcp.tools.id_utils import extract_account_from_calendar
+from morgenmcp.tools.outputs import ListTagsResult, fetch_coverage
 from morgenmcp.tools.tags import _format_tag
-from morgenmcp.tools.tasks import _format_task
+from morgenmcp.tools.tasks import _format_task, _is_open
 from morgenmcp.tools.utils import filter_none_values, gather_bounded
 
 _LOCAL_DT_FMT = "%Y-%m-%dT%H:%M:%S"
@@ -247,12 +248,6 @@ async def res_events_upcoming() -> str:
 
 # --- Task resources ---
 
-_OPEN_PROGRESS_VALUES = {"needs-action", "in-process", None}
-
-
-def _is_open(task) -> bool:
-    return task.progress in _OPEN_PROGRESS_VALUES
-
 
 def _due_date(task) -> date | None:
     if not task.due:
@@ -266,12 +261,13 @@ def _due_date(task) -> date | None:
 async def res_tasks() -> str:
     """Open tasks (not completed or cancelled)."""
     client = get_client()
-    tasks = await client.list_tasks()
-    open_tasks = [t for t in tasks if _is_open(t)]
+    result, fetch_limit = await client.list_tasks_and_spaces()
+    open_tasks = [t for t in result.tasks if _is_open(t)]
     return json.dumps(
         {
             "tasks": [_format_task(t).model_dump(mode="json") for t in open_tasks],
             "count": len(open_tasks),
+            "coverage": fetch_coverage(fetch_limit, len(result.tasks)),
             "filter": "open",
         }
     )
@@ -280,13 +276,14 @@ async def res_tasks() -> str:
 async def res_tasks_today() -> str:
     """Open tasks with a due date of today (local)."""
     client = get_client()
-    tasks = await client.list_tasks()
+    result, fetch_limit = await client.list_tasks_and_spaces()
     today = date.today()
-    todays = [t for t in tasks if _is_open(t) and _due_date(t) == today]
+    todays = [t for t in result.tasks if _is_open(t) and _due_date(t) == today]
     return json.dumps(
         {
             "tasks": [_format_task(t).model_dump(mode="json") for t in todays],
             "count": len(todays),
+            "coverage": fetch_coverage(fetch_limit, len(result.tasks)),
             "filter": "open,due_today",
             "date": today.isoformat(),
         }
@@ -299,10 +296,11 @@ async def res_tasks_today() -> str:
 async def res_tags() -> str:
     """List of user tags."""
     client = get_client()
-    tags = await client.list_tags()
-    return json.dumps(
-        {
-            "tags": [_format_tag(t) for t in tags],
-            "count": len(tags),
-        }
-    )
+    tags, fetch_limit = await client.list_tags()
+    payload: ListTagsResult = {
+        "tags": [_format_tag(t) for t in tags],
+        "count": len(tags),
+    }
+    if fetch_limit is not None:
+        payload["coverage"] = fetch_coverage(fetch_limit, len(tags))
+    return json.dumps(payload)

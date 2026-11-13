@@ -31,6 +31,21 @@ from typing import Annotated, NotRequired, TypedDict
 
 from pydantic import MISSING, BaseModel, Field, WithJsonSchema
 
+
+class FetchCoverage(TypedDict):
+    fetch_limit: Annotated[int, Field(description="Limit sent to Morgen.")]
+    limit_reached: Annotated[
+        bool,
+        Field(
+            description="The upstream row count reached the limit before local filtering."
+        ),
+    ]
+
+
+def fetch_coverage(limit: int, row_count: int) -> FetchCoverage:
+    return {"fetch_limit": limit, "limit_reached": row_count >= limit}
+
+
 # ---------------------------------------------------------------------------
 # Accounts
 # ---------------------------------------------------------------------------
@@ -245,13 +260,16 @@ class TaskListOutput(BaseModel):
     id: str
     name: str
     color: str | None
-    task_count: int
+    task_count: int = Field(
+        description="Open tasks observed for this list in the upstream fetch."
+    )
     account_id: str | None
 
 
 class TaskListListOutput(BaseModel):
     task_lists: list[TaskListOutput]
-    count: int
+    count: int = Field(description="Number of task lists returned.")
+    coverage: FetchCoverage
 
 
 class TaskRelationRef(BaseModel):
@@ -295,7 +313,8 @@ class TaskItem(BaseModel):
 
 class ListTasksResult(BaseModel):
     tasks: list[TaskItem]
-    count: int
+    count: int = Field(description="Number of tasks returned after filtering.")
+    coverage: FetchCoverage
 
 
 class GetTaskResult(BaseModel):
@@ -338,7 +357,8 @@ class TagItem(TypedDict):
 
 class ListTagsResult(TypedDict):
     tags: list[TagItem]
-    count: int
+    count: Annotated[int, Field(description="Number of tags returned.")]
+    coverage: NotRequired[FetchCoverage]
 
 
 class CreateTagResult(TypedDict):
