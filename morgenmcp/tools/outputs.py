@@ -255,7 +255,9 @@ class TaskListListOutput(TypedDict):
 
 
 class TaskRelationRef(TypedDict):
-    relation: NotRequired[str]
+    """Relation flags inside ``TaskItem.relatedTo`` (JSCalendar ``Relation.relation``)."""
+
+    relation: NotRequired[dict[str, bool]]
 
 
 class TaskItem(TypedDict):

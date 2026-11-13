@@ -525,34 +525,56 @@ class TestTypedOutputSchemas:
         "links": {"link-1": {"@type": "Link", "href": "https://example.com/spec"}},
     }
 
-    async def _call_task_tool(self, monkeypatch, tool: str, task: dict) -> dict:
-        """Serve ``task`` from a respx-mocked Morgen API and return the tool's item.
+    async def _mocked_task_call(
+        self,
+        monkeypatch,
+        tool: str,
+        args: dict,
+        *,
+        list_tasks: list[dict] | None = None,
+        single_task: dict | None = None,
+    ) -> dict:
+        """Execute a task tool against a respx-mocked Morgen API.
 
         Only HTTP is mocked, so the real client, envelope parse, ``Task`` model,
         ``_format_task`` and output-schema validation all run.
         """
         from morgenmcp import client as client_module
-        from morgenmcp.tools.id_registry import register_id
 
         monkeypatch.setattr(
             client_module, "_client", client_module.MorgenClient(api_key="test-key")
         )
-        if tool == "morgen_get_task":
-            args = {"task_id": register_id(task["id"])}
-        else:
-            args = {"limit": 5}
         with respx.mock(assert_all_called=False) as api:
             api.get(host="api.morgen.so", path="/v3/tasks/list").respond(
-                json={"data": {"tasks": [task], "labelDefs": [], "spaces": []}}
+                json={
+                    "data": {
+                        "tasks": list_tasks or [],
+                        "labelDefs": [],
+                        "spaces": [],
+                    }
+                }
             )
             api.get(host="api.morgen.so", path="/v3/tasks").respond(
-                json={"data": {"task": task, "labelDefs": []}}
+                json={"data": {"task": single_task, "labelDefs": []}}
             )
             async with Client(mcp) as client:
                 result = await client.call_tool(tool, args, raise_on_error=False)
 
         assert result.is_error is False, result.content[0].text
-        payload = result.structured_content
+        return result.structured_content
+
+    async def _call_task_tool(self, monkeypatch, tool: str, task: dict) -> dict:
+        """Serve ``task`` from a respx-mocked Morgen API and return the tool's item."""
+        from morgenmcp.tools.id_registry import register_id
+
+        args = (
+            {"task_id": register_id(task["id"])}
+            if tool == "morgen_get_task"
+            else {"limit": 5}
+        )
+        payload = await self._mocked_task_call(
+            monkeypatch, tool, args, list_tasks=[task], single_task=task
+        )
         return payload["tasks"][0] if tool == "morgen_list_tasks" else payload["task"]
 
     @pytest.mark.parametrize("tool", ["morgen_list_tasks", "morgen_get_task"])
@@ -608,6 +630,177 @@ class TestTypedOutputSchemas:
             monkeypatch, "morgen_get_task", {**self._LIVE_TASK, "deleted": True}
         )
         assert item["deleted"] is True
+
+    @staticmethod
+    def _deref_schema(root: dict, node: dict) -> dict:
+        while "$ref" in node:
+            ref = node["$ref"]
+            assert ref.startswith("#/$defs/"), f"Unexpected schema ref: {ref}"
+            node = root["$defs"][ref.removeprefix("#/$defs/")]
+        return node
+
+    @pytest.mark.parametrize("tool", ["morgen_list_tasks", "morgen_get_task"])
+    async def test_task_relation_schema_type(self, tool):
+        """relatedTo.*.relation advertises a bool-valued object, not a string (#35)."""
+        async with Client(mcp) as client:
+            by_name = {t.name: t for t in await client.list_tools()}
+        schema = by_name[tool].outputSchema
+        props = schema["properties"]
+        item = self._deref_schema(
+            schema,
+            props["tasks"]["items"] if tool == "morgen_list_tasks" else props["task"],
+        )
+        related_to = self._deref_schema(schema, item["properties"]["relatedTo"])
+        rel_ref = self._deref_schema(schema, related_to["additionalProperties"])
+        rel_prop = self._deref_schema(schema, rel_ref["properties"]["relation"])
+        assert rel_prop["type"] == "object"
+        assert rel_prop["additionalProperties"] == {"type": "boolean"}
+
+    @pytest.mark.parametrize("tool", ["morgen_list_tasks", "morgen_get_task"])
+    @pytest.mark.parametrize(
+        ("raw_related_to", "expected_relations"),
+        [
+            (
+                {
+                    "parent-raw-1": {
+                        "@type": "Relation",
+                        "relation": {"parent": True},
+                    }
+                },
+                {"parent-raw-1": {"relation": {"parent": True}}},
+            ),
+            (
+                {
+                    "parent-raw-1": {
+                        "@type": "Relation",
+                        "relation": {"parent": True, "child": False},
+                    },
+                    "prev-raw-1": {
+                        "@type": "Relation",
+                        "relation": {"next": True},
+                    },
+                },
+                {
+                    "parent-raw-1": {"relation": {"parent": True, "child": False}},
+                    "prev-raw-1": {"relation": {"next": True}},
+                },
+            ),
+            (
+                {"parent-raw-1": {"@type": "Relation"}},
+                {"parent-raw-1": {"relation": {}}},
+            ),
+        ],
+        ids=["parent", "multi_and_false_flags", "omitted_relation_defaults_empty"],
+    )
+    async def test_task_with_relations_passes_output_validation(
+        self, monkeypatch, tool, raw_related_to, expected_relations
+    ):
+        """Subtasks and multi-relation tasks pass output validation with virtualized keys (#35)."""
+        from morgenmcp.tools.id_registry import register_id, resolve_id
+
+        item = await self._call_task_tool(
+            monkeypatch, tool, {**self._LIVE_TASK, "relatedTo": raw_related_to}
+        )
+
+        expected_virtual = {
+            register_id(raw_id): val for raw_id, val in expected_relations.items()
+        }
+        assert item["relatedTo"] == expected_virtual
+        for raw_id, vid in ((r, register_id(r)) for r in expected_relations):
+            assert raw_id not in item["relatedTo"]
+            assert len(vid) == 7
+            assert resolve_id(vid) == raw_id
+
+    @pytest.mark.parametrize("tool", ["morgen_list_tasks", "morgen_get_task"])
+    async def test_task_empty_related_to_is_omitted(self, monkeypatch, tool):
+        """An empty relatedTo map is filtered out rather than emitted as {}."""
+        item = await self._call_task_tool(
+            monkeypatch, tool, {**self._LIVE_TASK, "relatedTo": {}}
+        )
+        assert "relatedTo" not in item
+
+    async def test_list_tasks_with_mixed_parent_and_subtask(self, monkeypatch):
+        """A single subtask must not break a whole morgen_list_tasks listing (#35)."""
+        parent = {
+            **self._LIVE_TASK,
+            "id": "parent-raw-100",
+            "title": "Parent task",
+        }
+        subtask = {
+            **self._LIVE_TASK,
+            "id": "child-raw-200",
+            "title": "Subtask",
+            "relatedTo": {
+                "parent-raw-100": {
+                    "@type": "Relation",
+                    "relation": {"parent": True},
+                }
+            },
+        }
+        payload = await self._mocked_task_call(
+            monkeypatch,
+            "morgen_list_tasks",
+            {"limit": 10},
+            list_tasks=[parent, subtask],
+        )
+        assert payload["count"] == 2
+        parent_out, subtask_out = payload["tasks"]
+        assert "relatedTo" not in parent_out
+        assert subtask_out["relatedTo"] == {
+            parent_out["id"]: {"relation": {"parent": True}}
+        }
+
+    async def test_create_subtask_round_trips_through_list_tasks(self, monkeypatch):
+        """A subtask payload sent by morgen_create_task validates when read back (#35)."""
+        import httpx
+
+        from morgenmcp import client as client_module
+        from morgenmcp.tools.id_registry import register_id
+
+        monkeypatch.setattr(
+            client_module, "_client", client_module.MorgenClient(api_key="test-key")
+        )
+        parent_vid = register_id("parent-roundtrip-1")
+        created_bodies: list[dict] = []
+
+        def _create_handler(request):
+            body = json.loads(request.content.decode())
+            created_bodies.append(body)
+            return httpx.Response(200, json={"data": {"id": "child-roundtrip-2"}})
+
+        def _list_handler(_request):
+            sent = created_bodies[-1]
+            echoed = {
+                **self._LIVE_TASK,
+                "id": "child-roundtrip-2",
+                "title": sent["title"],
+                "relatedTo": sent["relatedTo"],
+            }
+            return httpx.Response(
+                200, json={"data": {"tasks": [echoed], "labelDefs": [], "spaces": []}}
+            )
+
+        with respx.mock(assert_all_called=False) as api:
+            api.post(host="api.morgen.so", path="/v3/tasks/create").mock(
+                side_effect=_create_handler
+            )
+            api.get(host="api.morgen.so", path="/v3/tasks/list").mock(
+                side_effect=_list_handler
+            )
+            async with Client(mcp) as client:
+                create_res = await client.call_tool(
+                    "morgen_create_task",
+                    {"title": "Subtask", "parent_task_id": parent_vid},
+                    raise_on_error=False,
+                )
+                assert create_res.is_error is False, create_res.content[0].text
+                list_res = await client.call_tool(
+                    "morgen_list_tasks", {"limit": 5}, raise_on_error=False
+                )
+
+        assert list_res.is_error is False, list_res.content[0].text
+        listed = list_res.structured_content["tasks"][0]
+        assert listed["relatedTo"] == {parent_vid: {"relation": {"parent": True}}}
 
     async def test_get_task_unknown_returns_tool_error(self, monkeypatch):
         """When Morgen API returns data.task = null, morgen_get_task returns a clean ToolError."""
