@@ -250,10 +250,11 @@ overrides both the flag and the environment variable.
 > suited to the request, and a per-call value always wins. Set this variable to
 > bound what a model can pull in one call, not to express a typical page size.
 
-Morgen lists open tasks by default. Supplying `updated_after` uses a
-timestamp-based view that can also include completed and soft-deleted tasks.
-Both modes are capped at the requested limit. In live probes, rows with an
-update timestamp were ordered newest first.
+In live probes, the default listing returned only open tasks with
+`needs-action` status. The probes included no `in-process` tasks. Supplying
+`updated_after` uses a timestamp-based view that can also include completed
+and soft-deleted tasks. Both modes are capped at the requested limit. In the
+probes, rows with an update timestamp were ordered newest first.
 
 Task tools and resources report `coverage.fetch_limit` and
 `coverage.limit_reached`. When `limit_reached` is true, the upstream fetch

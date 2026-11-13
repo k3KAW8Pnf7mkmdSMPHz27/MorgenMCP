@@ -199,8 +199,9 @@ async def list_tasks(
 ) -> ListTasksResult:
     """List Morgen tasks.
 
-    By default, Morgen lists open tasks. With `updated_after`, the
-    incremental view can include completed and soft-deleted tasks.
+    The default view returned only open tasks in live probes. With
+    `updated_after`, the incremental view can include completed and
+    soft-deleted tasks.
     Morgen applies the fetch limit before local task-list filtering.
     A reached limit means additional tasks may exist in the query scope.
 
