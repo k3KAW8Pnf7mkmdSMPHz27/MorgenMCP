@@ -10,6 +10,7 @@ from functools import wraps
 from typing import Any
 
 from fastmcp.exceptions import ToolError
+from pydantic import MISSING
 
 from morgenmcp.models import (
     Alert,
@@ -51,6 +52,11 @@ async def gather_bounded(
             return await coro
 
     return await asyncio.gather(*(_run(c) for c in coros), return_exceptions=True)
+
+
+def omit_none[T](value: T | None) -> T | MISSING:
+    """Convert an absent wire value to an omitted output field."""
+    return MISSING if value is None else value
 
 
 def filter_none_values(d: dict[str, Any]) -> dict[str, Any]:

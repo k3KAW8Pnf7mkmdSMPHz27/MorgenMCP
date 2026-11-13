@@ -44,6 +44,7 @@ from morgenmcp.tools.utils import (
     build_recurrence_rules,
     gather_bounded,
     handle_tool_errors,
+    omit_none,
 )
 from morgenmcp.validators import (
     validate_date_range,
@@ -201,11 +202,6 @@ def _format_compact_event(event: Event, display_tz: tzinfo) -> str:
         return f"{event.start}: {title} [{virtual_id}{kind}]"
 
 
-def _omit_none[T](value: T | None) -> T | MISSING:
-    """Convert an absent wire value to an omitted output field."""
-    return MISSING if value is None else value
-
-
 def _format_full_event(event: Event) -> EventItem:
     """Project a Morgen event onto the MCP output model."""
     metadata = event.metadata
@@ -214,23 +210,23 @@ def _format_full_event(event: Event) -> EventItem:
         id=register_id(event.id),
         calendarId=register_id(event.calendar_id),
         accountId=register_id(event.account_id),
-        title=_omit_none(event.title),
-        description=_omit_none(event.description),
-        start=_omit_none(event.start),
-        duration=_omit_none(event.duration),
-        timeZone=_omit_none(event.time_zone),
-        isAllDay=_omit_none(event.show_without_time),
-        status=_omit_none(event.free_busy_status),
-        privacy=_omit_none(event.privacy),
+        title=omit_none(event.title),
+        description=omit_none(event.description),
+        start=omit_none(event.start),
+        duration=omit_none(event.duration),
+        timeZone=omit_none(event.time_zone),
+        isAllDay=omit_none(event.show_without_time),
+        status=omit_none(event.free_busy_status),
+        privacy=omit_none(event.privacy),
         locations=[
-            EventLocation(name=_omit_none(location.name))
+            EventLocation(name=omit_none(location.name))
             for location in (event.locations or {}).values()
         ]
         or MISSING,
         participants=[
             EventParticipant(
-                name=_omit_none(participant.name),
-                email=_omit_none(participant.email),
+                name=omit_none(participant.name),
+                email=omit_none(participant.email),
                 status=participant.participation_status,
                 isOrganizer=participant.roles.owner if participant.roles else False,
             )
@@ -247,7 +243,7 @@ def _format_full_event(event: Event) -> EventItem:
             for rule in (event.recurrence_rules or [])
         ]
         or MISSING,
-        recurrenceId=_omit_none(event.recurrence_id),
+        recurrenceId=omit_none(event.recurrence_id),
         masterEventId=register_id(event.master_event_id)
         if event.master_event_id
         else MISSING,
@@ -257,17 +253,17 @@ def _format_full_event(event: Event) -> EventItem:
         ]
         or MISSING,
         useDefaultAlerts=event.use_default_alerts or MISSING,
-        googleColorId=_omit_none(event.google_color_id),
-        categoryId=_omit_none(metadata.category_id) if metadata else MISSING,
-        categoryName=_omit_none(metadata.category_name) if metadata else MISSING,
-        categoryColor=_omit_none(metadata.category_color) if metadata else MISSING,
+        googleColorId=omit_none(event.google_color_id),
+        categoryId=omit_none(metadata.category_id) if metadata else MISSING,
+        categoryName=omit_none(metadata.category_name) if metadata else MISSING,
+        categoryColor=omit_none(metadata.category_color) if metadata else MISSING,
         taskId=register_id(metadata.task_id)
         if metadata and metadata.task_id
         else MISSING,
-        progress=_omit_none(metadata.progress) if metadata else MISSING,
-        canBeCompleted=_omit_none(metadata.can_be_completed) if metadata else MISSING,
-        isAutoScheduled=_omit_none(metadata.is_auto_scheduled) if metadata else MISSING,
-        virtualRoomUrl=_omit_none(room.url) if room else MISSING,
+        progress=omit_none(metadata.progress) if metadata else MISSING,
+        canBeCompleted=omit_none(metadata.can_be_completed) if metadata else MISSING,
+        isAutoScheduled=omit_none(metadata.is_auto_scheduled) if metadata else MISSING,
+        virtualRoomUrl=omit_none(room.url) if room else MISSING,
     )
 
 

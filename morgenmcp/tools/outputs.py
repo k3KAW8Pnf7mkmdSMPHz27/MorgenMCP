@@ -15,7 +15,7 @@ event with no description). So any field that ``filter_none_values`` — or
 conditional construction — can drop is ``NotRequired``. Only keys that are
 *always* present in the emitted dict are required.
 
-Full event output uses Pydantic models with `MISSING` for fields that can
+Event listings and task models use Pydantic with `MISSING` for fields that can
 be omitted. Pydantic leaves those fields out of serialization and describes
 them as optional in the schema.
 
@@ -27,9 +27,9 @@ hand-built camelCase dicts the tools emit.
 
 from __future__ import annotations
 
-from typing import NotRequired, TypedDict
+from typing import Annotated, NotRequired, TypedDict
 
-from pydantic import MISSING, BaseModel
+from pydantic import MISSING, BaseModel, Field, WithJsonSchema
 
 # ---------------------------------------------------------------------------
 # Accounts
@@ -239,7 +239,7 @@ class BatchUpdateResult(TypedDict):
 # ---------------------------------------------------------------------------
 
 
-class TaskListOutput(TypedDict):
+class TaskListOutput(BaseModel):
     """One task list / space with task count."""
 
     id: str
@@ -249,59 +249,70 @@ class TaskListOutput(TypedDict):
     account_id: str | None
 
 
-class TaskListListOutput(TypedDict):
+class TaskListListOutput(BaseModel):
     task_lists: list[TaskListOutput]
     count: int
 
 
-class TaskRelationRef(TypedDict):
-    relation: NotRequired[str]
+class TaskRelationRef(BaseModel):
+    """Relation flags inside ``TaskItem.relatedTo`` (JSCalendar ``Relation.relation``)."""
+
+    relation: dict[str, bool] | MISSING = Field(
+        default=MISSING,
+        description="Relationship flags for the referenced task. For example, "
+        '{"parent": true} identifies it as this task’s parent.',
+    )
 
 
-class TaskItem(TypedDict):
-    """One task (``_format_task``). Only ``id`` is always emitted; every other
-    field is dropped by ``filter_none_values`` when empty."""
+class TaskItem(BaseModel):
+    """One task with virtual IDs and omittable fields."""
 
     id: str
-    accountId: NotRequired[str]
-    integrationId: NotRequired[str]
-    taskListId: NotRequired[str]
-    title: NotRequired[str]
-    description: NotRequired[str]
-    due: NotRequired[str]
-    timeZone: NotRequired[str]
-    estimatedDuration: NotRequired[str]
-    priority: NotRequired[int]
-    progress: NotRequired[str]
-    position: NotRequired[float]
-    relatedTo: NotRequired[dict[str, TaskRelationRef]]
-    tags: NotRequired[list[str]]
-    scheduled: NotRequired[bool]
-    created: NotRequired[str]
-    updated: NotRequired[str]
-    deleted: NotRequired[bool]
+    accountId: str | MISSING = MISSING
+    integrationId: str | MISSING = MISSING
+    taskListId: str | MISSING = MISSING
+    title: str | MISSING = MISSING
+    description: str | MISSING = MISSING
+    due: str | MISSING = MISSING
+    timeZone: str | MISSING = MISSING
+    estimatedDuration: str | MISSING = MISSING
+    priority: int | MISSING = MISSING
+    progress: str | MISSING = MISSING
+    # Preserve integer positions in JSON while advertising the existing number schema.
+    position: Annotated[int | float, WithJsonSchema({"type": "number"})] | MISSING = (
+        MISSING
+    )
+    relatedTo: dict[str, TaskRelationRef] | MISSING = Field(
+        default=MISSING,
+        description="Relationships keyed by the virtual IDs of the referenced tasks.",
+    )
+    tags: list[str] | MISSING = MISSING
+    scheduled: bool | MISSING = MISSING
+    created: str | MISSING = MISSING
+    updated: str | MISSING = MISSING
+    deleted: bool | MISSING = MISSING
 
 
-class ListTasksResult(TypedDict):
+class ListTasksResult(BaseModel):
     tasks: list[TaskItem]
     count: int
 
 
-class GetTaskResult(TypedDict):
+class GetTaskResult(BaseModel):
     task: TaskItem
 
 
-class CreatedTaskRef(TypedDict):
+class CreatedTaskRef(BaseModel):
     id: str
 
 
-class CreateTaskResult(TypedDict):
+class CreateTaskResult(BaseModel):
     success: bool
     message: str
     task: CreatedTaskRef
 
 
-class MutateTaskResult(TypedDict):
+class MutateTaskResult(BaseModel):
     """Return of ``update_task`` / ``move_task`` / ``complete_task`` /
     ``reopen_task`` / ``delete_task``."""
 

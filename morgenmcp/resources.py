@@ -270,7 +270,7 @@ async def res_tasks() -> str:
     open_tasks = [t for t in tasks if _is_open(t)]
     return json.dumps(
         {
-            "tasks": [_format_task(t) for t in open_tasks],
+            "tasks": [_format_task(t).model_dump(mode="json") for t in open_tasks],
             "count": len(open_tasks),
             "filter": "open",
         }
@@ -285,7 +285,7 @@ async def res_tasks_today() -> str:
     todays = [t for t in tasks if _is_open(t) and _due_date(t) == today]
     return json.dumps(
         {
-            "tasks": [_format_task(t) for t in todays],
+            "tasks": [_format_task(t).model_dump(mode="json") for t in todays],
             "count": len(todays),
             "filter": "open,due_today",
             "date": today.isoformat(),

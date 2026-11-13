@@ -116,6 +116,7 @@ class TestListTaskLists:
         )
 
         result = await list_task_lists()
+        result = result.model_dump()
         assert result["count"] == 3
         lists = result["task_lists"]
 
@@ -148,6 +149,7 @@ class TestListTaskLists:
 
         acc1_virtual = register_id("acc_real_1")
         result = await list_task_lists(account_id=acc1_virtual)
+        result = result.model_dump()
         assert result["count"] == 1
         assert result["task_lists"][0]["name"] == "Acc1 Space"
         assert result["task_lists"][0]["task_count"] == 1
@@ -166,6 +168,7 @@ class TestListTaskLists:
         )
 
         result = await list_task_lists()
+        result = result.model_dump()
         entry = result["task_lists"][0]
         assert raw not in entry.values()
         assert entry["name"] == "Unnamed list"
@@ -189,6 +192,7 @@ class TestListTaskLists:
         mock_task_client.list_tasks.return_value = tasks
 
         result = await list_task_lists()
+        result = result.model_dump()
         assert result["count"] == 1
         entry = result["task_lists"][0]
         assert entry["name"] == "Default"
@@ -196,6 +200,7 @@ class TestListTaskLists:
 
         # The filter must agree with the count reported above.
         filtered = await list_tasks(task_list_id=entry["id"])
+        filtered = filtered.model_dump()
         assert filtered["count"] == entry["task_count"]
 
     async def test_list_task_lists_keeps_space_name_when_account_filtered(
@@ -213,6 +218,7 @@ class TestListTaskLists:
         )
 
         result = await list_task_lists(account_id=register_id("acc_real_1"))
+        result = result.model_dump()
         entry = result["task_lists"][0]
         assert entry["name"] == "Work Projects"
         assert entry["color"] == "#ff0000"
@@ -230,6 +236,7 @@ class TestListTasks:
     async def test_list_tasks_returns_virtual_ids(self, mock_task_client, sample_task):
         mock_task_client.list_tasks.return_value = [sample_task]
         result = await list_tasks()
+        result = result.model_dump()
         assert result["count"] == 1
         assert len(result["tasks"][0]["id"]) == 7
         assert result["tasks"][0]["title"] == "Review report"
@@ -266,11 +273,13 @@ class TestListTasks:
         # Filter by virtual ID
         space1_virtual = register_id("space_real_1")
         res1 = await list_tasks(task_list_id=space1_virtual)
+        res1 = res1.model_dump()
         assert res1["count"] == 1
         assert res1["tasks"][0]["title"] == "Task 1"
 
         # Filter by "default" (matches "default" and None)
         res_default = await list_tasks(task_list_id="default")
+        res_default = res_default.model_dump()
         assert res_default["count"] == 2
         titles = {t["title"] for t in res_default["tasks"]}
         assert titles == {"Task 3", "Task 4"}
@@ -282,6 +291,7 @@ class TestGetTask:
         mock_task_client.get_task.return_value = sample_task
 
         result = await get_task(virtual)
+        result = result.model_dump()
         mock_task_client.get_task.assert_awaited_once_with(sample_task.id)
         assert result["task"]["id"] == virtual
 
@@ -309,6 +319,7 @@ class TestGetTask:
         mock_task_client.get_task.return_value = sample_task
 
         result = await get_task(virtual)
+        result = result.model_dump()
         assert result["task"]["id"] == virtual
         assert result["task"]["deleted"] is True
 
@@ -317,6 +328,7 @@ class TestCreateTask:
     async def test_create_task_returns_virtual_id(self, mock_task_client):
         mock_task_client.create_task.return_value = "new_real_id"
         result = await create_task(title="Hello")
+        result = result.model_dump()
         assert result["success"] is True
         assert len(result["task"]["id"]) == 7
 
@@ -440,6 +452,7 @@ class TestCompleteAndReopen:
     async def test_complete_task(self, mock_task_client):
         v = register_id("task_x")
         result = await complete_task(v)
+        result = result.model_dump()
         assert result["success"] is True
         sent = mock_task_client.close_task.call_args.args[0]
         assert sent.id == "task_x"
