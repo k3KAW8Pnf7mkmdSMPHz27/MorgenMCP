@@ -54,18 +54,21 @@ async def list_tags(
             configured MORGENMCP_TAGS_LIMIT; when unset, all tags are returned.
 
     Returns:
-        Dictionary with 'tags' key containing list of tag objects, plus 'count'.
+        Tags, their returned count, and fetch coverage when a limit is set.
     """
     if limit is not None and limit < 1:
         raise ToolError("limit must be a positive integer")
 
     client = get_client()
-    tags = await client.list_tags(limit=limit, updated_after=updated_after)
+    tags, coverage = await client.fetch_tags(limit=limit, updated_after=updated_after)
 
-    return {
+    result: ListTagsResult = {
         "tags": [_format_tag(t) for t in tags],
         "count": len(tags),
     }
+    if coverage is not None:
+        result["coverage"] = coverage
+    return result
 
 
 @handle_tool_errors

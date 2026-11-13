@@ -21,6 +21,7 @@ from morgenmcp.models import (
     EventDeleteRequest,
     EventsListResponse,
     EventUpdateRequest,
+    FetchCoverage,
     MorgenAPIError,
     RateLimitInfo,
     Tag,
@@ -121,6 +122,15 @@ def resolve_limit(
             raise ValueError(f"{env_name} must be an integer (got {raw!r})") from None
         return validate_limit(parsed, env_name, maximum)
     return default
+
+
+def _fetch_coverage(limit: int, row_count: int) -> FetchCoverage:
+    return {
+        "fetch_limit": limit,
+        "fetched_count": row_count,
+        "limit_reached": row_count >= limit,
+        "completeness": "unknown",
+    }
 
 
 def _truncate_error_text(text: str, limit: int = _MAX_ERROR_BODY_CHARS) -> str:
@@ -459,23 +469,21 @@ class MorgenClient:
         limit: int | None = None,
         updated_after: str | None = None,
     ) -> TasksListResponse:
-        """List tasks and spaces from /tasks/list.
+        """List tasks and spaces from /tasks/list."""
+        data, _ = await self.fetch_tasks(limit=limit, updated_after=updated_after)
+        return data
 
-        Args:
-            limit: Maximum tasks to return (max 100). Defaults to
-                MORGENMCP_TASKS_LIMIT, else 100 — Morgen's documented default,
-                which the endpoint itself fails to apply.
-            updated_after: ISO 8601 datetime to filter for incremental sync.
-
-        Returns:
-            TasksListResponse containing tasks and spaces.
-        """
+    async def fetch_tasks(
+        self,
+        limit: int | None = None,
+        updated_after: str | None = None,
+    ) -> tuple[TasksListResponse, FetchCoverage]:
+        """Fetch tasks and spaces with coverage of the upstream task rows."""
         resolved = resolve_limit(
             limit, TASKS_LIMIT_ENV, TASKS_DEFAULT_LIMIT, TASKS_MAX_LIMIT
         )
-        params: dict[str, str | int] = {}
-        if resolved is not None:
-            params["limit"] = resolved
+        assert resolved is not None
+        params: dict[str, str | int] = {"limit": resolved}
         if updated_after is not None:
             params["updatedAfter"] = updated_after
 
@@ -484,7 +492,9 @@ class MorgenClient:
 
         data = response.json()
         api_response = APIResponse[TasksListResponse].model_validate(data)
-        return api_response.data
+        return api_response.data, _fetch_coverage(
+            resolved, len(api_response.data.tasks)
+        )
 
     async def list_tasks(
         self,
@@ -599,6 +609,15 @@ class MorgenClient:
         Returns:
             List of Tag objects (deleted ones have deleted=True).
         """
+        tags, _ = await self.fetch_tags(limit=limit, updated_after=updated_after)
+        return tags
+
+    async def fetch_tags(
+        self,
+        limit: int | None = None,
+        updated_after: str | None = None,
+    ) -> tuple[list[Tag], FetchCoverage | None]:
+        """Fetch tags with coverage when a limit is sent to Morgen."""
         resolved = resolve_limit(
             limit, TAGS_LIMIT_ENV, TAGS_DEFAULT_LIMIT, TAGS_MAX_LIMIT
         )
@@ -613,11 +632,14 @@ class MorgenClient:
 
         data = response.json()
         # The tags endpoint returns a bare array, not wrapped in {data: ...}
-        if isinstance(data, list):
-            return [Tag.model_validate(item) for item in data]
-        # Defensive: support {data: [...]} just in case
-        wrapped = data.get("data", []) if isinstance(data, dict) else []
-        return [Tag.model_validate(item) for item in wrapped]
+        if not isinstance(data, list):
+            # Defensive: support {data: [...]} just in case.
+            data = data.get("data", []) if isinstance(data, dict) else []
+        tags = [Tag.model_validate(item) for item in data]
+        coverage = (
+            _fetch_coverage(resolved, len(tags)) if resolved is not None else None
+        )
+        return tags, coverage
 
     async def get_tag(self, tag_id: str) -> Tag:
         """Retrieve a single tag by ID."""

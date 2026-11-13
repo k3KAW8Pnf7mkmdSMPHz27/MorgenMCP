@@ -8,7 +8,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastmcp.exceptions import ResourceError
 
-from morgenmcp.models import Account, Calendar, Event, Tag, Task
+from morgenmcp.client import _fetch_coverage
+from morgenmcp.models import Account, Calendar, Event, Tag, Task, TasksListResponse
 from morgenmcp.resources import (
     _LOCAL_DT_FMT,
     _is_open,
@@ -309,11 +310,17 @@ class TestEventWindowResources:
 class TestTaskResources:
     @pytest.mark.asyncio
     async def test_res_tasks_filters_completed(self, mock_client):
-        mock_client.list_tasks.return_value = [
-            Task(id="t1", title="open A", progress="needs-action"),
-            Task(id="t2", title="done", progress="completed"),
-            Task(id="t3", title="open B", progress=None),
-        ]
+        data = TasksListResponse(
+            tasks=[
+                Task(id="t1", title="open A", progress="needs-action"),
+                Task(id="t2", title="done", progress="completed"),
+                Task(id="t3", title="open B", progress=None),
+            ]
+        )
+        mock_client.fetch_tasks.return_value = (
+            data,
+            _fetch_coverage(100, len(data.tasks)),
+        )
         body = json.loads(await res_tasks())
         assert body["count"] == 2
         assert body["filter"] == "open"
@@ -326,12 +333,20 @@ class TestTaskResources:
         tomorrow_iso = (datetime.now() + timedelta(days=1)).strftime(
             "%Y-%m-%dT%H:%M:%S"
         )
-        mock_client.list_tasks.return_value = [
-            Task(id="t1", title="today", progress="needs-action", due=today_iso),
-            Task(id="t2", title="tomorrow", progress="needs-action", due=tomorrow_iso),
-            Task(id="t3", title="no due", progress="needs-action"),
-            Task(id="t4", title="today done", progress="completed", due=today_iso),
-        ]
+        data = TasksListResponse(
+            tasks=[
+                Task(id="t1", title="today", progress="needs-action", due=today_iso),
+                Task(
+                    id="t2", title="tomorrow", progress="needs-action", due=tomorrow_iso
+                ),
+                Task(id="t3", title="no due", progress="needs-action"),
+                Task(id="t4", title="today done", progress="completed", due=today_iso),
+            ]
+        )
+        mock_client.fetch_tasks.return_value = (
+            data,
+            _fetch_coverage(100, len(data.tasks)),
+        )
         body = json.loads(await res_tasks_today())
         assert body["count"] == 1
         assert body["tasks"][0]["title"] == "today"
@@ -346,17 +361,23 @@ class TestTaskResources:
         from morgenmcp.tools.id_registry import register_id
 
         parent_raw = "parent-raw-res-1"
-        mock_client.list_tasks.return_value = [
-            Task(
-                id="child-raw-res-1",
-                title="subtask",
-                progress="needs-action",
-                due=datetime.now().replace(hour=12).isoformat(),
-                priority=0,
-                deleted=False,
-                related_to={parent_raw: TaskRelation(relation={"parent": True})},
-            )
-        ]
+        data = TasksListResponse(
+            tasks=[
+                Task(
+                    id="child-raw-res-1",
+                    title="subtask",
+                    progress="needs-action",
+                    due=datetime.now().replace(hour=12).isoformat(),
+                    priority=0,
+                    deleted=False,
+                    related_to={parent_raw: TaskRelation(relation={"parent": True})},
+                )
+            ]
+        )
+        mock_client.fetch_tasks.return_value = (
+            data,
+            _fetch_coverage(100, len(data.tasks)),
+        )
         body = json.loads(await resource())
         task = body["tasks"][0]
         assert task["priority"] == 0
@@ -374,10 +395,13 @@ class TestTaskResources:
 class TestTagResources:
     @pytest.mark.asyncio
     async def test_res_tags_returns_list(self, mock_client):
-        mock_client.list_tags.return_value = [
-            Tag(id="tag-uuid-1", name="errands", color="#abc"),
-            Tag(id="tag-uuid-2", name="reading"),
-        ]
+        mock_client.fetch_tags.return_value = (
+            [
+                Tag(id="tag-uuid-1", name="errands", color="#abc"),
+                Tag(id="tag-uuid-2", name="reading"),
+            ],
+            None,
+        )
         body = json.loads(await res_tags())
         assert body["count"] == 2
         assert {t["name"] for t in body["tags"]} == {"errands", "reading"}

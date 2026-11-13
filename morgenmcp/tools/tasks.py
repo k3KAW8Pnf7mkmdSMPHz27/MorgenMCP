@@ -102,18 +102,18 @@ def _build_related_to(parent_task_id: str | None) -> dict[str, TaskRelation] | N
 async def list_task_lists(
     account_id: str | None = None,
 ) -> TaskListListOutput:
-    """Discover task lists (spaces) and their task counts.
+    """Discover task lists (spaces) and count their fetched tasks.
 
     Args:
         account_id: Optional virtual ID of an account to filter task lists.
 
     Returns:
-        Dictionary with 'task_lists' and 'count'.
+        Task lists, their count, and coverage of the upstream task fetch.
     """
     client = get_client()
     real_account_id = resolve_id(account_id) if account_id is not None else None
 
-    res = await client.list_tasks_and_spaces()
+    res, coverage = await client.fetch_tasks()
     tasks = res.tasks
     spaces = res.spaces or []
 
@@ -183,7 +183,9 @@ async def list_task_lists(
             )
         )
 
-    return TaskListListOutput(task_lists=task_lists, count=len(task_lists))
+    return TaskListListOutput(
+        task_lists=task_lists, count=len(task_lists), coverage=coverage
+    )
 
 
 @handle_tool_errors
@@ -194,11 +196,9 @@ async def list_tasks(
 ) -> ListTasksResult:
     """List Morgen tasks.
 
-    Set `limit` to what you actually need — a small number for a quick look,
-    up to 100 when you need the full picture. Results are truncated silently:
-    if `count` equals the limit, there may be more tasks you did not see, so
-    do not treat the response as a complete inventory. Narrow with
-    `updated_after` rather than raising the limit where you can.
+    Morgen applies the fetch limit before local task-list filtering.
+    Coverage describes the fetched rows. Even below the limit, an empty
+    or short result can omit tasks from the requested list.
 
     Args:
         limit: Max tasks to return (1-100). Defaults to the server's
@@ -210,14 +210,14 @@ async def list_tasks(
         task_list_id: Filter tasks by task list ID (virtual or real ID).
 
     Returns:
-        Dictionary with 'tasks' key containing list of task objects with
-        virtual IDs, plus 'count'.
+        Tasks with virtual IDs, their returned count, and upstream coverage.
     """
     if limit is not None and (limit < 1 or limit > 100):
         raise ToolError("limit must be between 1 and 100")
 
     client = get_client()
-    tasks = await client.list_tasks(limit=limit, updated_after=updated_after)
+    res, coverage = await client.fetch_tasks(limit=limit, updated_after=updated_after)
+    tasks = res.tasks
 
     if task_list_id is not None:
         try:
@@ -236,7 +236,9 @@ async def list_tasks(
             )
         ]
 
-    return ListTasksResult(tasks=[_format_task(t) for t in tasks], count=len(tasks))
+    return ListTasksResult(
+        tasks=[_format_task(t) for t in tasks], count=len(tasks), coverage=coverage
+    )
 
 
 @handle_tool_errors

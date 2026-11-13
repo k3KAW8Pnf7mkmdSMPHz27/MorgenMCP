@@ -250,6 +250,15 @@ overrides both the flag and the environment variable.
 > suited to the request, and a per-call value always wins. Set this variable to
 > bound what a model can pull in one call, not to express a typical page size.
 
+Task tools and resources include a `coverage` object with the effective
+`fetch_limit`, the upstream `fetched_count` before local filtering,
+`limit_reached`, and `completeness: "unknown"`. The `count` field counts
+returned items. Each `task_count` in `morgen_list_task_lists` counts fetched
+tasks assigned to that list. A zero count means zero matches in the fetched
+rows. Morgen can omit tasks even below the limit, and the limit applies
+before filters such as task list or due date. Tag listings include the same
+coverage fields when a tag limit is set.
+
 ## Troubleshooting
 
 **`MORGEN_API_KEY is not set`** — provide the key through your client's setup

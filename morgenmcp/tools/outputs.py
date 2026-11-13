@@ -31,6 +31,8 @@ from typing import Annotated, NotRequired, TypedDict
 
 from pydantic import MISSING, BaseModel, Field, WithJsonSchema
 
+from morgenmcp.models import FetchCoverage
+
 # ---------------------------------------------------------------------------
 # Accounts
 # ---------------------------------------------------------------------------
@@ -245,13 +247,14 @@ class TaskListOutput(BaseModel):
     id: str
     name: str
     color: str | None
-    task_count: int
+    task_count: int = Field(description="Fetched tasks assigned to this list.")
     account_id: str | None
 
 
 class TaskListListOutput(BaseModel):
     task_lists: list[TaskListOutput]
-    count: int
+    count: int = Field(description="Number of task lists returned.")
+    coverage: FetchCoverage
 
 
 class TaskRelationRef(BaseModel):
@@ -295,7 +298,8 @@ class TaskItem(BaseModel):
 
 class ListTasksResult(BaseModel):
     tasks: list[TaskItem]
-    count: int
+    count: int = Field(description="Number of tasks returned after filtering.")
+    coverage: FetchCoverage
 
 
 class GetTaskResult(BaseModel):
@@ -338,7 +342,8 @@ class TagItem(TypedDict):
 
 class ListTagsResult(TypedDict):
     tags: list[TagItem]
-    count: int
+    count: Annotated[int, Field(description="Number of tags returned.")]
+    coverage: NotRequired[FetchCoverage]
 
 
 class CreateTagResult(TypedDict):

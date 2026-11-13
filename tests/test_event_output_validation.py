@@ -236,7 +236,15 @@ async def test_sparse_builders_match_advertised_schema(
         item = item.model_dump()
     schema = advertised[tool].outputSchema
     assert schema is not None
-    jsonschema.validate({collection: [item], "count": 1}, schema)
+    result = {collection: [item], "count": 1}
+    if tool == "morgen_list_tasks":
+        result["coverage"] = {
+            "fetch_limit": 100,
+            "fetched_count": 1,
+            "limit_reached": False,
+            "completeness": "unknown",
+        }
+    jsonschema.validate(result, schema)
     if formatter_name == "calendar":
         assert item["metadata"] == {"busy": False}
         assert item["permissions"]["canRead"] is False
