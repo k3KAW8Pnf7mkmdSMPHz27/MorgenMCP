@@ -5,11 +5,12 @@ from __future__ import annotations
 import os
 from collections import defaultdict
 from datetime import datetime, timedelta, tzinfo
-from typing import Any, Literal, cast
+from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
+from pydantic import MISSING
 
 from morgenmcp.client import get_client
 from morgenmcp.models import (
@@ -27,7 +28,11 @@ from morgenmcp.tools.outputs import (
     BatchDeleteResult,
     BatchUpdateResult,
     CreateEventResult,
+    EventAlert,
     EventItem,
+    EventLocation,
+    EventParticipant,
+    EventRecurrenceRule,
     FailedItem,
     ListEventsResult,
     MutateEventResult,
@@ -37,7 +42,6 @@ from morgenmcp.tools.utils import (
     build_locations_dict,
     build_participants_dict,
     build_recurrence_rules,
-    filter_none_values,
     gather_bounded,
     handle_tool_errors,
 )
@@ -196,87 +200,73 @@ def _format_compact_event(event: Event, display_tz: tzinfo) -> str:
         return f"{event.start}: {title} [{virtual_id}{kind}]"
 
 
-def _format_recurrence_rule(rule: Any) -> dict[str, Any]:
-    """Compact representation of a recurrence rule."""
-    return filter_none_values(
-        {
-            "frequency": rule.frequency,
-            "interval": rule.interval,
-            "byDay": [d.day for d in (rule.by_day or [])] or None,
-        }
-    )
-
-
-def _format_alerts(event: Event) -> list[dict[str, str]] | None:
-    """Compact representation of an event's alerts as offset list."""
-    alerts = event.alerts or {}
-    if not alerts:
-        return None
-    out: list[dict[str, str]] = []
-    for alert in alerts.values():
-        if alert and alert.trigger:
-            out.append({"offset": alert.trigger.offset, "action": alert.action})
-    return out or None
+def _omit_none[T](value: T | None) -> T | MISSING:
+    """Convert an absent wire value to an omitted output field."""
+    return MISSING if value is None else value
 
 
 def _format_full_event(event: Event) -> EventItem:
-    """Format an event in full format with all fields and virtual IDs."""
+    """Project a Morgen event onto the MCP output model."""
     metadata = event.metadata
-    return cast(
-        "EventItem",
-        filter_none_values(
-            {
-                "id": register_id(event.id),
-                "calendarId": register_id(event.calendar_id),
-                "accountId": register_id(event.account_id),
-                "title": event.title,
-                "description": event.description,
-                "start": event.start,
-                "duration": event.duration,
-                "timeZone": event.time_zone,
-                "isAllDay": event.show_without_time,
-                "status": event.free_busy_status,
-                "privacy": event.privacy,
-                "locations": [
-                    {"name": loc.name} for loc in (event.locations or {}).values()
-                ],
-                "participants": [
-                    {
-                        "name": p.name,
-                        "email": p.email,
-                        "status": p.participation_status,
-                        "isOrganizer": p.roles.owner if p.roles else False,
-                    }
-                    for p in (event.participants or {}).values()
-                ],
-                "isRecurring": event.recurrence_rules is not None,
-                "recurrenceRules": [
-                    _format_recurrence_rule(r) for r in (event.recurrence_rules or [])
-                ]
-                or None,
-                "recurrenceId": event.recurrence_id,
-                "masterEventId": register_id(event.master_event_id)
-                if event.master_event_id
-                else None,
-                "alerts": _format_alerts(event),
-                "useDefaultAlerts": event.use_default_alerts or None,
-                "googleColorId": event.google_color_id,
-                "categoryId": metadata.category_id if metadata else None,
-                "categoryName": metadata.category_name if metadata else None,
-                "categoryColor": metadata.category_color if metadata else None,
-                "taskId": register_id(metadata.task_id)
-                if metadata and metadata.task_id
-                else None,
-                "progress": metadata.progress if metadata else None,
-                "canBeCompleted": metadata.can_be_completed if metadata else None,
-                "isAutoScheduled": metadata.is_auto_scheduled if metadata else None,
-                "virtualRoomUrl": (
-                    event.derived.virtual_room.url
-                    if event.derived and event.derived.virtual_room
-                    else None
-                ),
-            }
-        ),
+    room = event.derived.virtual_room if event.derived else None
+    return EventItem(
+        id=register_id(event.id),
+        calendarId=register_id(event.calendar_id),
+        accountId=register_id(event.account_id),
+        title=_omit_none(event.title),
+        description=_omit_none(event.description),
+        start=_omit_none(event.start),
+        duration=_omit_none(event.duration),
+        timeZone=_omit_none(event.time_zone),
+        isAllDay=_omit_none(event.show_without_time),
+        status=_omit_none(event.free_busy_status),
+        privacy=_omit_none(event.privacy),
+        locations=[
+            EventLocation(name=_omit_none(location.name))
+            for location in (event.locations or {}).values()
+        ]
+        or MISSING,
+        participants=[
+            EventParticipant(
+                name=_omit_none(participant.name),
+                email=_omit_none(participant.email),
+                status=participant.participation_status,
+                isOrganizer=participant.roles.owner if participant.roles else False,
+            )
+            for participant in (event.participants or {}).values()
+        ]
+        or MISSING,
+        isRecurring=event.recurrence_rules is not None,
+        recurrenceRules=[
+            EventRecurrenceRule(
+                frequency=rule.frequency,
+                interval=rule.interval,
+                byDay=[day.day for day in (rule.by_day or [])] or MISSING,
+            )
+            for rule in (event.recurrence_rules or [])
+        ]
+        or MISSING,
+        recurrenceId=_omit_none(event.recurrence_id),
+        masterEventId=register_id(event.master_event_id)
+        if event.master_event_id
+        else MISSING,
+        alerts=[
+            EventAlert(offset=alert.trigger.offset, action=alert.action)
+            for alert in (event.alerts or {}).values()
+        ]
+        or MISSING,
+        useDefaultAlerts=event.use_default_alerts or MISSING,
+        googleColorId=_omit_none(event.google_color_id),
+        categoryId=_omit_none(metadata.category_id) if metadata else MISSING,
+        categoryName=_omit_none(metadata.category_name) if metadata else MISSING,
+        categoryColor=_omit_none(metadata.category_color) if metadata else MISSING,
+        taskId=register_id(metadata.task_id)
+        if metadata and metadata.task_id
+        else MISSING,
+        progress=_omit_none(metadata.progress) if metadata else MISSING,
+        canBeCompleted=_omit_none(metadata.can_be_completed) if metadata else MISSING,
+        isAutoScheduled=_omit_none(metadata.is_auto_scheduled) if metadata else MISSING,
+        virtualRoomUrl=_omit_none(room.url) if room else MISSING,
     )
 
 
@@ -374,20 +364,16 @@ async def list_events(
                 continue
             all_events.extend(result)
 
-    # Format output (IDs are registered during formatting)
     if compact:
         display_tz = _resolve_display_tz(display_timezone)
-        return {
-            "events": [
-                _format_compact_event(event, display_tz) for event in all_events
-            ],
-            "count": len(all_events),
-        }
-    else:
-        return {
-            "events": [_format_full_event(event) for event in all_events],
-            "count": len(all_events),
-        }
+        return ListEventsResult(
+            events=[_format_compact_event(event, display_tz) for event in all_events],
+            count=len(all_events),
+        )
+    return ListEventsResult(
+        events=[_format_full_event(event) for event in all_events],
+        count=len(all_events),
+    )
 
 
 @handle_tool_errors

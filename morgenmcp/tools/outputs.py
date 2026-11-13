@@ -1,18 +1,23 @@
 """Typed output schemas for MCP tool return values.
 
-These `TypedDict`s give each tool a shaped `outputSchema` instead of the
+These output models give each tool a shaped `outputSchema` instead of the
 permissive ``{"type": "object", "additionalProperties": true}`` that a bare
 ``-> dict`` annotation produces. FastMCP 3.4.x validates each tool's return
 against this schema at runtime.
 
-**Why so many `NotRequired` fields:** every list/item payload is built through
-``filter_none_values`` (``tools/utils.py``), which drops any key whose value is
-None or ``[]``. A field marked *required* here that gets filtered out at runtime
+**Why so many `NotRequired` fields:** item builders use ``filter_none_values``
+(``tools/utils.py``) to drop keys whose values are None or ``[]``. This helper
+is shallow: nested item builders must filter their own optional fields too.
+A field marked *required* here that gets filtered out at runtime
 would raise ``ToolError: Output validation error: '<field>' is a required
 property`` on perfectly normal responses (an account with no display name, an
 event with no description). So any field that ``filter_none_values`` — or
 conditional construction — can drop is ``NotRequired``. Only keys that are
 *always* present in the emitted dict are required.
+
+Full event output uses Pydantic models with `MISSING` for fields that can
+be omitted. Pydantic leaves those fields out of serialization and describes
+them as optional in the schema.
 
 These are output-only view models. They intentionally do **not** reuse the
 Pydantic wire models in ``models.py``: those are alias-based request/response
@@ -23,6 +28,8 @@ hand-built camelCase dicts the tools emit.
 from __future__ import annotations
 
 from typing import NotRequired, TypedDict
+
+from pydantic import MISSING, BaseModel
 
 # ---------------------------------------------------------------------------
 # Accounts
@@ -107,71 +114,62 @@ class UpdateCalendarMetadataResult(TypedDict):
 # ---------------------------------------------------------------------------
 
 
-class EventLocation(TypedDict):
-    name: NotRequired[str]
+class EventLocation(BaseModel):
+    name: str | MISSING = MISSING
 
 
-class EventParticipant(TypedDict):
-    name: NotRequired[str]
-    email: NotRequired[str]
-    status: NotRequired[str]
-    isOrganizer: NotRequired[bool]
+class EventParticipant(BaseModel):
+    name: str | MISSING = MISSING
+    email: str | MISSING = MISSING
+    status: str | MISSING = MISSING
+    isOrganizer: bool | MISSING = MISSING
 
 
-class EventRecurrenceRule(TypedDict):
-    frequency: NotRequired[str]
-    interval: NotRequired[int]
-    byDay: NotRequired[list[str]]
+class EventRecurrenceRule(BaseModel):
+    frequency: str | MISSING = MISSING
+    interval: int | MISSING = MISSING
+    byDay: list[str] | MISSING = MISSING
 
 
-class EventAlert(TypedDict):
-    offset: NotRequired[str]
-    action: NotRequired[str]
+class EventAlert(BaseModel):
+    offset: str | MISSING = MISSING
+    action: str | MISSING = MISSING
 
 
-class EventItem(TypedDict):
-    """One event in full (non-compact) format (``_format_full_event``).
-
-    Only ``id``/``calendarId``/``accountId``/``isRecurring`` are always emitted;
-    everything else is dropped by ``filter_none_values`` when empty, so all are
-    ``NotRequired``. (``locations``/``participants`` are always assigned but may
-    be empty lists, which ``filter_none_values`` also drops.)
-    """
+class EventItem(BaseModel):
+    """One full event with virtual IDs and omittable fields."""
 
     id: str
     calendarId: str
     accountId: str
     isRecurring: bool
-    title: NotRequired[str]
-    description: NotRequired[str]
-    start: NotRequired[str]
-    duration: NotRequired[str]
-    timeZone: NotRequired[str]
-    isAllDay: NotRequired[bool]
-    status: NotRequired[str]
-    privacy: NotRequired[str]
-    locations: NotRequired[list[EventLocation]]
-    participants: NotRequired[list[EventParticipant]]
-    recurrenceRules: NotRequired[list[EventRecurrenceRule]]
-    recurrenceId: NotRequired[str]
-    masterEventId: NotRequired[str]
-    alerts: NotRequired[list[EventAlert]]
-    useDefaultAlerts: NotRequired[bool]
-    googleColorId: NotRequired[str]
-    categoryId: NotRequired[str]
-    categoryName: NotRequired[str]
-    categoryColor: NotRequired[str]
-    taskId: NotRequired[str]
-    progress: NotRequired[str]
-    # NotRequired, not `bool | None`: filter_none_values drops None but KEEPS
-    # False, so on an event with metadata these arrive as False, and on an event
-    # without metadata they are dropped entirely. Both states must validate.
-    canBeCompleted: NotRequired[bool]
-    isAutoScheduled: NotRequired[bool]
-    virtualRoomUrl: NotRequired[str]
+    title: str | MISSING = MISSING
+    description: str | MISSING = MISSING
+    start: str | MISSING = MISSING
+    duration: str | MISSING = MISSING
+    timeZone: str | MISSING = MISSING
+    isAllDay: bool | MISSING = MISSING
+    status: str | MISSING = MISSING
+    privacy: str | MISSING = MISSING
+    locations: list[EventLocation] | MISSING = MISSING
+    participants: list[EventParticipant] | MISSING = MISSING
+    recurrenceRules: list[EventRecurrenceRule] | MISSING = MISSING
+    recurrenceId: str | MISSING = MISSING
+    masterEventId: str | MISSING = MISSING
+    alerts: list[EventAlert] | MISSING = MISSING
+    useDefaultAlerts: bool | MISSING = MISSING
+    googleColorId: str | MISSING = MISSING
+    categoryId: str | MISSING = MISSING
+    categoryName: str | MISSING = MISSING
+    categoryColor: str | MISSING = MISSING
+    taskId: str | MISSING = MISSING
+    progress: str | MISSING = MISSING
+    canBeCompleted: bool | MISSING = MISSING
+    isAutoScheduled: bool | MISSING = MISSING
+    virtualRoomUrl: str | MISSING = MISSING
 
 
-class ListEventsResult(TypedDict):
+class ListEventsResult(BaseModel):
     """``list_events`` output. ``events`` is a list of ``EventItem`` in full
     mode, or a list of formatted strings when ``compact=True``."""
 

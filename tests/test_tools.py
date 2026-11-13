@@ -956,6 +956,7 @@ class TestListEvents:
             end="2023-03-02T00:00:00",
             calendar_ids=[virtual_cal],
         )
+        result = result.model_dump()
 
         assert "events" in result
         assert result["count"] == 1
@@ -979,6 +980,7 @@ class TestListEvents:
             end="2023-03-02T00:00:00",
             calendar_ids=[virtual_cal],
         )
+        result = result.model_dump()
 
         assert result["events"] == []
         assert result["count"] == 0
@@ -1022,6 +1024,7 @@ class TestListEvents:
             start="2023-03-01T00:00:00",
             end="2023-03-02T00:00:00",
         )
+        result = result.model_dump()
 
         assert result["count"] == 1
         # Verify list_calendars was called
@@ -1041,6 +1044,7 @@ class TestListEvents:
             calendar_ids=[virtual_cal],
             compact=True,
         )
+        result = result.model_dump()
 
         assert result["count"] == 1
         # Compact format should be a string
@@ -1076,6 +1080,7 @@ class TestListEvents:
             calendar_ids=[virtual_cal],
             compact=True,
         )
+        result = result.model_dump()
 
         assert "(all-day)" in result["events"][0]
         assert "Holiday" in result["events"][0]
@@ -1106,6 +1111,7 @@ class TestListEvents:
             compact=True,
             display_timezone="America/Chicago",
         )
+        result = result.model_dump()
 
         assert "Jul 15 09:15-10:00 CDT (America/Chicago)" in result["events"][0]
 
@@ -1139,6 +1145,7 @@ class TestListEvents:
             calendar_ids=[virtual_cal],
             compact=True,
         )
+        result = result.model_dump()
 
         # Berlin in July is CEST (UTC+2), so 16:15 CEST = 14:15 UTC
         assert "Jul 15 14:15-15:00 UTC" in result["events"][0]
@@ -1664,6 +1671,7 @@ class TestContextWarnings:
             end="2025-01-02T00:00:00",
             ctx=ctx,
         )
+        result = result.model_dump()
 
         assert result["count"] == 0
         ctx.warning.assert_awaited_once()
@@ -1737,6 +1745,7 @@ class TestContextWarnings:
             start="2025-01-01T00:00:00",
             end="2025-01-02T00:00:00",
         )
+        result = result.model_dump()
         assert result["count"] == 0
 
 
@@ -1926,6 +1935,7 @@ class TestFormatFullEventExposesMetadata:
             end="2025-01-02T00:00:00",
             calendar_ids=[virtual_cal],
         )
+        result = result.model_dump()
         ev_out = result["events"][0]
         assert ev_out["categoryId"] == "cat-uuid"
         assert ev_out["categoryName"] == "Deep Work"
@@ -1962,6 +1972,7 @@ class TestFormatFullEventExposesMetadata:
             end="2025-01-02T00:00:00",
             calendar_ids=[virtual_cal],
         )
+        result = result.model_dump()
         ev_out = result["events"][0]
         assert ev_out["canBeCompleted"] is True
         assert ev_out["isAutoScheduled"] is True
@@ -1970,12 +1981,7 @@ class TestFormatFullEventExposesMetadata:
     async def test_full_format_keeps_false_metadata_flags(
         self, mock_morgen_client, sample_calendar_id, sample_account_id
     ):
-        """filter_none_values drops None but KEEPS False.
-
-        This is why canBeCompleted/isAutoScheduled must be NotRequired in
-        EventItem rather than required: they are present-as-False here and
-        absent entirely on a metadata-less event, and both must validate.
-        """
+        """Explicit false metadata flags survive event serialization."""
         from morgenmcp.models import EventMetadata
 
         evt_id = make_event_id("a@b.com", "uid_false", sample_account_id)
@@ -1997,6 +2003,7 @@ class TestFormatFullEventExposesMetadata:
             end="2025-01-02T00:00:00",
             calendar_ids=[virtual_cal],
         )
+        result = result.model_dump()
         ev_out = result["events"][0]
         assert ev_out["canBeCompleted"] is False
         assert ev_out["isAutoScheduled"] is False
@@ -2033,6 +2040,7 @@ class TestFormatFullEventExposesMetadata:
             end="2025-01-02T00:00:00",
             calendar_ids=[virtual_cal],
         )
+        result = result.model_dump()
         ev_out = result["events"][0]
         assert ev_out["isRecurring"] is True
         assert ev_out["recurrenceRules"][0]["frequency"] == "weekly"
@@ -2065,5 +2073,6 @@ class TestFormatFullEventExposesMetadata:
             end="2025-01-02T00:00:00",
             calendar_ids=[virtual_cal],
         )
+        result = result.model_dump()
         ev_out = result["events"][0]
         assert ev_out["alerts"] == [{"offset": "-PT15M", "action": "display"}]
