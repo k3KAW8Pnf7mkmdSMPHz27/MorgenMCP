@@ -52,6 +52,12 @@ from morgenmcp.validators import (
     validate_timezone,
 )
 
+_OPEN_PROGRESS_VALUES = {"needs-action", "in-process", None}
+
+
+def _is_open(task: Task) -> bool:
+    return task.deleted is not True and task.progress in _OPEN_PROGRESS_VALUES
+
 
 def _format_task(task: Task) -> TaskItem:
     """Format a task for tool output, virtualizing IDs."""
@@ -131,7 +137,8 @@ async def list_task_lists(
     task_counts: dict[str | None, int] = {}
     for task in tasks:
         list_key = task.task_list_id if task.task_list_id is not None else "default"
-        task_counts[list_key] = task_counts.get(list_key, 0) + 1
+        # Keep discovering lists even when every fetched task in them is closed.
+        task_counts[list_key] = task_counts.get(list_key, 0) + int(_is_open(task))
 
     task_lists: list[TaskListOutput] = []
     seen_ids: set[str] = set()

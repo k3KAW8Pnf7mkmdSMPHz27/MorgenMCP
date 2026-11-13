@@ -11,7 +11,6 @@ from fastmcp.exceptions import ResourceError
 from morgenmcp.models import Account, Calendar, Event, Tag, Task, TasksListResponse
 from morgenmcp.resources import (
     _LOCAL_DT_FMT,
-    _is_open,
     _this_week_range,
     _today_range,
     _upcoming_range,
@@ -29,6 +28,7 @@ from morgenmcp.resources import (
     res_tasks_today,
 )
 from morgenmcp.tools.id_registry import clear_registry, register_id
+from morgenmcp.tools.tasks import _is_open
 
 
 def _make_calendar_id(account_id: str, email: str) -> str:

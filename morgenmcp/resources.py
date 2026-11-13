@@ -38,7 +38,7 @@ from morgenmcp.tools.id_registry import HASH_SPEC, register_id, resolve_id
 from morgenmcp.tools.id_utils import extract_account_from_calendar
 from morgenmcp.tools.outputs import ListTagsResult, fetch_coverage
 from morgenmcp.tools.tags import _format_tag
-from morgenmcp.tools.tasks import _format_task
+from morgenmcp.tools.tasks import _format_task, _is_open
 from morgenmcp.tools.utils import filter_none_values, gather_bounded
 
 _LOCAL_DT_FMT = "%Y-%m-%dT%H:%M:%S"
@@ -247,12 +247,6 @@ async def res_events_upcoming() -> str:
 
 
 # --- Task resources ---
-
-_OPEN_PROGRESS_VALUES = {"needs-action", "in-process", None}
-
-
-def _is_open(task) -> bool:
-    return task.progress in _OPEN_PROGRESS_VALUES
 
 
 def _due_date(task) -> date | None:

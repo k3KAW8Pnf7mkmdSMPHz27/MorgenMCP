@@ -189,7 +189,7 @@ class TestMCPServer:
         assert item["scheduled"] is True
 
     @pytest.mark.usefixtures("isolated_response_cache")
-    @pytest.mark.parametrize("limit", [1, 100])
+    @pytest.mark.parametrize("limit", [3, 100])
     async def test_task_coverage_counts_rows_before_filtering(self, monkeypatch, limit):
         monkeypatch.setenv("MORGENMCP_TASKS_LIMIT", str(limit))
         with respx.mock as api:
@@ -198,7 +198,15 @@ class TestMCPServer:
             ).respond(
                 json={
                     "data": {
-                        "tasks": [{"id": "fetched", "taskListId": "first"}],
+                        "tasks": [
+                            {"id": "fetched", "taskListId": "first"},
+                            {
+                                "id": "closed",
+                                "taskListId": "third",
+                                "progress": "completed",
+                            },
+                            {"id": "deleted", "taskListId": "third", "deleted": True},
+                        ],
                         "spaces": [
                             {"id": "first", "name": "First"},
                             {"id": "second", "name": "Second"},
@@ -240,10 +248,15 @@ class TestMCPServer:
 
         coverage = {
             "fetch_limit": limit,
-            "limit_reached": limit == 1,
+            "limit_reached": limit == 3,
         }
         assert route.call_count == 4
-        assert lists["count"] == 2
+        assert lists["count"] == 3
+        assert {item["name"]: item["task_count"] for item in lists["task_lists"]} == {
+            "First": 1,
+            "Second": 0,
+            "Unnamed list": 0,
+        }
         assert second["task_count"] == 0
         assert opened["count"] == 1
         assert filtered["count"] == today["count"] == 0
@@ -251,7 +264,7 @@ class TestMCPServer:
             assert payload["coverage"] == coverage
 
     @pytest.mark.usefixtures("isolated_response_cache")
-    @pytest.mark.parametrize("limit", [None, 1])
+    @pytest.mark.parametrize("limit", [None, 1, 2])
     async def test_tag_coverage_is_present_only_for_bounded_fetches(
         self, monkeypatch, limit
     ):
@@ -286,8 +299,8 @@ class TestMCPServer:
             assert "coverage" not in resource
         else:
             assert resource["coverage"] == {
-                "fetch_limit": 1,
-                "limit_reached": True,
+                "fetch_limit": limit,
+                "limit_reached": limit == 1,
             }
 
     async def test_initialize_advertises_morgenmcp_version(self):
