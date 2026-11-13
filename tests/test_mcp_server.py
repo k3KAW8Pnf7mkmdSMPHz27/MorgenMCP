@@ -763,9 +763,11 @@ class TestResponseCaching:
         assert "morgen_list_task_lists" in included
         assert "morgen_list_tasks" in included
         assert "morgen_list_tags" in included
-        assert "morgen_get_task" in included
         assert "morgen_get_tag" in included
-        # Writes must NOT be in the allowlist
+        # `morgen_get_task` and writes must NOT be in the allowlist
+        assert "morgen_get_task" not in included, (
+            "morgen_get_task must not be cached (breaks post-mutation verification)"
+        )
         for write_tool in (
             "morgen_create_event",
             "morgen_update_event",
@@ -797,6 +799,34 @@ class TestResponseCaching:
                 await client.call_tool("morgen_list_calendars", {})
 
             assert client_mock.list_calendars.await_count == 1
+
+    async def test_get_task_is_not_cached_after_mutation(self):
+        """morgen_get_task bypasses the 60s cache so post-delete reads see deleted=True."""
+        from morgenmcp.models import Task
+        from morgenmcp.tools.id_registry import register_id
+
+        real_id = "task-uncached-after-delete"
+        virtual_id = register_id(real_id)
+        active = Task(id=real_id, title="Verify me")
+        deleted = Task(id=real_id, title="Verify me", deleted=True)
+
+        with patch("morgenmcp.tools.tasks.get_client") as mock:
+            client_mock = AsyncMock()
+            client_mock.get_task.side_effect = [active, deleted]
+            mock.return_value = client_mock
+
+            async with Client(mcp) as client:
+                before = await client.call_tool(
+                    "morgen_get_task", {"task_id": virtual_id}
+                )
+                await client.call_tool("morgen_delete_task", {"task_id": virtual_id})
+                after = await client.call_tool(
+                    "morgen_get_task", {"task_id": virtual_id}
+                )
+
+            assert client_mock.get_task.await_count == 2
+            assert before.structured_content["task"].get("deleted") is None
+            assert after.structured_content["task"]["deleted"] is True
 
     async def test_write_tool_is_not_cached(self):
         """Two identical calls to a write tool MUST hit the underlying client twice.

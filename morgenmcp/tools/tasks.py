@@ -88,11 +88,21 @@ def _format_task(task: Task) -> TaskItem:
     )
 
 
+def _resolve_task_id(task_id: str, param_name: str = "task_id") -> str:
+    """Validate and resolve a virtual task ID to its real Morgen ID."""
+    if not task_id or not task_id.strip():
+        raise ToolError(f"{param_name} cannot be empty")
+    try:
+        return resolve_id(task_id)
+    except IDNotFoundError as e:
+        raise ToolError(f"Task with ID '{task_id}' not found") from e
+
+
 def _build_related_to(parent_task_id: str | None) -> dict[str, TaskRelation] | None:
     """Build a relatedTo dict for a single parent task."""
-    if not parent_task_id:
+    if parent_task_id is None:
         return None
-    real_parent_id = resolve_id(parent_task_id)
+    real_parent_id = _resolve_task_id(parent_task_id, "parent_task_id")
     return {real_parent_id: TaskRelation(relation={"parent": True})}
 
 
@@ -247,19 +257,17 @@ async def list_tasks(
 async def get_task(task_id: str) -> GetTaskResult:
     """Retrieve a single task by virtual ID.
 
+    Soft-deleted tasks are still returned with `"deleted": True` (useful for
+    verifying deletion), while unknown or unowned task IDs raise a not-found
+    ToolError.
+
     Args:
         task_id: The virtual ID of the task.
 
     Returns:
         Dictionary with the task fields.
     """
-    if not task_id or not task_id.strip():
-        raise ToolError("task_id cannot be empty")
-
-    try:
-        real_id = resolve_id(task_id)
-    except IDNotFoundError as e:
-        raise ToolError(f"Task with ID '{task_id}' not found") from e
+    real_id = _resolve_task_id(task_id)
 
     client = get_client()
     task = await client.get_task(real_id)
@@ -386,7 +394,7 @@ async def update_task(
     if progress is not None:
         validate_progress(progress)
 
-    real_id = resolve_id(task_id)
+    real_id = _resolve_task_id(task_id)
     real_tags = resolve_ids(tag_ids) if tag_ids else None
     real_task_list_id = None
     if task_list_id is not None:
@@ -442,7 +450,7 @@ async def move_task(
     Returns:
         Dictionary indicating success.
     """
-    real_id = resolve_id(task_id)
+    real_id = _resolve_task_id(task_id)
     payload: dict[str, Any] = {"id": real_id}
 
     if move_to_first and previous_task_id is not None:
@@ -453,12 +461,12 @@ async def move_task(
     if move_to_first:
         payload["previous_id"] = None
     elif previous_task_id is not None:
-        payload["previous_id"] = resolve_id(previous_task_id)
+        payload["previous_id"] = _resolve_task_id(previous_task_id, "previous_task_id")
 
     if move_to_root:
         payload["parent_id"] = None
     elif parent_task_id is not None:
-        payload["parent_id"] = resolve_id(parent_task_id)
+        payload["parent_id"] = _resolve_task_id(parent_task_id, "parent_task_id")
 
     if "previous_id" not in payload and "parent_id" not in payload:
         raise ToolError(
@@ -495,7 +503,7 @@ async def complete_task(
     if occurrence_start is not None:
         validate_local_datetime(occurrence_start, "occurrence_start")
 
-    real_id = resolve_id(task_id)
+    real_id = _resolve_task_id(task_id)
     request = TaskCloseRequest(id=real_id, occurrence_start=occurrence_start)
 
     client = get_client()
@@ -526,7 +534,7 @@ async def reopen_task(
     if occurrence_start is not None:
         validate_local_datetime(occurrence_start, "occurrence_start")
 
-    real_id = resolve_id(task_id)
+    real_id = _resolve_task_id(task_id)
     request = TaskReopenRequest(id=real_id, occurrence_start=occurrence_start)
 
     client = get_client()
@@ -549,7 +557,7 @@ async def delete_task(task_id: str) -> MutateTaskResult:
     Returns:
         Dictionary indicating success.
     """
-    real_id = resolve_id(task_id)
+    real_id = _resolve_task_id(task_id)
     request = TaskDeleteRequest(id=real_id)
 
     client = get_client()
@@ -586,7 +594,7 @@ async def batch_delete_tasks(
     to_delete: list[tuple[str, str]] = []  # (virtual_id, real_id)
     for virtual_id in task_ids:
         try:
-            real_id = resolve_id(virtual_id)
+            real_id = _resolve_task_id(virtual_id)
             to_delete.append((virtual_id, real_id))
         except Exception as e:
             failed.append({"id": virtual_id, "error": str(e)})
