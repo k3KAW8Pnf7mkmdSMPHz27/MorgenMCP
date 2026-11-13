@@ -8,6 +8,7 @@ import json
 import pytest
 import respx
 from fastmcp import Client
+from pydantic import BaseModel
 
 from morgenmcp import client as client_module
 from morgenmcp.server import mcp
@@ -231,6 +232,8 @@ async def test_sparse_builders_match_advertised_schema(
     )
     async with Client(mcp) as client:
         advertised = {t.name: t for t in await client.list_tools()}
+    if isinstance(item, BaseModel):
+        item = item.model_dump()
     schema = advertised[tool].outputSchema
     assert schema is not None
     jsonschema.validate({collection: [item], "count": 1}, schema)
