@@ -64,20 +64,50 @@ def _format_window(
     return utc_bounds, local_bounds
 
 
+def _first_valid_instant(target_date: date, tz: tzinfo) -> datetime:
+    """Return the earliest valid local instant of ``target_date`` in ``tz``.
+
+    On normal days this is ``00:00:00``. When midnight itself is skipped by a
+    spring-forward transition (e.g. America/Santiago on 2026-09-06), resolve via
+    UTC-to-local conversion so both endpoints stay on ``target_date`` cleanly
+    across platforms without depending on OS ``mktime`` gap normalization.
+    """
+    candidate = datetime.combine(target_date, time.min, tzinfo=tz)
+    utc_candidate = candidate.astimezone(UTC)
+    roundtrip = utc_candidate.astimezone(tz)
+    if (
+        roundtrip.date() == target_date
+        and roundtrip.time() == time.min
+        and (utc_candidate - timedelta(seconds=1)).astimezone(tz).date() < target_date
+    ):
+        return roundtrip
+
+    base = datetime.combine(target_date, time.min, tzinfo=UTC)
+    lo = int((base - timedelta(days=2)).timestamp())
+    hi = int((base + timedelta(days=2)).timestamp())
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if datetime.fromtimestamp(mid, tz=tz).date() >= target_date:
+            hi = mid
+        else:
+            lo = mid + 1
+    return datetime.fromtimestamp(lo, tz=tz)
+
+
 def _today_range(tz: tzinfo) -> tuple[tuple[str, str], tuple[str, str]]:
-    """Local-midnight today → local-midnight tomorrow in ``tz``."""
+    """First valid instant of today → first valid instant of tomorrow in ``tz``."""
     today = datetime.now(tz).date()
-    start = datetime.combine(today, time.min, tzinfo=tz)
-    end = datetime.combine(today + timedelta(days=1), time.min, tzinfo=tz)
+    start = _first_valid_instant(today, tz)
+    end = _first_valid_instant(today + timedelta(days=1), tz)
     return _format_window(start, end)
 
 
 def _this_week_range(tz: tzinfo) -> tuple[tuple[str, str], tuple[str, str]]:
-    """ISO week: Monday 00:00 → next Monday 00:00 in ``tz``."""
+    """ISO week: Monday start → next Monday start in ``tz``."""
     today = datetime.now(tz).date()
     monday = today - timedelta(days=today.weekday())
-    start = datetime.combine(monday, time.min, tzinfo=tz)
-    end = datetime.combine(monday + timedelta(days=7), time.min, tzinfo=tz)
+    start = _first_valid_instant(monday, tz)
+    end = _first_valid_instant(monday + timedelta(days=7), tz)
     return _format_window(start, end)
 
 

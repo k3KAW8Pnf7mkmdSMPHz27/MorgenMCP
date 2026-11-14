@@ -62,12 +62,19 @@ _DISPLAY_TZ_ENV = "MORGENMCP_DISPLAY_TZ"
 _UTC_TZ_NAMES = frozenset({"UTC", "Etc/UTC", "Etc/GMT", "GMT"})
 
 
+def _system_localtime(dt: datetime) -> datetime:
+    """Resolve an aware or naive datetime against the host OS local timezone."""
+    return dt.astimezone()
+
+
 class _SystemLocalTz(tzinfo):
     """Dynamic tzinfo delegating each boundary/instant to OS local TZ rules."""
 
     @staticmethod
     def _at(dt: datetime | None) -> datetime:
-        return (datetime.now() if dt is None else dt.replace(tzinfo=None)).astimezone()
+        if dt is None:
+            return _system_localtime(datetime.now(UTC))
+        return _system_localtime(dt.replace(tzinfo=None))
 
     def utcoffset(self, dt: datetime | None) -> timedelta | None:
         return self._at(dt).utcoffset()
@@ -79,11 +86,11 @@ class _SystemLocalTz(tzinfo):
         return self._at(dt).tzname()
 
     def fromutc(self, dt: datetime) -> datetime:
-        local = dt.replace(tzinfo=UTC).astimezone()
+        local = _system_localtime(dt.replace(tzinfo=UTC))
         naive = local.replace(tzinfo=None)
         fold = (
             1
-            if naive.replace(fold=0).astimezone().utcoffset() != local.utcoffset()
+            if _system_localtime(naive.replace(fold=0)).utcoffset() != local.utcoffset()
             else 0
         )
         return naive.replace(fold=fold, tzinfo=self)
