@@ -2,8 +2,9 @@
 
 import base64
 import json
-from datetime import date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastmcp.exceptions import ResourceError
@@ -125,22 +126,32 @@ def sample_event(event_id, calendar_id, account_id) -> Event:
 
 class TestTimeRanges:
     def test_today_range_is_midnight_to_midnight(self):
-        start_s, end_s = _today_range()
+        utc_bounds, (start_s, end_s) = _today_range(UTC)
         start = datetime.strptime(start_s, _LOCAL_DT_FMT)
         end = datetime.strptime(end_s, _LOCAL_DT_FMT)
         assert start.hour == 0 and start.minute == 0
         assert end - start == timedelta(days=1)
-        assert start.date() == date.today()
+        assert start.date() == datetime.now(UTC).date()
+        assert utc_bounds[0].endswith("Z") and utc_bounds[1].endswith("Z")
+
+    def test_today_range_converts_local_midnight_to_utc(self):
+        tz = ZoneInfo("America/Chicago")
+        (utc_start_s, utc_end_s), (local_start_s, local_end_s) = _today_range(tz)
+        local_start = datetime.strptime(local_start_s, _LOCAL_DT_FMT).replace(tzinfo=tz)
+        local_end = datetime.strptime(local_end_s, _LOCAL_DT_FMT).replace(tzinfo=tz)
+        assert local_start.hour == 0 and local_end.hour == 0
+        assert utc_start_s == local_start.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        assert utc_end_s == local_end.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     def test_this_week_range_is_seven_days_starting_monday(self):
-        start_s, end_s = _this_week_range()
+        _, (start_s, end_s) = _this_week_range(UTC)
         start = datetime.strptime(start_s, _LOCAL_DT_FMT)
         end = datetime.strptime(end_s, _LOCAL_DT_FMT)
         assert start.weekday() == 0  # Monday
         assert end - start == timedelta(days=7)
 
     def test_upcoming_range_seven_days_default(self):
-        start_s, end_s = _upcoming_range()
+        _, (start_s, end_s) = _upcoming_range(UTC)
         start = datetime.strptime(start_s, _LOCAL_DT_FMT)
         end = datetime.strptime(end_s, _LOCAL_DT_FMT)
         assert end - start == timedelta(days=7)
@@ -281,6 +292,27 @@ class TestEventWindowResources:
         assert "14:00-14:30 UTC" in line
 
     @pytest.mark.asyncio
+    async def test_res_events_today_queries_utc_for_display_tz(
+        self, monkeypatch, mock_client, sample_calendar
+    ):
+        """morgen://events/today converts local midnight in MORGENMCP_DISPLAY_TZ to UTC."""
+        monkeypatch.setenv("MORGENMCP_DISPLAY_TZ", "America/Chicago")
+        mock_client.list_calendars.return_value = [sample_calendar]
+        mock_client.list_events.return_value = []
+
+        body = json.loads(await res_events_today())
+
+        tz = ZoneInfo("America/Chicago")
+        expected_local_start = datetime.strptime(
+            body["window"]["start"], _LOCAL_DT_FMT
+        ).replace(tzinfo=tz)
+        expected_utc_start = expected_local_start.astimezone(UTC).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        call_kwargs = mock_client.list_events.call_args.kwargs
+        assert call_kwargs["start"] == expected_utc_start
+
+    @pytest.mark.asyncio
     async def test_res_events_upcoming_handles_per_account_failure(
         self, mock_client, sample_calendar, sample_event
     ):
@@ -301,6 +333,106 @@ class TestEventWindowResources:
         mock_client.list_events.side_effect = list_events_side_effect
         body = json.loads(await res_events_upcoming())
         assert body["count"] == 1  # only the surviving account contributed
+
+    @pytest.mark.asyncio
+    async def test_res_events_today_default_system_tz_uses_boundary_offset_on_dst_transition(
+        self, monkeypatch, mock_client, sample_calendar
+    ):
+        """With MORGENMCP_DISPLAY_TZ unset, midnight on DST day uses midnight's offset."""
+        monkeypatch.delenv("MORGENMCP_DISPLAY_TZ", raising=False)
+        chicago = ZoneInfo("America/Chicago")
+
+        def _fake_localtime(dt: datetime) -> datetime:
+            if dt.tzinfo is not None:
+                return dt.astimezone(chicago)
+            return (
+                dt.replace(tzinfo=chicago, fold=dt.fold)
+                .astimezone(UTC)
+                .astimezone(chicago)
+            )
+
+        class _FrozenNoon(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                noon_utc = datetime(2026, 3, 8, 17, 0, 0, tzinfo=UTC)
+                return noon_utc.astimezone(tz) if tz is not None else noon_utc
+
+        monkeypatch.setattr("morgenmcp.tools.events._system_localtime", _fake_localtime)
+        monkeypatch.setattr("morgenmcp.resources.datetime", _FrozenNoon)
+        mock_client.list_calendars.return_value = [sample_calendar]
+        mock_client.list_events.return_value = []
+
+        body = json.loads(await res_events_today())
+
+        assert body["window"] == {
+            "start": "2026-03-08T00:00:00",
+            "end": "2026-03-09T00:00:00",
+        }
+        call_kwargs = mock_client.list_events.call_args.kwargs
+        assert call_kwargs["start"] == "2026-03-08T06:00:00Z"
+        assert call_kwargs["end"] == "2026-03-09T05:00:00Z"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("use_env", [False, True])
+    async def test_res_events_today_skipped_midnight_starts_at_first_valid_instant(
+        self, monkeypatch, mock_client, sample_calendar, use_env
+    ):
+        """When DST skips midnight (America/Santiago 2026-09-06), start at 01:00 / 04:00Z."""
+        santiago = ZoneInfo("America/Santiago")
+        if use_env:
+            monkeypatch.setenv("MORGENMCP_DISPLAY_TZ", "America/Santiago")
+        else:
+            monkeypatch.delenv("MORGENMCP_DISPLAY_TZ", raising=False)
+
+            def _fake_localtime(dt: datetime) -> datetime:
+                if dt.tzinfo is not None:
+                    return dt.astimezone(santiago)
+                # Emulate POSIX/glibc mktime normalizing nonexistent 00:00 -> 01:00 (-03:00)
+                return (
+                    dt.replace(tzinfo=santiago, fold=dt.fold)
+                    .astimezone(UTC)
+                    .astimezone(santiago)
+                )
+
+            monkeypatch.setattr(
+                "morgenmcp.tools.events._system_localtime", _fake_localtime
+            )
+
+        class _FrozenSantiagoNoon(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                noon_utc = datetime(2026, 9, 6, 15, 0, 0, tzinfo=UTC)
+                return noon_utc.astimezone(tz) if tz is not None else noon_utc
+
+        monkeypatch.setattr("morgenmcp.resources.datetime", _FrozenSantiagoNoon)
+        mock_client.list_calendars.return_value = [sample_calendar]
+        mock_client.list_events.return_value = []
+
+        body = json.loads(await res_events_today())
+
+        assert body["window"] == {
+            "start": "2026-09-06T01:00:00",
+            "end": "2026-09-07T00:00:00",
+        }
+        call_kwargs = mock_client.list_events.call_args.kwargs
+        assert call_kwargs["start"] == "2026-09-06T04:00:00Z"
+        assert call_kwargs["end"] == "2026-09-07T03:00:00Z"
+
+    @pytest.mark.asyncio
+    async def test_res_events_today_raises_when_all_accounts_fail(
+        self, mock_client, sample_calendar
+    ):
+        other_calendar = Calendar(
+            id=_make_calendar_id("a" * 24, "b@example.com"),
+            account_id="a" * 24,
+            integration_id="google",
+            name="Other",
+        )
+        mock_client.list_calendars.return_value = [sample_calendar, other_calendar]
+        mock_client.list_events.side_effect = RuntimeError("upstream down")
+
+        with pytest.raises(ResourceError, match="all accounts"):
+            await res_events_today()
 
 
 # --- task resources ---

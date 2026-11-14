@@ -1,5 +1,6 @@
 """MCP protocol-level tests using FastMCP in-memory Client."""
 
+import asyncio
 import base64
 import json
 from unittest.mock import AsyncMock, patch
@@ -1259,6 +1260,363 @@ class TestResponseCaching:
 
             # Different windows ⇒ two underlying fetches
             assert client_mock.list_events.await_count == 2
+
+    @pytest.mark.usefixtures("isolated_response_cache")
+    async def test_event_writes_invalidate_list_events_and_resources_only(self):
+        """Event writes evict cached list_events & event resources, not unrelated tools."""
+        from morgenmcp.models import CreatedEventInfo, Event, EventCreateResponse
+        from morgenmcp.tools.id_registry import register_id
+
+        acc_id = "d" * 24
+        real_cal_id = (
+            base64.b64encode(
+                json.dumps([acc_id, "inv@example.com"], separators=(",", ":")).encode()
+            )
+            .decode()
+            .rstrip("=")
+        )
+        real_evt_id = (
+            base64.b64encode(
+                json.dumps(
+                    ["inv@example.com", "evt_inv", acc_id], separators=(",", ":")
+                ).encode()
+            )
+            .decode()
+            .rstrip("=")
+        )
+        virtual_cal_id = register_id(real_cal_id)
+        created_evt = Event(
+            id=real_evt_id,
+            calendar_id=real_cal_id,
+            account_id=acc_id,
+            integration_id="google",
+            title="Job search",
+            start="2026-11-14T13:00:00",
+            duration="PT45M",
+            time_zone="America/Chicago",
+        )
+        updated_evt = created_evt.model_copy(update={"title": "Job search (updated)"})
+
+        list_args = {
+            "start": "2026-11-14T12:00:00",
+            "end": "2026-11-14T16:00:00",
+            "time_zone": "America/Chicago",
+            "calendar_ids": [virtual_cal_id],
+            "compact": True,
+        }
+
+        with (
+            patch("morgenmcp.tools.events.get_client") as events_mock,
+            patch("morgenmcp.tools.accounts.get_client") as accounts_mock,
+            patch("morgenmcp.resources.get_client") as resources_mock,
+        ):
+            evt_client = AsyncMock()
+            evt_client.list_events.side_effect = [
+                [],
+                [created_evt],
+                [updated_evt],
+                [],
+            ]
+            evt_client.create_event.return_value = EventCreateResponse(
+                event=CreatedEventInfo(
+                    id=real_evt_id, calendar_id=real_cal_id, account_id=acc_id
+                )
+            )
+            events_mock.return_value = evt_client
+
+            acc_client = AsyncMock()
+            acc_client.list_accounts.return_value = []
+            accounts_mock.return_value = acc_client
+
+            res_client = AsyncMock()
+            res_client.list_calendars.return_value = []
+            res_client.list_events.return_value = []
+            resources_mock.return_value = res_client
+
+            async with Client(mcp) as client:
+                # Populate list_accounts, events/today resource, and list_events caches
+                await client.call_tool("morgen_list_accounts", {})
+                await client.read_resource("morgen://events/today")
+                before = await client.call_tool("morgen_list_events", list_args)
+                assert before.structured_content is not None
+                assert before.structured_content["count"] == 0
+
+                # Create invalidates list_events & events/today, NOT list_accounts
+                created = await client.call_tool(
+                    "morgen_create_event",
+                    {
+                        "calendar_id": virtual_cal_id,
+                        "title": "Job search",
+                        "start": "2026-11-14T13:00:00",
+                        "duration": "PT45M",
+                        "time_zone": "America/Chicago",
+                    },
+                )
+                assert created.structured_content is not None
+                virtual_evt_id = created.structured_content["event"]["id"]
+
+                after_create = await client.call_tool("morgen_list_events", list_args)
+                assert after_create.structured_content is not None
+                assert after_create.structured_content["count"] == 1
+                assert "Job search" in after_create.structured_content["events"][0]
+
+                # list_accounts stays cached across the event write
+                await client.call_tool("morgen_list_accounts", {})
+                assert acc_client.list_accounts.await_count == 1
+
+                # events/today resource cache was evicted by the event write
+                await client.read_resource("morgen://events/today")
+                assert res_client.list_calendars.await_count == 2
+
+                # Update invalidates list_events cache
+                await client.call_tool(
+                    "morgen_update_event",
+                    {"event_id": virtual_evt_id, "title": "Job search (updated)"},
+                )
+                after_update = await client.call_tool("morgen_list_events", list_args)
+                assert after_update.structured_content is not None
+                assert (
+                    "Job search (updated)"
+                    in after_update.structured_content["events"][0]
+                )
+
+                # Delete invalidates list_events cache
+                await client.call_tool(
+                    "morgen_delete_event", {"event_id": virtual_evt_id}
+                )
+                after_delete = await client.call_tool("morgen_list_events", list_args)
+                assert after_delete.structured_content is not None
+                assert after_delete.structured_content["count"] == 0
+
+            assert evt_client.list_events.await_count == 4
+
+    async def test_tracked_store_prunes_expired_keys(self, monkeypatch):
+        """Expired tracked cache keys are pruned on subsequent puts."""
+        from morgenmcp.server import _ACTIVE_CACHE_TARGET, _TrackedMemoryStore
+
+        now = 1000.0
+        monkeypatch.setattr("morgenmcp.server.time.monotonic", lambda: now)
+        store = _TrackedMemoryStore()
+
+        token = _ACTIVE_CACHE_TARGET.set(("tools/call", "morgen_list_events"))
+        try:
+            await store.put("k1", {"v": 1}, collection="tools/call", ttl=60)
+            assert set(store._tracked_keys[("tools/call", "morgen_list_events")]) == {
+                "k1"
+            }
+
+            now = 1061.0  # past TTL
+            await store.put("k2", {"v": 2}, collection="tools/call", ttl=60)
+            assert set(store._tracked_keys[("tools/call", "morgen_list_events")]) == {
+                "k2"
+            }
+        finally:
+            _ACTIVE_CACHE_TARGET.reset(token)
+
+    @pytest.mark.usefixtures("isolated_response_cache")
+    async def test_overlapping_write_rejects_stale_read_cache_insertion(self):
+        """A delayed read overlapping a write must not poison the response cache."""
+        from morgenmcp.models import CreatedEventInfo, Event, EventCreateResponse
+        from morgenmcp.tools.id_registry import register_id
+
+        acc_id = "e" * 24
+        real_cal_id = (
+            base64.b64encode(
+                json.dumps([acc_id, "race@example.com"], separators=(",", ":")).encode()
+            )
+            .decode()
+            .rstrip("=")
+        )
+        real_evt_id = (
+            base64.b64encode(
+                json.dumps(
+                    ["race@example.com", "evt_race", acc_id], separators=(",", ":")
+                ).encode()
+            )
+            .decode()
+            .rstrip("=")
+        )
+        virtual_cal_id = register_id(real_cal_id)
+        created_evt = Event(
+            id=real_evt_id,
+            calendar_id=real_cal_id,
+            account_id=acc_id,
+            integration_id="google",
+            title="Overlap event",
+            start="2026-11-14T13:00:00",
+            duration="PT45M",
+            time_zone="America/Chicago",
+        )
+        list_args = {
+            "start": "2026-11-14T12:00:00",
+            "end": "2026-11-14T16:00:00",
+            "time_zone": "America/Chicago",
+            "calendar_ids": [virtual_cal_id],
+            "compact": True,
+        }
+
+        read_entered = asyncio.Event()
+        release_read = asyncio.Event()
+        calls = 0
+
+        async def _list_events(**_kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                read_entered.set()
+                await release_read.wait()
+                return []
+            return [created_evt]
+
+        with patch("morgenmcp.tools.events.get_client") as events_mock:
+            evt_client = AsyncMock()
+            evt_client.list_events.side_effect = _list_events
+            evt_client.create_event.return_value = EventCreateResponse(
+                event=CreatedEventInfo(
+                    id=real_evt_id, calendar_id=real_cal_id, account_id=acc_id
+                )
+            )
+            events_mock.return_value = evt_client
+
+            async with Client(mcp) as client:
+                stale_task = asyncio.create_task(
+                    client.call_tool("morgen_list_events", list_args)
+                )
+                await read_entered.wait()
+
+                await client.call_tool(
+                    "morgen_create_event",
+                    {
+                        "calendar_id": virtual_cal_id,
+                        "title": "Overlap event",
+                        "start": "2026-11-14T13:00:00",
+                        "duration": "PT45M",
+                        "time_zone": "America/Chicago",
+                    },
+                )
+                release_read.set()
+                stale_res = await stale_task
+                assert stale_res.structured_content is not None
+                assert stale_res.structured_content["count"] == 0
+
+                fresh_res = await client.call_tool("morgen_list_events", list_args)
+                assert fresh_res.structured_content is not None
+                assert fresh_res.structured_content["count"] == 1
+                assert "Overlap event" in fresh_res.structured_content["events"][0]
+
+            assert calls == 2
+
+    @pytest.mark.usefixtures("isolated_response_cache")
+    async def test_partial_failure_and_all_account_failure_not_cached(self):
+        """Failed and partial cross-account queries are never cached."""
+        from fastmcp.exceptions import ToolError
+
+        from morgenmcp.models import Event
+        from morgenmcp.tools.id_registry import register_id
+
+        acc1 = "f" * 24
+        acc2 = "1" * 24
+        cal1_id = (
+            base64.b64encode(
+                json.dumps([acc1, "a@example.com"], separators=(",", ":")).encode()
+            )
+            .decode()
+            .rstrip("=")
+        )
+        cal2_id = (
+            base64.b64encode(
+                json.dumps([acc2, "b@example.com"], separators=(",", ":")).encode()
+            )
+            .decode()
+            .rstrip("=")
+        )
+        vcal1 = register_id(cal1_id)
+        vcal2 = register_id(cal2_id)
+        evt2_id = (
+            base64.b64encode(
+                json.dumps(
+                    ["b@example.com", "rec1", acc2], separators=(",", ":")
+                ).encode()
+            )
+            .decode()
+            .rstrip("=")
+        )
+        recovered_evt = Event(
+            id=evt2_id,
+            calendar_id=cal2_id,
+            account_id=acc2,
+            integration_id="google",
+            title="Recovered",
+            start="2026-11-14T13:00:00",
+            duration="PT30M",
+            time_zone="America/Chicago",
+        )
+        list_args = {
+            "start": "2026-11-14T12:00:00",
+            "end": "2026-11-14T16:00:00",
+            "time_zone": "America/Chicago",
+            "calendar_ids": [vcal1, vcal2],
+            "compact": True,
+        }
+
+        tool_phase = 0
+
+        async def _tool_list_events(*, account_id, **_kwargs):
+            if tool_phase == 0:
+                raise MorgenAPIError("Service Unavailable", status_code=503)
+            if tool_phase == 1:
+                if account_id == acc2:
+                    raise MorgenAPIError("Service Unavailable", status_code=503)
+                return []
+            return [recovered_evt] if account_id == acc2 else []
+
+        res_phase = 0
+
+        async def _res_list_events(*, account_id, **_kwargs):
+            if res_phase == 0 and account_id == acc2:
+                raise MorgenAPIError("Service Unavailable", status_code=503)
+            return [recovered_evt] if account_id == acc2 else []
+
+        with (
+            patch("morgenmcp.tools.events.get_client") as events_mock,
+            patch("morgenmcp.resources.get_client") as resources_mock,
+        ):
+            evt_client = AsyncMock()
+            evt_client.list_events.side_effect = _tool_list_events
+            events_mock.return_value = evt_client
+
+            res_client = AsyncMock()
+            res_client.list_calendars.return_value = [
+                Calendar(id=cal1_id, account_id=acc1, integration_id="google"),
+                Calendar(id=cal2_id, account_id=acc2, integration_id="google"),
+            ]
+            res_client.list_events.side_effect = _res_list_events
+            resources_mock.return_value = res_client
+
+            async with Client(mcp) as client:
+                with pytest.raises(ToolError, match="all accounts"):
+                    await client.call_tool("morgen_list_events", list_args)
+
+                tool_phase = 1
+                partial_res = await client.call_tool("morgen_list_events", list_args)
+                assert partial_res.structured_content is not None
+                assert partial_res.structured_content["count"] == 0
+
+                tool_phase = 2
+                recovered_res = await client.call_tool("morgen_list_events", list_args)
+                assert recovered_res.structured_content is not None
+                assert recovered_res.structured_content["count"] == 1
+                assert "Recovered" in recovered_res.structured_content["events"][0]
+
+                # Partial resource read is also not cached
+                res_partial = await client.read_resource("morgen://events/upcoming")
+                assert isinstance(res_partial[0], TextResourceContents)
+                assert json.loads(res_partial[0].text)["count"] == 0
+
+                res_phase = 1
+                res_recovered = await client.read_resource("morgen://events/upcoming")
+                assert isinstance(res_recovered[0], TextResourceContents)
+                assert json.loads(res_recovered[0].text)["count"] == 1
 
 
 class TestLimitConfig:

@@ -8,10 +8,14 @@ Z suffix from datetime could shift events by hours).
 from __future__ import annotations
 
 import re
-from zoneinfo import available_timezones
+from datetime import UTC, datetime
+from zoneinfo import ZoneInfo, available_timezones
 
 # Pre-compile regex patterns for performance
 SUFFIXLESS_DATETIME_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$")
+EVENT_WINDOW_BOUND_PATTERN = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)?$"
+)
 ISO_DURATION_PATTERN = re.compile(
     r"^P(?:\d+Y)?(?:\d+M)?(?:\d+W)?(?:\d+D)?(?:T(?:\d+H)?(?:\d+M)?(?:\d+(?:\.\d+)?S)?)?$"
 )
@@ -319,39 +323,37 @@ def validate_recurrence_rule(rule: dict) -> None:
                 )
 
 
-def validate_utc_window_bound(value: str, field_name: str) -> None:
-    """Validate the suffixless UTC format used by the event listing tool."""
-    # Morgen accepts offsets. The MCP tool requires both bounds to be suffixless
-    # so validate_date_range can compare them without mixing naive and aware datetimes.
-    if not SUFFIXLESS_DATETIME_PATTERN.match(value):
+def validate_event_window_bound(value: str, field_name: str) -> datetime:
+    """Validate and parse an event listing window bound.
+
+    Accepts ISO 8601 timestamps with ``Z`` or a numeric offset (e.g.,
+    ``2023-03-01T00:00:00Z``, ``2023-03-01T00:00:00-06:00``), or bare
+    ``YYYY-MM-DDTHH:mm:ss`` strings (interpreted using ``time_zone`` or UTC).
+    """
+    if not value:
+        raise ValidationError(f"'{field_name}' cannot be empty")
+    if not EVENT_WINDOW_BOUND_PATTERN.match(value):
         raise ValidationError(
             f"Invalid {field_name} format: '{value}'. "
-            "This tool expects UTC in YYYY-MM-DDTHH:mm:ss format without a Z suffix or numeric "
-            "offset. Convert local times to UTC before formatting."
+            "Expected ISO 8601 format such as '2023-03-01T00:00:00Z', "
+            "'2023-03-01T00:00:00-06:00', or '2023-03-01T00:00:00' with time_zone."
         )
-
-
-def validate_date_range(start: str, end: str, max_days: int = 180) -> None:
-    """Validate that a date range is valid and within limits.
-
-    Args:
-        start: Start datetime in suffixless UTC format.
-        end: End datetime in suffixless UTC format.
-        max_days: Maximum allowed range in days (default: 180 = ~6 months).
-
-    Raises:
-        ValidationError: If the range is invalid.
-    """
-    from datetime import datetime
-
     try:
-        start_dt = datetime.fromisoformat(start)
-        end_dt = datetime.fromisoformat(end)
+        return datetime.fromisoformat(value)
     except ValueError as e:
-        raise ValidationError(f"Cannot parse date range: {e}") from e
+        raise ValidationError(f"Invalid {field_name} datetime '{value}': {e}") from e
 
+
+def _validate_utc_bounds(
+    start_dt: datetime,
+    end_dt: datetime,
+    raw_start: str,
+    raw_end: str,
+    max_days: int = 180,
+) -> None:
+    """Validate ordering and maximum span for two UTC-normalized datetimes."""
     if end_dt <= start_dt:
-        raise ValidationError(f"'end' ({end}) must be after 'start' ({start})")
+        raise ValidationError(f"'end' ({raw_end}) must be after 'start' ({raw_start})")
 
     days_diff = (end_dt - start_dt).days
     if days_diff > max_days:
@@ -360,3 +362,104 @@ def validate_date_range(start: str, end: str, max_days: int = 180) -> None:
             f"Maximum allowed is {max_days} days (~6 months). "
             f"The Morgen API recommends retrieving no more than 2 months at a time."
         )
+
+
+def _resolve_named_zone_bound(
+    dt: datetime,
+    raw: str,
+    field_name: str,
+    time_zone: str,
+    zone: ZoneInfo,
+) -> datetime:
+    """Convert a naive wall time in a named IANA zone to UTC, rejecting DST gaps/folds."""
+    utc0 = dt.replace(tzinfo=zone, fold=0).astimezone(UTC)
+    utc1 = dt.replace(tzinfo=zone, fold=1).astimezone(UTC)
+    roundtrip0 = utc0.astimezone(zone).replace(tzinfo=None)
+    roundtrip1 = utc1.astimezone(zone).replace(tzinfo=None)
+    if roundtrip0 != dt or roundtrip1 != dt:
+        raise ValidationError(
+            f"'{field_name}' ('{raw}') does not exist in timezone '{time_zone}' "
+            "(daylight saving transition gap)."
+        )
+    if utc0 != utc1:
+        raise ValidationError(
+            f"'{field_name}' ('{raw}') is ambiguous in timezone '{time_zone}' "
+            "(occurs twice during daylight saving fall-back). "
+            "Provide an explicit UTC offset or 'Z' instead."
+        )
+    return utc0
+
+
+def resolve_event_window(
+    start: str,
+    end: str,
+    time_zone: str | None = None,
+    max_days: int = 180,
+) -> tuple[str, str]:
+    """Validate an event listing window and normalize both bounds to UTC ``...Z``.
+
+    Accepts explicit offsets (``Z`` or ``±HH:MM``) on ``start``/``end``, or bare
+    ``YYYY-MM-DDTHH:mm:ss`` bounds interpreted in ``time_zone`` (defaulting to UTC
+    when ``time_zone`` is omitted).
+    """
+    validate_timezone(time_zone)
+    start_dt = validate_event_window_bound(start, "start")
+    end_dt = validate_event_window_bound(end, "end")
+
+    if (start_dt.tzinfo is None) != (end_dt.tzinfo is None):
+        raise ValidationError(
+            "Do not mix timezone-aware and naive bounds for 'start' and 'end'."
+        )
+
+    if start_dt.tzinfo is not None and time_zone is not None:
+        raise ValidationError(
+            "Do not specify 'time_zone' when 'start'/'end' already include a 'Z' or numeric offset."
+        )
+
+    if start_dt.tzinfo is not None:
+        start_utc = start_dt.astimezone(UTC)
+        end_utc = end_dt.astimezone(UTC)
+    elif time_zone is not None:
+        source_tz = ZoneInfo(time_zone)
+        start_utc = _resolve_named_zone_bound(
+            start_dt, start, "start", time_zone, source_tz
+        )
+        end_utc = _resolve_named_zone_bound(end_dt, end, "end", time_zone, source_tz)
+    else:
+        start_utc = start_dt.replace(tzinfo=UTC)
+        end_utc = end_dt.replace(tzinfo=UTC)
+
+    _validate_utc_bounds(start_utc, end_utc, start, end, max_days=max_days)
+    return (
+        start_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        end_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+    )
+
+
+def validate_date_range(start: str, end: str, max_days: int = 180) -> None:
+    """Validate that a date range is valid and within limits.
+
+    Args:
+        start: Start datetime in ISO 8601 format (bare or with offset/Z).
+        end: End datetime in ISO 8601 format (bare or with offset/Z).
+        max_days: Maximum allowed range in days (default: 180 = ~6 months).
+
+    Raises:
+        ValidationError: If the range is invalid.
+    """
+    try:
+        start_dt = datetime.fromisoformat(start)
+        end_dt = datetime.fromisoformat(end)
+    except ValueError as e:
+        raise ValidationError(f"Cannot parse date range: {e}") from e
+
+    if (start_dt.tzinfo is None) != (end_dt.tzinfo is None):
+        raise ValidationError(
+            "Do not mix timezone-aware and naive bounds for 'start' and 'end'."
+        )
+
+    if start_dt.tzinfo is not None:
+        start_dt = start_dt.astimezone(UTC)
+        end_dt = end_dt.astimezone(UTC)
+
+    _validate_utc_bounds(start_dt, end_dt, start, end, max_days=max_days)

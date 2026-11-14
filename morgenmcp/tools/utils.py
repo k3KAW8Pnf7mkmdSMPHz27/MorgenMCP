@@ -6,6 +6,8 @@ import asyncio
 import base64
 import json
 from collections.abc import Callable, Coroutine, Iterable
+from contextvars import ContextVar
+from dataclasses import dataclass
 from functools import wraps
 from typing import Any
 
@@ -32,6 +34,25 @@ from morgenmcp.validators import (
 # tools fan out one request per item; unbounded gather would fire them all at
 # once and trip Morgen's rate limiter on large batches.
 BATCH_CONCURRENCY = 8
+
+
+@dataclass
+class ResponseCacheControl:
+    """Per-request flag letting read handlers opt out of response caching."""
+
+    cacheable: bool = True
+
+
+_ACTIVE_CACHE_CONTROL: ContextVar[ResponseCacheControl | None] = ContextVar(
+    "_ACTIVE_CACHE_CONTROL", default=None
+)
+
+
+def disable_response_caching() -> None:
+    """Mark the active read response non-cacheable (e.g. partial upstream failure)."""
+    control = _ACTIVE_CACHE_CONTROL.get()
+    if control is not None:
+        control.cacheable = False
 
 
 async def gather_bounded(

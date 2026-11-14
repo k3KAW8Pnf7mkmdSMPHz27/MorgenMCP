@@ -6,6 +6,7 @@ import pytest
 
 from morgenmcp.validators import (
     ValidationError,
+    resolve_event_window,
     validate_alert_offset,
     validate_date_range,
     validate_duration,
@@ -311,6 +312,92 @@ class TestValidateDateRange:
 
         # But pass with max_days=60
         validate_date_range("2023-03-01T00:00:00", "2023-04-01T00:00:00", max_days=60)
+
+
+class TestResolveEventWindow:
+    """Tests for resolve_event_window."""
+
+    def test_bare_bounds_default_to_utc(self):
+        assert resolve_event_window("2026-11-14T12:00:00", "2026-11-14T16:00:00") == (
+            "2026-11-14T12:00:00Z",
+            "2026-11-14T16:00:00Z",
+        )
+
+    def test_z_suffix_bounds_accepted(self):
+        assert resolve_event_window("2026-11-14T18:00:00Z", "2026-11-14T22:00:00Z") == (
+            "2026-11-14T18:00:00Z",
+            "2026-11-14T22:00:00Z",
+        )
+
+    def test_numeric_offsets_converted_to_utc(self):
+        assert resolve_event_window(
+            "2026-11-14T12:00:00-06:00", "2026-11-14T16:00:00-06:00"
+        ) == ("2026-11-14T18:00:00Z", "2026-11-14T22:00:00Z")
+
+    def test_time_zone_converts_bare_bounds_to_utc_cst_and_cdt(self):
+        # Nov 14, 2026 is CST (UTC-6)
+        assert resolve_event_window(
+            "2026-11-14T12:00:00",
+            "2026-11-14T16:00:00",
+            time_zone="America/Chicago",
+        ) == ("2026-11-14T18:00:00Z", "2026-11-14T22:00:00Z")
+        # Jul 15, 2026 is CDT (UTC-5)
+        assert resolve_event_window(
+            "2026-07-15T12:00:00",
+            "2026-07-15T16:00:00",
+            time_zone="America/Chicago",
+        ) == ("2026-07-15T17:00:00Z", "2026-07-15T21:00:00Z")
+
+    def test_rejects_mixing_aware_and_naive_bounds(self):
+        with pytest.raises(ValidationError, match="Do not mix"):
+            resolve_event_window("2026-11-14T12:00:00Z", "2026-11-14T16:00:00")
+        with pytest.raises(ValidationError, match="Do not mix"):
+            resolve_event_window("2026-11-14T12:00:00", "2026-11-14T16:00:00-06:00")
+
+    def test_rejects_explicit_offset_combined_with_time_zone(self):
+        with pytest.raises(ValidationError, match="Do not specify 'time_zone'"):
+            resolve_event_window(
+                "2026-11-14T12:00:00-06:00",
+                "2026-11-14T16:00:00-06:00",
+                time_zone="America/Chicago",
+            )
+
+    def test_rejects_bad_format_and_invalid_calendar_date(self):
+        with pytest.raises(ValidationError, match="Invalid start format"):
+            resolve_event_window("2026-11-14", "2026-11-15T00:00:00")
+        with pytest.raises(ValidationError, match="Invalid start datetime"):
+            resolve_event_window("2026-13-01T00:00:00Z", "2026-13-02T00:00:00Z")
+
+    @pytest.mark.parametrize(
+        "bad_bound",
+        [
+            "2026-11-14T12:00:00+00:60",
+            "2026-11-14T12:00:00-06:99",
+            "2026-11-14T12:00:00+24:00",
+        ],
+    )
+    def test_rejects_out_of_range_offset_components(self, bad_bound):
+        with pytest.raises(ValidationError, match="Invalid start format"):
+            resolve_event_window(bad_bound, "2026-11-14T16:00:00+00:00")
+
+    def test_rejects_nonexistent_dst_spring_forward_bound(self):
+        with pytest.raises(ValidationError, match="does not exist"):
+            resolve_event_window(
+                "2026-03-08T02:15:00",
+                "2026-03-08T02:45:00",
+                time_zone="America/Chicago",
+            )
+
+    def test_rejects_ambiguous_dst_fall_back_bound_and_accepts_explicit_offset(self):
+        with pytest.raises(ValidationError, match="ambiguous"):
+            resolve_event_window(
+                "2026-11-01T01:15:00",
+                "2026-11-01T04:00:00",
+                time_zone="America/Chicago",
+            )
+        assert resolve_event_window(
+            "2026-11-01T01:15:00-05:00", "2026-11-01T01:15:00-06:00"
+        ) == ("2026-11-01T06:15:00Z", "2026-11-01T07:15:00Z")
 
 
 class TestValidatePriority:

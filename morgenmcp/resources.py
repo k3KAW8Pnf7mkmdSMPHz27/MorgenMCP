@@ -24,8 +24,8 @@ All bodies are JSON. IDs are virtual IDs, identical to those returned by tools.
 from __future__ import annotations
 
 import json
-from collections import defaultdict
-from datetime import date, datetime, timedelta, tzinfo
+import logging
+from datetime import UTC, date, datetime, time, timedelta, tzinfo
 
 from fastmcp.exceptions import ResourceError
 
@@ -33,37 +33,91 @@ from morgenmcp import __version__
 from morgenmcp.client import get_client
 from morgenmcp.models import Event
 from morgenmcp.tools.calendars import _format_calendar
-from morgenmcp.tools.events import _format_compact_event, _resolve_display_tz
+from morgenmcp.tools.events import (
+    _format_compact_event,
+    _resolve_display_tz,
+    query_events,
+)
 from morgenmcp.tools.id_registry import HASH_SPEC, register_id, resolve_id
-from morgenmcp.tools.id_utils import extract_account_from_calendar
 from morgenmcp.tools.outputs import ListTagsResult, fetch_coverage
 from morgenmcp.tools.tags import _format_tag
 from morgenmcp.tools.tasks import _format_task, _is_open
-from morgenmcp.tools.utils import filter_none_values, gather_bounded
+from morgenmcp.tools.utils import disable_response_caching, filter_none_values
+
+logger = logging.getLogger(__name__)
 
 _LOCAL_DT_FMT = "%Y-%m-%dT%H:%M:%S"
 
 
-def _today_range() -> tuple[str, str]:
-    """Local-midnight today → local-midnight tomorrow as LocalDateTime strings."""
-    start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-    end = start + timedelta(days=1)
-    return start.strftime(_LOCAL_DT_FMT), end.strftime(_LOCAL_DT_FMT)
+def _format_window(
+    start_local: datetime, end_local: datetime
+) -> tuple[tuple[str, str], tuple[str, str]]:
+    """Return ((utc_start, utc_end), (local_start, local_end)) for a window."""
+    utc_bounds = (
+        start_local.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        end_local.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    )
+    local_bounds = (
+        start_local.strftime(_LOCAL_DT_FMT),
+        end_local.strftime(_LOCAL_DT_FMT),
+    )
+    return utc_bounds, local_bounds
 
 
-def _this_week_range() -> tuple[str, str]:
-    """ISO week: Monday 00:00 → next Monday 00:00 (local time)."""
-    today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+def _first_valid_instant(target_date: date, tz: tzinfo) -> datetime:
+    """Return the earliest valid local instant of ``target_date`` in ``tz``.
+
+    On normal days this is ``00:00:00``. When midnight itself is skipped by a
+    spring-forward transition (e.g. America/Santiago on 2026-09-06), resolve via
+    UTC-to-local conversion so both endpoints stay on ``target_date`` cleanly
+    across platforms without depending on OS ``mktime`` gap normalization.
+    """
+    candidate = datetime.combine(target_date, time.min, tzinfo=tz)
+    utc_candidate = candidate.astimezone(UTC)
+    roundtrip = utc_candidate.astimezone(tz)
+    if (
+        roundtrip.date() == target_date
+        and roundtrip.time() == time.min
+        and (utc_candidate - timedelta(seconds=1)).astimezone(tz).date() < target_date
+    ):
+        return roundtrip
+
+    base = datetime.combine(target_date, time.min, tzinfo=UTC)
+    lo = int((base - timedelta(days=2)).timestamp())
+    hi = int((base + timedelta(days=2)).timestamp())
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if datetime.fromtimestamp(mid, tz=tz).date() >= target_date:
+            hi = mid
+        else:
+            lo = mid + 1
+    return datetime.fromtimestamp(lo, tz=tz)
+
+
+def _today_range(tz: tzinfo) -> tuple[tuple[str, str], tuple[str, str]]:
+    """First valid instant of today → first valid instant of tomorrow in ``tz``."""
+    today = datetime.now(tz).date()
+    start = _first_valid_instant(today, tz)
+    end = _first_valid_instant(today + timedelta(days=1), tz)
+    return _format_window(start, end)
+
+
+def _this_week_range(tz: tzinfo) -> tuple[tuple[str, str], tuple[str, str]]:
+    """ISO week: Monday start → next Monday start in ``tz``."""
+    today = datetime.now(tz).date()
     monday = today - timedelta(days=today.weekday())
-    next_monday = monday + timedelta(days=7)
-    return monday.strftime(_LOCAL_DT_FMT), next_monday.strftime(_LOCAL_DT_FMT)
+    start = _first_valid_instant(monday, tz)
+    end = _first_valid_instant(monday + timedelta(days=7), tz)
+    return _format_window(start, end)
 
 
-def _upcoming_range(days: int = 7) -> tuple[str, str]:
-    """Now → now + N days, both as LocalDateTime."""
-    start = datetime.now().replace(microsecond=0)
+def _upcoming_range(
+    tz: tzinfo, days: int = 7
+) -> tuple[tuple[str, str], tuple[str, str]]:
+    """Now → now + N days in ``tz``."""
+    start = datetime.now(tz).replace(microsecond=0)
     end = start + timedelta(days=days)
-    return start.strftime(_LOCAL_DT_FMT), end.strftime(_LOCAL_DT_FMT)
+    return _format_window(start, end)
 
 
 async def _fetch_events_in_window(
@@ -71,44 +125,35 @@ async def _fetch_events_in_window(
     end: str,
     calendar_ids: list[str] | None = None,
 ) -> list[Event]:
-    """Fetch events in a window across one or all calendars.
+    """Fetch events in a window across one or all calendars."""
+    if calendar_ids is not None and not calendar_ids:
+        return []
 
-    Mirrors the tool-side parallel-by-account fetch but without progress
-    reporting (resources have no per-call ctx for that).
-    """
     client = get_client()
+    query = await query_events(
+        client,
+        start,
+        end,
+        real_calendar_ids=calendar_ids,
+    )
 
-    if calendar_ids is not None:
-        if not calendar_ids:
-            return []
-        account_id = extract_account_from_calendar(calendar_ids[0])
-        return await client.list_events(
-            account_id=account_id,
-            calendar_ids=calendar_ids,
-            start=start,
-            end=end,
+    if query.all_failed:
+        if len(query.account_failures) == 1:
+            raise query.account_failures[0][1]
+        details = "; ".join(
+            f"{register_id(acc_id)}: {err}" for acc_id, err in query.account_failures
+        )
+        raise ResourceError(f"Failed to fetch events for all accounts: {details}")
+
+    if query.is_partial:
+        disable_response_caching()
+        logger.warning(
+            "Partial event fetch for resource window (%d/%d account(s) failed)",
+            len(query.account_failures),
+            query.account_count,
         )
 
-    calendars = await client.list_calendars()
-    by_account: dict[str, list[str]] = defaultdict(list)
-    for cal in calendars:
-        by_account[cal.account_id].append(cal.id)
-
-    async def fetch(acc_id: str, cal_ids: list[str]) -> list[Event]:
-        return await client.list_events(
-            account_id=acc_id,
-            calendar_ids=cal_ids,
-            start=start,
-            end=end,
-        )
-
-    results = await gather_bounded(fetch(a, c) for a, c in by_account.items())
-    out: list[Event] = []
-    for r in results:
-        if isinstance(r, BaseException):
-            continue  # silently skip per-account failures, same as tool
-        out.extend(r)
-    return out
+    return query.events
 
 
 def _format_account(acc) -> dict:
@@ -213,10 +258,10 @@ async def res_calendar(calendar_id: str) -> str:
 async def res_calendar_events(calendar_id: str) -> str:
     """Events in a single calendar from today through next 7 days."""
     real_id = resolve_id(calendar_id)
-    start, end = _upcoming_range(days=7)
-    events = await _fetch_events_in_window(start, end, calendar_ids=[real_id])
     display_tz = _resolve_display_tz(None)
-    return _events_payload(events, (start, end), display_tz)
+    utc_window, display_window = _upcoming_range(display_tz, days=7)
+    events = await _fetch_events_in_window(*utc_window, calendar_ids=[real_id])
+    return _events_payload(events, display_window, display_tz)
 
 
 # --- Event window resources ---
@@ -224,26 +269,26 @@ async def res_calendar_events(calendar_id: str) -> str:
 
 async def res_events_today() -> str:
     """Events scheduled for today (local-midnight to local-midnight)."""
-    start, end = _today_range()
-    events = await _fetch_events_in_window(start, end)
     display_tz = _resolve_display_tz(None)
-    return _events_payload(events, (start, end), display_tz)
+    utc_window, display_window = _today_range(display_tz)
+    events = await _fetch_events_in_window(*utc_window)
+    return _events_payload(events, display_window, display_tz)
 
 
 async def res_events_this_week() -> str:
     """Events scheduled this ISO week (Monday through Sunday, local)."""
-    start, end = _this_week_range()
-    events = await _fetch_events_in_window(start, end)
     display_tz = _resolve_display_tz(None)
-    return _events_payload(events, (start, end), display_tz)
+    utc_window, display_window = _this_week_range(display_tz)
+    events = await _fetch_events_in_window(*utc_window)
+    return _events_payload(events, display_window, display_tz)
 
 
 async def res_events_upcoming() -> str:
     """Events from now through the next 7 days."""
-    start, end = _upcoming_range(days=7)
-    events = await _fetch_events_in_window(start, end)
     display_tz = _resolve_display_tz(None)
-    return _events_payload(events, (start, end), display_tz)
+    utc_window, display_window = _upcoming_range(display_tz, days=7)
+    events = await _fetch_events_in_window(*utc_window)
+    return _events_payload(events, display_window, display_tz)
 
 
 # --- Task resources ---
