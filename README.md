@@ -225,7 +225,7 @@ equivalent CLI flag, and the flag wins over the environment variable.
 | `MORGENMCP_READ_ONLY` | `--read-only` | off | Truthy (`1`/`true`/`yes`/`on`) exposes only the read tools, disabling every mutating one. |
 | `MORGENMCP_TASKS_LIMIT` | `--tasks-limit N` | `100` | Default `limit` sent to `/tasks/list`. Integer 1–100. |
 | `MORGENMCP_TAGS_LIMIT` | `--tags-limit N` | *(unset)* | Default `limit` sent to `/tags/list`. Integer ≥ 1, no upper bound. Unset returns all tags. |
-| `MORGENMCP_DISPLAY_TZ` | — | system local | IANA timezone (e.g. `America/Chicago`) for rendering compact event times. |
+| `MORGENMCP_DISPLAY_TZ` | — | system local | IANA timezone (e.g. `America/Chicago`) for rendering compact event times and determining the local day/week windows of event resources. |
 | `MORGENMCP_DATA_DIR` | — | platform data dir | Override the virtual-ID persistence directory. |
 
 An invalid limit fails at startup with a clear error rather than silently

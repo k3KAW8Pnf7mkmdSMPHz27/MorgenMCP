@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import os
 from collections import defaultdict
-from datetime import datetime, timedelta, tzinfo
+from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta, tzinfo
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
@@ -12,7 +14,7 @@ from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from pydantic import MISSING
 
-from morgenmcp.client import get_client
+from morgenmcp.client import MorgenClient, get_client
 from morgenmcp.models import (
     Event,
     EventCreateRequest,
@@ -42,6 +44,7 @@ from morgenmcp.tools.utils import (
     build_locations_dict,
     build_participants_dict,
     build_recurrence_rules,
+    disable_response_caching,
     gather_bounded,
     handle_tool_errors,
     omit_none,
@@ -59,6 +62,36 @@ _DISPLAY_TZ_ENV = "MORGENMCP_DISPLAY_TZ"
 _UTC_TZ_NAMES = frozenset({"UTC", "Etc/UTC", "Etc/GMT", "GMT"})
 
 
+class _SystemLocalTz(tzinfo):
+    """Dynamic tzinfo delegating each boundary/instant to OS local TZ rules."""
+
+    @staticmethod
+    def _at(dt: datetime | None) -> datetime:
+        return (datetime.now() if dt is None else dt.replace(tzinfo=None)).astimezone()
+
+    def utcoffset(self, dt: datetime | None) -> timedelta | None:
+        return self._at(dt).utcoffset()
+
+    def dst(self, dt: datetime | None) -> timedelta | None:
+        return timedelta(0)
+
+    def tzname(self, dt: datetime | None) -> str | None:
+        return self._at(dt).tzname()
+
+    def fromutc(self, dt: datetime) -> datetime:
+        local = dt.replace(tzinfo=UTC).astimezone()
+        naive = local.replace(tzinfo=None)
+        fold = (
+            1
+            if naive.replace(fold=0).astimezone().utcoffset() != local.utcoffset()
+            else 0
+        )
+        return naive.replace(fold=fold, tzinfo=self)
+
+
+_SYSTEM_LOCAL_TZ = _SystemLocalTz()
+
+
 def _resolve_display_tz(explicit: str | None) -> tzinfo:
     """Pick the display tz: explicit arg > MORGENMCP_DISPLAY_TZ > system local."""
     if explicit:
@@ -69,14 +102,12 @@ def _resolve_display_tz(explicit: str | None) -> tzinfo:
             return ZoneInfo(env_value)
         except Exception:
             pass  # bad env var → silently fall through to system tz
-    sys_tz = datetime.now().astimezone().tzinfo
-    assert sys_tz is not None
-    return sys_tz
+    return _SYSTEM_LOCAL_TZ
 
 
 def _tz_label(dt: datetime, tz: tzinfo) -> str:
-    """Render '<abbrev> (<IANA>)' or just '<label>' on fixed-offset fallbacks."""
-    iana = getattr(tz, "key", None) or str(tz)
+    """Render '<abbrev> (<IANA>)' or just '<label>' on fixed-offset/local fallbacks."""
+    iana = getattr(tz, "key", None) or dt.tzname() or str(tz)
     abbrev = dt.tzname() or iana
     if abbrev == iana:
         return iana
@@ -268,14 +299,48 @@ def _format_full_event(event: Event) -> EventItem:
     )
 
 
-async def _fetch_events_by_account(
-    client: Any,
-    calendars_by_account: dict[str, list[str]],
+@dataclass(frozen=True)
+class EventQueryResult:
+    """Result of querying events across one or more calendar accounts."""
+
+    events: list[Event]
+    account_failures: list[tuple[str, BaseException]]
+    account_count: int
+
+    @property
+    def is_partial(self) -> bool:
+        return bool(self.account_failures)
+
+    @property
+    def all_failed(self) -> bool:
+        return (
+            self.account_count > 0 and len(self.account_failures) == self.account_count
+        )
+
+
+async def query_events(
+    client: MorgenClient,
     start: str,
     end: str,
-    ctx: Context | None = None,
-) -> list[Event]:
-    """Query events for each account in parallel, warning on per-account errors."""
+    real_calendar_ids: Sequence[str] | None = None,
+    *,
+    on_account_done: Callable[[int, int], Awaitable[None]] | None = None,
+) -> EventQueryResult:
+    """Group calendars by account and fetch events in bounded parallel."""
+    calendars_by_account: dict[str, list[str]] = defaultdict(list)
+    if real_calendar_ids is not None:
+        if not real_calendar_ids:
+            return EventQueryResult(events=[], account_failures=[], account_count=0)
+        for cal_id in real_calendar_ids:
+            calendars_by_account[extract_account_from_calendar(cal_id)].append(cal_id)
+    else:
+        calendars = await client.list_calendars()
+        for cal in calendars:
+            calendars_by_account[cal.account_id].append(cal.id)
+
+    account_items = list(calendars_by_account.items())
+    if not account_items:
+        return EventQueryResult(events=[], account_failures=[], account_count=0)
 
     async def fetch_account_events(acc_id: str, cal_ids: list[str]) -> list[Event]:
         return await client.list_events(
@@ -286,25 +351,25 @@ async def _fetch_events_by_account(
         )
 
     results = await gather_bounded(
-        fetch_account_events(acc_id, cal_ids)
-        for acc_id, cal_ids in calendars_by_account.items()
+        fetch_account_events(acc_id, cal_ids) for acc_id, cal_ids in account_items
     )
 
-    all_events: list[Event] = []
-    account_ids = list(calendars_by_account.keys())
-    for i, result in enumerate(results):
-        if ctx:
-            await ctx.report_progress(i + 1, len(results))
+    events: list[Event] = []
+    failures: list[tuple[str, BaseException]] = []
+    total = len(account_items)
+    for i, ((acc_id, _), result) in enumerate(zip(account_items, results, strict=True)):
+        if on_account_done is not None:
+            await on_account_done(i + 1, total)
         if isinstance(result, BaseException):
-            if ctx:
-                # register_id: surface the virtual ID, never a raw Morgen ID
-                await ctx.warning(
-                    f"Failed to fetch events for account "
-                    f"{register_id(account_ids[i])}: {result}"
-                )
-            continue
-        all_events.extend(result)
-    return all_events
+            failures.append((acc_id, result))
+        else:
+            events.extend(result)
+
+    return EventQueryResult(
+        events=events,
+        account_failures=failures,
+        account_count=total,
+    )
 
 
 @handle_tool_errors
@@ -368,39 +433,42 @@ async def list_events(
         )
 
     client = get_client()
-    all_events: list[Event] = []
-
+    real_calendar_ids: list[str] | None = None
     if calendar_ids is not None:
         if not calendar_ids:
             raise ToolError("calendar_ids cannot be empty when provided")
-
         real_calendar_ids = resolve_ids(calendar_ids)
-        calendars_by_account: dict[str, list[str]] = defaultdict(list)
-        for cal_id in real_calendar_ids:
-            calendars_by_account[extract_account_from_calendar(cal_id)].append(cal_id)
 
-        if len(calendars_by_account) == 1:
-            real_account_id, scoped_cal_ids = next(iter(calendars_by_account.items()))
-            all_events = await client.list_events(
-                account_id=real_account_id,
-                calendar_ids=scoped_cal_ids,
-                start=utc_start,
-                end=utc_end,
-            )
-        else:
-            all_events = await _fetch_events_by_account(
-                client, calendars_by_account, utc_start, utc_end, ctx=ctx
-            )
-    else:
-        calendars = await client.list_calendars()
+    async def _report_progress(done: int, total: int) -> None:
+        if ctx is not None:
+            await ctx.report_progress(done, total)
 
-        calendars_by_account = defaultdict(list)
-        for cal in calendars:
-            calendars_by_account[cal.account_id].append(cal.id)
+    query = await query_events(
+        client,
+        utc_start,
+        utc_end,
+        real_calendar_ids=real_calendar_ids,
+        on_account_done=_report_progress if ctx is not None else None,
+    )
 
-        all_events = await _fetch_events_by_account(
-            client, calendars_by_account, utc_start, utc_end, ctx=ctx
+    if query.all_failed:
+        if len(query.account_failures) == 1:
+            raise query.account_failures[0][1]
+        details = "; ".join(
+            f"{register_id(acc_id)}: {err}" for acc_id, err in query.account_failures
         )
+        raise ToolError(f"Failed to fetch events for all accounts: {details}")
+
+    if query.is_partial:
+        disable_response_caching()
+        if ctx is not None:
+            for acc_id, err in query.account_failures:
+                # register_id: surface the virtual ID, never a raw Morgen ID
+                await ctx.warning(
+                    f"Failed to fetch events for account {register_id(acc_id)}: {err}"
+                )
+
+    all_events = query.events
 
     if compact:
         effective_display_tz = (

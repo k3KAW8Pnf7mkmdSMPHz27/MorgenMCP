@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo, available_timezones
 # Pre-compile regex patterns for performance
 SUFFIXLESS_DATETIME_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$")
 EVENT_WINDOW_BOUND_PATTERN = re.compile(
-    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})?$"
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)?$"
 )
 ISO_DURATION_PATTERN = re.compile(
     r"^P(?:\d+Y)?(?:\d+M)?(?:\d+W)?(?:\d+D)?(?:T(?:\d+H)?(?:\d+M)?(?:\d+(?:\.\d+)?S)?)?$"
@@ -364,6 +364,32 @@ def _validate_utc_bounds(
         )
 
 
+def _resolve_named_zone_bound(
+    dt: datetime,
+    raw: str,
+    field_name: str,
+    time_zone: str,
+    zone: ZoneInfo,
+) -> datetime:
+    """Convert a naive wall time in a named IANA zone to UTC, rejecting DST gaps/folds."""
+    utc0 = dt.replace(tzinfo=zone, fold=0).astimezone(UTC)
+    utc1 = dt.replace(tzinfo=zone, fold=1).astimezone(UTC)
+    roundtrip0 = utc0.astimezone(zone).replace(tzinfo=None)
+    roundtrip1 = utc1.astimezone(zone).replace(tzinfo=None)
+    if roundtrip0 != dt or roundtrip1 != dt:
+        raise ValidationError(
+            f"'{field_name}' ('{raw}') does not exist in timezone '{time_zone}' "
+            "(daylight saving transition gap)."
+        )
+    if utc0 != utc1:
+        raise ValidationError(
+            f"'{field_name}' ('{raw}') is ambiguous in timezone '{time_zone}' "
+            "(occurs twice during daylight saving fall-back). "
+            "Provide an explicit UTC offset or 'Z' instead."
+        )
+    return utc0
+
+
 def resolve_event_window(
     start: str,
     end: str,
@@ -390,17 +416,18 @@ def resolve_event_window(
             "Do not specify 'time_zone' when 'start'/'end' already include a 'Z' or numeric offset."
         )
 
-    source_tz = ZoneInfo(time_zone) if time_zone is not None else UTC
-    start_utc = (
-        start_dt.astimezone(UTC)
-        if start_dt.tzinfo is not None
-        else start_dt.replace(tzinfo=source_tz).astimezone(UTC)
-    )
-    end_utc = (
-        end_dt.astimezone(UTC)
-        if end_dt.tzinfo is not None
-        else end_dt.replace(tzinfo=source_tz).astimezone(UTC)
-    )
+    if start_dt.tzinfo is not None:
+        start_utc = start_dt.astimezone(UTC)
+        end_utc = end_dt.astimezone(UTC)
+    elif time_zone is not None:
+        source_tz = ZoneInfo(time_zone)
+        start_utc = _resolve_named_zone_bound(
+            start_dt, start, "start", time_zone, source_tz
+        )
+        end_utc = _resolve_named_zone_bound(end_dt, end, "end", time_zone, source_tz)
+    else:
+        start_utc = start_dt.replace(tzinfo=UTC)
+        end_utc = end_dt.replace(tzinfo=UTC)
 
     _validate_utc_bounds(start_utc, end_utc, start, end, max_days=max_days)
     return (

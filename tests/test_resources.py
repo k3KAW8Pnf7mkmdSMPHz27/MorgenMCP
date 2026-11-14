@@ -2,6 +2,7 @@
 
 import base64
 import json
+import time
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 from zoneinfo import ZoneInfo
@@ -333,6 +334,55 @@ class TestEventWindowResources:
         mock_client.list_events.side_effect = list_events_side_effect
         body = json.loads(await res_events_upcoming())
         assert body["count"] == 1  # only the surviving account contributed
+
+    @pytest.mark.asyncio
+    async def test_res_events_today_default_system_tz_uses_boundary_offset_on_dst_transition(
+        self, monkeypatch, mock_client, sample_calendar
+    ):
+        """With MORGENMCP_DISPLAY_TZ unset, midnight on DST day uses midnight's offset."""
+        monkeypatch.delenv("MORGENMCP_DISPLAY_TZ", raising=False)
+        monkeypatch.setenv("TZ", "America/Chicago")
+        time.tzset()
+
+        class _FrozenNoon(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                noon_utc = datetime(2026, 3, 8, 17, 0, 0, tzinfo=UTC)
+                return noon_utc.astimezone(tz) if tz is not None else noon_utc
+
+        monkeypatch.setattr("morgenmcp.resources.datetime", _FrozenNoon)
+        mock_client.list_calendars.return_value = [sample_calendar]
+        mock_client.list_events.return_value = []
+
+        try:
+            body = json.loads(await res_events_today())
+        finally:
+            monkeypatch.undo()
+            time.tzset()
+
+        assert body["window"] == {
+            "start": "2026-03-08T00:00:00",
+            "end": "2026-03-09T00:00:00",
+        }
+        call_kwargs = mock_client.list_events.call_args.kwargs
+        assert call_kwargs["start"] == "2026-03-08T06:00:00Z"
+        assert call_kwargs["end"] == "2026-03-09T05:00:00Z"
+
+    @pytest.mark.asyncio
+    async def test_res_events_today_raises_when_all_accounts_fail(
+        self, mock_client, sample_calendar
+    ):
+        other_calendar = Calendar(
+            id=_make_calendar_id("a" * 24, "b@example.com"),
+            account_id="a" * 24,
+            integration_id="google",
+            name="Other",
+        )
+        mock_client.list_calendars.return_value = [sample_calendar, other_calendar]
+        mock_client.list_events.side_effect = RuntimeError("upstream down")
+
+        with pytest.raises(ResourceError, match="all accounts"):
+            await res_events_today()
 
 
 # --- task resources ---

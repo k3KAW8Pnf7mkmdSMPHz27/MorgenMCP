@@ -24,7 +24,7 @@ All bodies are JSON. IDs are virtual IDs, identical to those returned by tools.
 from __future__ import annotations
 
 import json
-from collections import defaultdict
+import logging
 from datetime import UTC, date, datetime, time, timedelta, tzinfo
 
 from fastmcp.exceptions import ResourceError
@@ -34,16 +34,17 @@ from morgenmcp.client import get_client
 from morgenmcp.models import Event
 from morgenmcp.tools.calendars import _format_calendar
 from morgenmcp.tools.events import (
-    _fetch_events_by_account,
     _format_compact_event,
     _resolve_display_tz,
+    query_events,
 )
 from morgenmcp.tools.id_registry import HASH_SPEC, register_id, resolve_id
-from morgenmcp.tools.id_utils import extract_account_from_calendar
 from morgenmcp.tools.outputs import ListTagsResult, fetch_coverage
 from morgenmcp.tools.tags import _format_tag
 from morgenmcp.tools.tasks import _format_task, _is_open
-from morgenmcp.tools.utils import filter_none_values
+from morgenmcp.tools.utils import disable_response_caching, filter_none_values
+
+logger = logging.getLogger(__name__)
 
 _LOCAL_DT_FMT = "%Y-%m-%dT%H:%M:%S"
 
@@ -94,35 +95,35 @@ async def _fetch_events_in_window(
     end: str,
     calendar_ids: list[str] | None = None,
 ) -> list[Event]:
-    """Fetch events in a window across one or all calendars.
+    """Fetch events in a window across one or all calendars."""
+    if calendar_ids is not None and not calendar_ids:
+        return []
 
-    Mirrors the tool-side parallel-by-account fetch but without progress
-    reporting (resources have no per-call ctx for that).
-    """
     client = get_client()
+    query = await query_events(
+        client,
+        start,
+        end,
+        real_calendar_ids=calendar_ids,
+    )
 
-    if calendar_ids is not None:
-        if not calendar_ids:
-            return []
-        by_account: dict[str, list[str]] = defaultdict(list)
-        for cal_id in calendar_ids:
-            by_account[extract_account_from_calendar(cal_id)].append(cal_id)
-        if len(by_account) == 1:
-            account_id, scoped_cal_ids = next(iter(by_account.items()))
-            return await client.list_events(
-                account_id=account_id,
-                calendar_ids=scoped_cal_ids,
-                start=start,
-                end=end,
-            )
-        return await _fetch_events_by_account(client, by_account, start, end)
+    if query.all_failed:
+        if len(query.account_failures) == 1:
+            raise query.account_failures[0][1]
+        details = "; ".join(
+            f"{register_id(acc_id)}: {err}" for acc_id, err in query.account_failures
+        )
+        raise ResourceError(f"Failed to fetch events for all accounts: {details}")
 
-    calendars = await client.list_calendars()
-    by_account = defaultdict(list)
-    for cal in calendars:
-        by_account[cal.account_id].append(cal.id)
+    if query.is_partial:
+        disable_response_caching()
+        logger.warning(
+            "Partial event fetch for resource window (%d/%d account(s) failed)",
+            len(query.account_failures),
+            query.account_count,
+        )
 
-    return await _fetch_events_by_account(client, by_account, start, end)
+    return query.events
 
 
 def _format_account(acc) -> dict:

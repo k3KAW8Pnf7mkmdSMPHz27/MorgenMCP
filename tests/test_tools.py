@@ -1137,6 +1137,30 @@ class TestListEvents:
             other_account_id: [other_cal_id],
         }
 
+    async def test_list_events_raises_when_all_accounts_fail(
+        self, mock_morgen_client, sample_calendar_id, sample_account_id
+    ):
+        other_account_id = "bbbb00000000000000000002"
+        other_cal_id = make_calendar_id(other_account_id, "other@test.com")
+        vcal1 = register_id(sample_calendar_id)
+        vcal2 = register_id(other_cal_id)
+        mock_morgen_client.list_events.side_effect = MorgenAPIError(
+            "Service Unavailable", status_code=503
+        )
+
+        with pytest.raises(ToolError, match="all accounts") as exc_info:
+            await list_events(
+                start="2026-11-14T12:00:00-06:00",
+                end="2026-11-14T16:00:00-06:00",
+                calendar_ids=[vcal1, vcal2],
+            )
+
+        msg = str(exc_info.value)
+        assert register_id(sample_account_id) in msg
+        assert register_id(other_account_id) in msg
+        assert sample_account_id not in msg
+        assert other_account_id not in msg
+
     async def test_list_events_all_calendars(
         self, mock_morgen_client, sample_event, sample_calendar
     ):

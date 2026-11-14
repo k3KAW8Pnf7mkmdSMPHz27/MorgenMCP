@@ -368,6 +368,37 @@ class TestResolveEventWindow:
         with pytest.raises(ValidationError, match="Invalid start datetime"):
             resolve_event_window("2026-13-01T00:00:00Z", "2026-13-02T00:00:00Z")
 
+    @pytest.mark.parametrize(
+        "bad_bound",
+        [
+            "2026-11-14T12:00:00+00:60",
+            "2026-11-14T12:00:00-06:99",
+            "2026-11-14T12:00:00+24:00",
+        ],
+    )
+    def test_rejects_out_of_range_offset_components(self, bad_bound):
+        with pytest.raises(ValidationError, match="Invalid start format"):
+            resolve_event_window(bad_bound, "2026-11-14T16:00:00+00:00")
+
+    def test_rejects_nonexistent_dst_spring_forward_bound(self):
+        with pytest.raises(ValidationError, match="does not exist"):
+            resolve_event_window(
+                "2026-03-08T02:15:00",
+                "2026-03-08T02:45:00",
+                time_zone="America/Chicago",
+            )
+
+    def test_rejects_ambiguous_dst_fall_back_bound_and_accepts_explicit_offset(self):
+        with pytest.raises(ValidationError, match="ambiguous"):
+            resolve_event_window(
+                "2026-11-01T01:15:00",
+                "2026-11-01T04:00:00",
+                time_zone="America/Chicago",
+            )
+        assert resolve_event_window(
+            "2026-11-01T01:15:00-05:00", "2026-11-01T01:15:00-06:00"
+        ) == ("2026-11-01T06:15:00Z", "2026-11-01T07:15:00Z")
+
 
 class TestValidatePriority:
     def test_valid_range(self):

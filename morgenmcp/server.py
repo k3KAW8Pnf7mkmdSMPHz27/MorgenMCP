@@ -10,6 +10,7 @@ from collections import defaultdict
 from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager, suppress
 from contextvars import ContextVar
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, SupportsFloat
 
@@ -87,6 +88,7 @@ from morgenmcp.tools.tasks import (
     reopen_task,
     update_task,
 )
+from morgenmcp.tools.utils import _ACTIVE_CACHE_CONTROL, ResponseCacheControl
 
 logger = get_logger(__name__)
 
@@ -639,12 +641,25 @@ _DISABLED = {"enabled": False}
 _ACTIVE_CACHE_TARGET: ContextVar[tuple[str, str] | None] = ContextVar(
     "_ACTIVE_CACHE_TARGET", default=None
 )
+_ACTIVE_COMMIT_GUARD: ContextVar[Callable[[], bool] | None] = ContextVar(
+    "_ACTIVE_COMMIT_GUARD", default=None
+)
 
-_INVALIDATION_RULES: tuple[
-    tuple[frozenset[str], tuple[str, ...], Callable[[str], bool]], ...
-] = (
-    (
-        frozenset(
+
+@dataclass(frozen=True)
+class _CacheDomain:
+    """Groups write tools with the read tools and resource URIs they invalidate."""
+
+    name: str
+    write_tools: frozenset[str]
+    read_tools: tuple[str, ...]
+    resource_pred: Callable[[str], bool]
+
+
+_DEFAULT_CACHE_DOMAINS: tuple[_CacheDomain, ...] = (
+    _CacheDomain(
+        name="events",
+        write_tools=frozenset(
             {
                 "morgen_create_event",
                 "morgen_update_event",
@@ -653,22 +668,24 @@ _INVALIDATION_RULES: tuple[
                 "morgen_batch_update_events",
             }
         ),
-        ("morgen_list_events",),
-        lambda u: (
+        read_tools=("morgen_list_events",),
+        resource_pred=lambda u: (
             u.startswith("morgen://events/")
             or (u.startswith("morgen://calendar/") and u.endswith("/events"))
         ),
     ),
-    (
-        frozenset({"morgen_update_calendar_metadata"}),
-        ("morgen_list_calendars",),
-        lambda u: (
+    _CacheDomain(
+        name="calendars",
+        write_tools=frozenset({"morgen_update_calendar_metadata"}),
+        read_tools=("morgen_list_calendars",),
+        resource_pred=lambda u: (
             u == "morgen://calendars"
             or (u.startswith("morgen://calendar/") and not u.endswith("/events"))
         ),
     ),
-    (
-        frozenset(
+    _CacheDomain(
+        name="tasks",
+        write_tools=frozenset(
             {
                 "morgen_create_task",
                 "morgen_update_task",
@@ -679,13 +696,16 @@ _INVALIDATION_RULES: tuple[
                 "morgen_batch_delete_tasks",
             }
         ),
-        ("morgen_list_tasks",),
-        lambda u: u.startswith("morgen://tasks"),
+        read_tools=("morgen_list_tasks",),
+        resource_pred=lambda u: u.startswith("morgen://tasks"),
     ),
-    (
-        frozenset({"morgen_create_tag", "morgen_update_tag", "morgen_delete_tag"}),
-        ("morgen_list_tags", "morgen_get_tag"),
-        lambda u: u == "morgen://tags",
+    _CacheDomain(
+        name="tags",
+        write_tools=frozenset(
+            {"morgen_create_tag", "morgen_update_tag", "morgen_delete_tag"}
+        ),
+        read_tools=("morgen_list_tags", "morgen_get_tag"),
+        resource_pred=lambda u: u == "morgen://tags",
     ),
 )
 
@@ -715,7 +735,13 @@ class _TrackedMemoryStore(MemoryStore):
         collection: str | None = None,
         ttl: SupportsFloat | None = None,
     ) -> None:
+        commit_guard = _ACTIVE_COMMIT_GUARD.get()
+        if commit_guard is not None and not commit_guard():
+            return
         await super().put(key, value, collection=collection, ttl=ttl)
+        if commit_guard is not None and not commit_guard():
+            await self.delete(key=key, collection=collection)
+            return
         now = time.monotonic()
         self._prune_expired(now)
         target = _ACTIVE_CACHE_TARGET.get()
@@ -744,17 +770,52 @@ class _TrackedMemoryStore(MemoryStore):
 
 
 class _WriteInvalidatingCachingMiddleware(ResponseCachingMiddleware):
-    """ResponseCachingMiddleware that evicts affected reads after mutations."""
+    """ResponseCachingMiddleware that owns mutation dependencies, per-domain
+    generations, and incomplete-response skipping.
+    """
 
-    def __init__(self, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        *,
+        domains: tuple[_CacheDomain, ...] = _DEFAULT_CACHE_DOMAINS,
+        **kwargs: Any,
+    ) -> None:
         self._tracked_store = _TrackedMemoryStore()
+        self._domains = domains
+        self._generations: dict[str, int] = {domain.name: 0 for domain in domains}
         super().__init__(cache_storage=self._tracked_store, **kwargs)
 
-    async def _invalidate_for_write(self, tool_name: str) -> None:
-        for write_tools, read_tools, resource_pred in _INVALIDATION_RULES:
-            if tool_name in write_tools:
-                await self._tracked_store.invalidate_tools(read_tools)
-                await self._tracked_store.invalidate_resources(resource_pred)
+    def _domain_for_write(self, tool_name: str) -> _CacheDomain | None:
+        for domain in self._domains:
+            if tool_name in domain.write_tools:
+                return domain
+        return None
+
+    def _domain_for_read_tool(self, tool_name: str) -> _CacheDomain | None:
+        for domain in self._domains:
+            if tool_name in domain.read_tools:
+                return domain
+        return None
+
+    def _domain_for_resource(self, uri: str) -> _CacheDomain | None:
+        for domain in self._domains:
+            if domain.resource_pred(uri):
+                return domain
+        return None
+
+    async def _invalidate_domain(self, domain: _CacheDomain) -> None:
+        self._generations[domain.name] += 1
+        await self._tracked_store.invalidate_tools(domain.read_tools)
+        await self._tracked_store.invalidate_resources(domain.resource_pred)
+
+    def _make_commit_guard(
+        self, domain: _CacheDomain | None, control: ResponseCacheControl
+    ) -> Callable[[], bool]:
+        if domain is None:
+            return lambda: control.cacheable
+        start_gen = self._generations[domain.name]
+        domain_name = domain.name
+        return lambda: control.cacheable and self._generations[domain_name] == start_gen
 
     async def on_call_tool(
         self,
@@ -762,28 +823,44 @@ class _WriteInvalidatingCachingMiddleware(ResponseCachingMiddleware):
         call_next: CallNext[CallToolRequestParams, ToolResult],
     ) -> ToolResult:
         tool_name = context.message.name
-        if any(tool_name in write_tools for write_tools, _, _ in _INVALIDATION_RULES):
+        if (write_domain := self._domain_for_write(tool_name)) is not None:
+            self._generations[write_domain.name] += 1
             try:
                 return await call_next(context)
             finally:
-                await self._invalidate_for_write(tool_name)
+                await self._invalidate_domain(write_domain)
 
-        token = _ACTIVE_CACHE_TARGET.set(("tools/call", tool_name))
+        read_domain = self._domain_for_read_tool(tool_name)
+        control = ResponseCacheControl()
+        guard = self._make_commit_guard(read_domain, control)
+        target_tok = _ACTIVE_CACHE_TARGET.set(("tools/call", tool_name))
+        ctrl_tok = _ACTIVE_CACHE_CONTROL.set(control)
+        guard_tok = _ACTIVE_COMMIT_GUARD.set(guard)
         try:
             return await super().on_call_tool(context, call_next)
         finally:
-            _ACTIVE_CACHE_TARGET.reset(token)
+            _ACTIVE_COMMIT_GUARD.reset(guard_tok)
+            _ACTIVE_CACHE_CONTROL.reset(ctrl_tok)
+            _ACTIVE_CACHE_TARGET.reset(target_tok)
 
     async def on_read_resource(
         self,
         context: MiddlewareContext[ReadResourceRequestParams],
         call_next: CallNext[ReadResourceRequestParams, ResourceResult],
     ) -> ResourceResult:
-        token = _ACTIVE_CACHE_TARGET.set(("resources/read", str(context.message.uri)))
+        uri = str(context.message.uri)
+        read_domain = self._domain_for_resource(uri)
+        control = ResponseCacheControl()
+        guard = self._make_commit_guard(read_domain, control)
+        target_tok = _ACTIVE_CACHE_TARGET.set(("resources/read", uri))
+        ctrl_tok = _ACTIVE_CACHE_CONTROL.set(control)
+        guard_tok = _ACTIVE_COMMIT_GUARD.set(guard)
         try:
             return await super().on_read_resource(context, call_next)
         finally:
-            _ACTIVE_CACHE_TARGET.reset(token)
+            _ACTIVE_COMMIT_GUARD.reset(guard_tok)
+            _ACTIVE_CACHE_CONTROL.reset(ctrl_tok)
+            _ACTIVE_CACHE_TARGET.reset(target_tok)
 
 
 mcp.add_middleware(
