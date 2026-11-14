@@ -1821,6 +1821,52 @@ class TestContextWarnings:
 
         ctx.report_progress.assert_awaited_once_with(1, 1)
 
+    async def test_list_events_warns_on_bare_bounds_with_non_utc_display_timezone(
+        self, mock_morgen_client, sample_calendar_id
+    ):
+        """Bare bounds with non-UTC display_timezone emit a UTC interpretation warning."""
+        mock_morgen_client.list_events.return_value = []
+        virtual_cal = register_id(sample_calendar_id)
+        ctx = AsyncMock()
+
+        await list_events(
+            start="2026-11-14T12:00:00",
+            end="2026-11-14T16:00:00",
+            calendar_ids=[virtual_cal],
+            display_timezone="America/Chicago",
+            ctx=ctx,
+        )
+
+        ctx.warning.assert_awaited_once()
+        warning_msg = ctx.warning.call_args[0][0]
+        assert "UTC" in warning_msg
+        assert "time_zone" in warning_msg
+
+    async def test_list_events_no_warning_when_offset_or_time_zone_provided(
+        self, mock_morgen_client, sample_calendar_id
+    ):
+        mock_morgen_client.list_events.return_value = []
+        virtual_cal = register_id(sample_calendar_id)
+        ctx = AsyncMock()
+
+        await list_events(
+            start="2026-11-14T12:00:00-06:00",
+            end="2026-11-14T16:00:00-06:00",
+            calendar_ids=[virtual_cal],
+            display_timezone="America/Chicago",
+            ctx=ctx,
+        )
+        await list_events(
+            start="2026-11-14T12:00:00",
+            end="2026-11-14T16:00:00",
+            calendar_ids=[virtual_cal],
+            display_timezone="America/Chicago",
+            time_zone="America/Chicago",
+            ctx=ctx,
+        )
+
+        ctx.warning.assert_not_awaited()
+
     async def test_batch_delete_warns_on_failure(
         self, mock_morgen_client, sample_account_id
     ):

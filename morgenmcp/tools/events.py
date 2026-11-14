@@ -47,6 +47,7 @@ from morgenmcp.tools.utils import (
     omit_none,
 )
 from morgenmcp.validators import (
+    SUFFIXLESS_DATETIME_PATTERN,
     resolve_event_window,
     validate_duration,
     validate_email,
@@ -55,6 +56,7 @@ from morgenmcp.validators import (
 )
 
 _DISPLAY_TZ_ENV = "MORGENMCP_DISPLAY_TZ"
+_UTC_TZ_NAMES = frozenset({"UTC", "Etc/UTC", "Etc/GMT", "GMT"})
 
 
 def _resolve_display_tz(explicit: str | None) -> tzinfo:
@@ -350,6 +352,20 @@ async def list_events(
     """
     utc_start, utc_end = resolve_event_window(start, end, time_zone=time_zone)
     validate_timezone(display_timezone)
+
+    configured_display_tz = display_timezone or os.environ.get(_DISPLAY_TZ_ENV)
+    if (
+        ctx
+        and time_zone is None
+        and configured_display_tz
+        and configured_display_tz not in _UTC_TZ_NAMES
+        and SUFFIXLESS_DATETIME_PATTERN.match(start)
+    ):
+        await ctx.warning(
+            f"Bare 'start'/'end' bounds without 'time_zone' or an offset are "
+            f"interpreted as UTC even when display_timezone={configured_display_tz!r}. "
+            f"Pass offsets/Z or time_zone={configured_display_tz!r} if you intended local time."
+        )
 
     client = get_client()
     all_events: list[Event] = []

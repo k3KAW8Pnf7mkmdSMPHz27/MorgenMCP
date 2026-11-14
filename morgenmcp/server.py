@@ -695,7 +695,17 @@ class _TrackedMemoryStore(MemoryStore):
 
     def __init__(self) -> None:
         super().__init__()
-        self._tracked_keys: dict[tuple[str, str], set[str]] = defaultdict(set)
+        self._tracked_keys: dict[tuple[str, str], dict[str, float]] = defaultdict(dict)
+
+    def _prune_expired(self, now: float) -> None:
+        empty_targets: list[tuple[str, str]] = []
+        for target, keys in self._tracked_keys.items():
+            for key in [k for k, exp in keys.items() if exp <= now]:
+                del keys[key]
+            if not keys:
+                empty_targets.append(target)
+        for target in empty_targets:
+            del self._tracked_keys[target]
 
     async def put(
         self,
@@ -706,23 +716,30 @@ class _TrackedMemoryStore(MemoryStore):
         ttl: SupportsFloat | None = None,
     ) -> None:
         await super().put(key, value, collection=collection, ttl=ttl)
+        now = time.monotonic()
+        self._prune_expired(now)
         target = _ACTIVE_CACHE_TARGET.get()
         if target is not None and collection == target[0]:
-            self._tracked_keys[target].add(key)
+            expires_at = now + float(ttl) if ttl is not None else float("inf")
+            self._tracked_keys[target][key] = expires_at
 
     async def invalidate_tools(self, tool_names: tuple[str, ...]) -> None:
+        now = time.monotonic()
+        self._prune_expired(now)
         for name in tool_names:
-            for key in self._tracked_keys.pop(("tools/call", name), ()):
+            for key in self._tracked_keys.pop(("tools/call", name), {}):
                 await self.delete(key=key, collection="tools/call")
 
     async def invalidate_resources(self, predicate: Callable[[str], bool]) -> None:
+        now = time.monotonic()
+        self._prune_expired(now)
         uris = [
             uri
             for col, uri in self._tracked_keys
             if col == "resources/read" and predicate(uri)
         ]
         for uri in uris:
-            for key in self._tracked_keys.pop(("resources/read", uri), ()):
+            for key in self._tracked_keys.pop(("resources/read", uri), {}):
                 await self.delete(key=key, collection="resources/read")
 
 

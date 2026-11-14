@@ -1337,6 +1337,7 @@ class TestResponseCaching:
                 await client.call_tool("morgen_list_accounts", {})
                 await client.read_resource("morgen://events/today")
                 before = await client.call_tool("morgen_list_events", list_args)
+                assert before.structured_content is not None
                 assert before.structured_content["count"] == 0
 
                 # Create invalidates list_events & events/today, NOT list_accounts
@@ -1350,9 +1351,11 @@ class TestResponseCaching:
                         "time_zone": "America/Chicago",
                     },
                 )
+                assert created.structured_content is not None
                 virtual_evt_id = created.structured_content["event"]["id"]
 
                 after_create = await client.call_tool("morgen_list_events", list_args)
+                assert after_create.structured_content is not None
                 assert after_create.structured_content["count"] == 1
                 assert "Job search" in after_create.structured_content["events"][0]
 
@@ -1370,6 +1373,7 @@ class TestResponseCaching:
                     {"event_id": virtual_evt_id, "title": "Job search (updated)"},
                 )
                 after_update = await client.call_tool("morgen_list_events", list_args)
+                assert after_update.structured_content is not None
                 assert (
                     "Job search (updated)"
                     in after_update.structured_content["events"][0]
@@ -1380,9 +1384,33 @@ class TestResponseCaching:
                     "morgen_delete_event", {"event_id": virtual_evt_id}
                 )
                 after_delete = await client.call_tool("morgen_list_events", list_args)
+                assert after_delete.structured_content is not None
                 assert after_delete.structured_content["count"] == 0
 
             assert evt_client.list_events.await_count == 4
+
+    async def test_tracked_store_prunes_expired_keys(self, monkeypatch):
+        """Expired tracked cache keys are pruned on subsequent puts."""
+        from morgenmcp.server import _ACTIVE_CACHE_TARGET, _TrackedMemoryStore
+
+        now = 1000.0
+        monkeypatch.setattr("morgenmcp.server.time.monotonic", lambda: now)
+        store = _TrackedMemoryStore()
+
+        token = _ACTIVE_CACHE_TARGET.set(("tools/call", "morgen_list_events"))
+        try:
+            await store.put("k1", {"v": 1}, collection="tools/call", ttl=60)
+            assert set(store._tracked_keys[("tools/call", "morgen_list_events")]) == {
+                "k1"
+            }
+
+            now = 1061.0  # past TTL
+            await store.put("k2", {"v": 2}, collection="tools/call", ttl=60)
+            assert set(store._tracked_keys[("tools/call", "morgen_list_events")]) == {
+                "k2"
+            }
+        finally:
+            _ACTIVE_CACHE_TARGET.reset(token)
 
 
 class TestLimitConfig:
