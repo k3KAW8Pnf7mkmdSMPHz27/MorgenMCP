@@ -1260,6 +1260,130 @@ class TestResponseCaching:
             # Different windows ⇒ two underlying fetches
             assert client_mock.list_events.await_count == 2
 
+    @pytest.mark.usefixtures("isolated_response_cache")
+    async def test_event_writes_invalidate_list_events_and_resources_only(self):
+        """Event writes evict cached list_events & event resources, not unrelated tools."""
+        from morgenmcp.models import CreatedEventInfo, Event, EventCreateResponse
+        from morgenmcp.tools.id_registry import register_id
+
+        acc_id = "d" * 24
+        real_cal_id = (
+            base64.b64encode(
+                json.dumps([acc_id, "inv@example.com"], separators=(",", ":")).encode()
+            )
+            .decode()
+            .rstrip("=")
+        )
+        real_evt_id = (
+            base64.b64encode(
+                json.dumps(
+                    ["inv@example.com", "evt_inv", acc_id], separators=(",", ":")
+                ).encode()
+            )
+            .decode()
+            .rstrip("=")
+        )
+        virtual_cal_id = register_id(real_cal_id)
+        created_evt = Event(
+            id=real_evt_id,
+            calendar_id=real_cal_id,
+            account_id=acc_id,
+            integration_id="google",
+            title="Job search",
+            start="2026-11-14T13:00:00",
+            duration="PT45M",
+            time_zone="America/Chicago",
+        )
+        updated_evt = created_evt.model_copy(update={"title": "Job search (updated)"})
+
+        list_args = {
+            "start": "2026-11-14T12:00:00",
+            "end": "2026-11-14T16:00:00",
+            "time_zone": "America/Chicago",
+            "calendar_ids": [virtual_cal_id],
+            "compact": True,
+        }
+
+        with (
+            patch("morgenmcp.tools.events.get_client") as events_mock,
+            patch("morgenmcp.tools.accounts.get_client") as accounts_mock,
+            patch("morgenmcp.resources.get_client") as resources_mock,
+        ):
+            evt_client = AsyncMock()
+            evt_client.list_events.side_effect = [
+                [],
+                [created_evt],
+                [updated_evt],
+                [],
+            ]
+            evt_client.create_event.return_value = EventCreateResponse(
+                event=CreatedEventInfo(
+                    id=real_evt_id, calendar_id=real_cal_id, account_id=acc_id
+                )
+            )
+            events_mock.return_value = evt_client
+
+            acc_client = AsyncMock()
+            acc_client.list_accounts.return_value = []
+            accounts_mock.return_value = acc_client
+
+            res_client = AsyncMock()
+            res_client.list_calendars.return_value = []
+            res_client.list_events.return_value = []
+            resources_mock.return_value = res_client
+
+            async with Client(mcp) as client:
+                # Populate list_accounts, events/today resource, and list_events caches
+                await client.call_tool("morgen_list_accounts", {})
+                await client.read_resource("morgen://events/today")
+                before = await client.call_tool("morgen_list_events", list_args)
+                assert before.structured_content["count"] == 0
+
+                # Create invalidates list_events & events/today, NOT list_accounts
+                created = await client.call_tool(
+                    "morgen_create_event",
+                    {
+                        "calendar_id": virtual_cal_id,
+                        "title": "Job search",
+                        "start": "2026-11-14T13:00:00",
+                        "duration": "PT45M",
+                        "time_zone": "America/Chicago",
+                    },
+                )
+                virtual_evt_id = created.structured_content["event"]["id"]
+
+                after_create = await client.call_tool("morgen_list_events", list_args)
+                assert after_create.structured_content["count"] == 1
+                assert "Job search" in after_create.structured_content["events"][0]
+
+                # list_accounts stays cached across the event write
+                await client.call_tool("morgen_list_accounts", {})
+                assert acc_client.list_accounts.await_count == 1
+
+                # events/today resource cache was evicted by the event write
+                await client.read_resource("morgen://events/today")
+                assert res_client.list_calendars.await_count == 2
+
+                # Update invalidates list_events cache
+                await client.call_tool(
+                    "morgen_update_event",
+                    {"event_id": virtual_evt_id, "title": "Job search (updated)"},
+                )
+                after_update = await client.call_tool("morgen_list_events", list_args)
+                assert (
+                    "Job search (updated)"
+                    in after_update.structured_content["events"][0]
+                )
+
+                # Delete invalidates list_events cache
+                await client.call_tool(
+                    "morgen_delete_event", {"event_id": virtual_evt_id}
+                )
+                after_delete = await client.call_tool("morgen_list_events", list_args)
+                assert after_delete.structured_content["count"] == 0
+
+            assert evt_client.list_events.await_count == 4
+
 
 class TestLimitConfig:
     """CLI/env wiring for the per-endpoint list limits (_apply_limit_config)."""

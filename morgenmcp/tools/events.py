@@ -47,12 +47,11 @@ from morgenmcp.tools.utils import (
     omit_none,
 )
 from morgenmcp.validators import (
-    validate_date_range,
+    resolve_event_window,
     validate_duration,
     validate_email,
     validate_local_datetime,
     validate_timezone,
-    validate_utc_window_bound,
 )
 
 _DISPLAY_TZ_ENV = "MORGENMCP_DISPLAY_TZ"
@@ -267,6 +266,45 @@ def _format_full_event(event: Event) -> EventItem:
     )
 
 
+async def _fetch_events_by_account(
+    client: Any,
+    calendars_by_account: dict[str, list[str]],
+    start: str,
+    end: str,
+    ctx: Context | None = None,
+) -> list[Event]:
+    """Query events for each account in parallel, warning on per-account errors."""
+
+    async def fetch_account_events(acc_id: str, cal_ids: list[str]) -> list[Event]:
+        return await client.list_events(
+            account_id=acc_id,
+            calendar_ids=cal_ids,
+            start=start,
+            end=end,
+        )
+
+    results = await gather_bounded(
+        fetch_account_events(acc_id, cal_ids)
+        for acc_id, cal_ids in calendars_by_account.items()
+    )
+
+    all_events: list[Event] = []
+    account_ids = list(calendars_by_account.keys())
+    for i, result in enumerate(results):
+        if ctx:
+            await ctx.report_progress(i + 1, len(results))
+        if isinstance(result, BaseException):
+            if ctx:
+                # register_id: surface the virtual ID, never a raw Morgen ID
+                await ctx.warning(
+                    f"Failed to fetch events for account "
+                    f"{register_id(account_ids[i])}: {result}"
+                )
+            continue
+        all_events.extend(result)
+    return all_events
+
+
 @handle_tool_errors
 async def list_events(
     start: str,
@@ -274,19 +312,22 @@ async def list_events(
     calendar_ids: list[str] | None = None,
     compact: bool = False,
     display_timezone: str | None = None,
+    time_zone: str | None = None,
     ctx: Context | None = None,
 ) -> ListEventsResult:
     """List events from calendars within a time window.
 
     Recurring events are automatically expanded to individual occurrences.
     Deleted or cancelled events are not included.
-    Convert local window bounds to UTC before formatting them.
 
     Args:
-        start: Start of the UTC window in YYYY-MM-DDTHH:mm:ss format without a Z
-            suffix or numeric offset (e.g., "2023-03-01T00:00:00").
-        end: End of the UTC window in YYYY-MM-DDTHH:mm:ss format without a Z
-            suffix or numeric offset. Max 6 months from start.
+        start: Start of the time window in ISO 8601 format, either with an
+            explicit offset or ``Z`` (e.g., "2023-03-01T00:00:00-06:00" or
+            "2023-03-01T06:00:00Z"), or bare YYYY-MM-DDTHH:mm:ss interpreted
+            in ``time_zone`` (defaulting to UTC when ``time_zone`` is omitted).
+        end: End of the time window in ISO 8601 format (explicit offset / ``Z``,
+            or bare YYYY-MM-DDTHH:mm:ss interpreted in ``time_zone`` / UTC).
+            Max 6 months from start.
         calendar_ids: Optional list of virtual calendar IDs. If omitted, queries all calendars.
         compact: If True, returns compact one-liner format to reduce tokens.
             Format: "Jul 15 09:15-10:00 CDT (America/Chicago): Meeting [event_id]"
@@ -297,76 +338,59 @@ async def list_events(
             "[abc123 task,free]". No tag means an ordinary busy commitment.
             Only task/routine/flexible are mutually exclusive.
         display_timezone: Optional IANA timezone (e.g. "America/Chicago") used to
-            render compact times. Defaults to the MORGENMCP_DISPLAY_TZ env var,
-            or the system local timezone if unset. Applies only to compact output.
-            The queried window uses UTC independently of this setting.
-            Floating events are tagged "(floating)".
+            render compact times. Defaults to ``time_zone`` if provided, then the
+            MORGENMCP_DISPLAY_TZ env var, or the system local timezone if unset.
+            Applies only to compact output; floating events are tagged "(floating)".
+        time_zone: Optional IANA timezone (e.g. "America/Chicago") used to
+            interpret bare ``start``/``end`` window bounds before converting to UTC.
+            Do not combine with a ``Z`` or numeric offset on ``start``/``end``.
 
     Returns:
         Dictionary with 'events' key containing list of event objects (or strings if compact).
     """
-    validate_utc_window_bound(start, "start")
-    validate_utc_window_bound(end, "end")
-    validate_date_range(start, end)
+    utc_start, utc_end = resolve_event_window(start, end, time_zone=time_zone)
     validate_timezone(display_timezone)
 
     client = get_client()
     all_events: list[Event] = []
 
     if calendar_ids is not None:
-        # Specific calendars requested - resolve virtual IDs and extract account
         if not calendar_ids:
             raise ToolError("calendar_ids cannot be empty when provided")
 
         real_calendar_ids = resolve_ids(calendar_ids)
-        # Extract account ID from first calendar (all calendars in a query must be from same account)
-        real_account_id = extract_account_from_calendar(real_calendar_ids[0])
+        calendars_by_account: dict[str, list[str]] = defaultdict(list)
+        for cal_id in real_calendar_ids:
+            calendars_by_account[extract_account_from_calendar(cal_id)].append(cal_id)
 
-        all_events = await client.list_events(
-            account_id=real_account_id,
-            calendar_ids=real_calendar_ids,
-            start=start,
-            end=end,
-        )
+        if len(calendars_by_account) == 1:
+            real_account_id, scoped_cal_ids = next(iter(calendars_by_account.items()))
+            all_events = await client.list_events(
+                account_id=real_account_id,
+                calendar_ids=scoped_cal_ids,
+                start=utc_start,
+                end=utc_end,
+            )
+        else:
+            all_events = await _fetch_events_by_account(
+                client, calendars_by_account, utc_start, utc_end, ctx=ctx
+            )
     else:
-        # Fetch all calendars and query by account
         calendars = await client.list_calendars()
 
-        # Group calendars by account_id (using real IDs internally)
-        calendars_by_account: dict[str, list[str]] = defaultdict(list)
+        calendars_by_account = defaultdict(list)
         for cal in calendars:
             calendars_by_account[cal.account_id].append(cal.id)
 
-        # Query events for each account in parallel
-        async def fetch_account_events(acc_id: str, cal_ids: list[str]) -> list[Event]:
-            return await client.list_events(
-                account_id=acc_id,
-                calendar_ids=cal_ids,
-                start=start,
-                end=end,
-            )
-
-        results = await gather_bounded(
-            fetch_account_events(acc_id, cal_ids)
-            for acc_id, cal_ids in calendars_by_account.items()
+        all_events = await _fetch_events_by_account(
+            client, calendars_by_account, utc_start, utc_end, ctx=ctx
         )
 
-        account_ids = list(calendars_by_account.keys())
-        for i, result in enumerate(results):
-            if ctx:
-                await ctx.report_progress(i + 1, len(results))
-            if isinstance(result, BaseException):
-                if ctx:
-                    # register_id: surface the virtual ID, never a raw Morgen ID
-                    await ctx.warning(
-                        f"Failed to fetch events for account "
-                        f"{register_id(account_ids[i])}: {result}"
-                    )
-                continue
-            all_events.extend(result)
-
     if compact:
-        display_tz = _resolve_display_tz(display_timezone)
+        effective_display_tz = (
+            display_timezone if display_timezone is not None else time_zone
+        )
+        display_tz = _resolve_display_tz(effective_display_tz)
         return ListEventsResult(
             events=[_format_compact_event(event, display_tz) for event in all_events],
             count=len(all_events),

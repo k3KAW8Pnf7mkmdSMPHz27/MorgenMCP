@@ -1001,23 +1001,141 @@ class TestListEvents:
             )
 
     @pytest.mark.parametrize(
-        ("start", "end"),
+        ("start", "end", "time_zone"),
         [
-            ("2023-03-01T00:00:00Z", "2023-03-02T00:00:00"),
-            ("2023-03-01T00:00:00", "2023-03-02T00:00:00-06:00"),
+            ("2023-03-01T00:00:00Z", "2023-03-02T00:00:00", None),
+            ("2023-03-01T00:00:00", "2023-03-02T00:00:00-06:00", None),
+            (
+                "2023-03-01T00:00:00-06:00",
+                "2023-03-02T00:00:00-06:00",
+                "America/Chicago",
+            ),
+            ("2023-03-01", "2023-03-02T00:00:00", None),
         ],
     )
     async def test_list_events_validation_error(
-        self, mock_morgen_client, sample_calendar_id, start, end
+        self, mock_morgen_client, sample_calendar_id, start, end, time_zone
     ):
         virtual_cal = register_id(sample_calendar_id)
 
         with pytest.raises(ToolError, match="Validation error") as error:
-            await list_events(start=start, end=end, calendar_ids=[virtual_cal])
+            await list_events(
+                start=start,
+                end=end,
+                calendar_ids=[virtual_cal],
+                time_zone=time_zone,
+            )
 
-        assert "UTC" in str(error.value)
         assert "timeZone" not in str(error.value)
         mock_morgen_client.list_events.assert_not_awaited()
+
+    @pytest.mark.parametrize(
+        ("start", "end", "time_zone", "expected_start", "expected_end"),
+        [
+            (
+                "2026-11-14T18:00:00Z",
+                "2026-11-14T22:00:00Z",
+                None,
+                "2026-11-14T18:00:00Z",
+                "2026-11-14T22:00:00Z",
+            ),
+            (
+                "2026-11-14T12:00:00-06:00",
+                "2026-11-14T16:00:00-06:00",
+                None,
+                "2026-11-14T18:00:00Z",
+                "2026-11-14T22:00:00Z",
+            ),
+            (
+                "2026-11-14T12:00:00",
+                "2026-11-14T16:00:00",
+                "America/Chicago",
+                "2026-11-14T18:00:00Z",
+                "2026-11-14T22:00:00Z",
+            ),
+        ],
+    )
+    async def test_list_events_converts_window_to_utc(
+        self,
+        mock_morgen_client,
+        sample_calendar_id,
+        start,
+        end,
+        time_zone,
+        expected_start,
+        expected_end,
+    ):
+        mock_morgen_client.list_events.return_value = []
+        virtual_cal = register_id(sample_calendar_id)
+
+        await list_events(
+            start=start,
+            end=end,
+            calendar_ids=[virtual_cal],
+            time_zone=time_zone,
+        )
+
+        call_kwargs = mock_morgen_client.list_events.call_args.kwargs
+        assert call_kwargs["start"] == expected_start
+        assert call_kwargs["end"] == expected_end
+
+    async def test_list_events_time_zone_defaults_compact_display_timezone(
+        self, mock_morgen_client, sample_calendar_id, sample_account_id
+    ):
+        event_id = make_event_id("test@example.com", "job_uid", sample_account_id)
+        evt = Event(
+            id=event_id,
+            calendar_id=sample_calendar_id,
+            account_id=sample_account_id,
+            integration_id="google",
+            title="Job search",
+            start="2026-11-14T13:00:00",
+            duration="PT45M",
+            time_zone="America/Chicago",
+            show_without_time=False,
+        )
+        mock_morgen_client.list_events.return_value = [evt]
+        virtual_cal = register_id(sample_calendar_id)
+
+        result = (
+            await list_events(
+                start="2026-11-14T12:00:00",
+                end="2026-11-14T16:00:00",
+                calendar_ids=[virtual_cal],
+                compact=True,
+                time_zone="America/Chicago",
+            )
+        ).model_dump()
+
+        assert (
+            "Nov 14 13:00-13:45 CST (America/Chicago): Job search"
+            in result["events"][0]
+        )
+
+    async def test_list_events_multi_account_calendar_ids(
+        self, mock_morgen_client, sample_calendar_id, sample_account_id
+    ):
+        other_account_id = "bbbb00000000000000000002"
+        other_cal_id = make_calendar_id(other_account_id, "other@test.com")
+        vcal1 = register_id(sample_calendar_id)
+        vcal2 = register_id(other_cal_id)
+        mock_morgen_client.list_events.return_value = []
+
+        await list_events(
+            start="2026-11-14T12:00:00-06:00",
+            end="2026-11-14T16:00:00-06:00",
+            calendar_ids=[vcal1, vcal2],
+        )
+
+        assert mock_morgen_client.list_events.await_count == 2
+        seen = {
+            call.kwargs["account_id"]: call.kwargs["calendar_ids"]
+            for call in mock_morgen_client.list_events.call_args_list
+        }
+        assert seen == {
+            sample_account_id: [sample_calendar_id],
+            other_account_id: [other_cal_id],
+        }
 
     async def test_list_events_all_calendars(
         self, mock_morgen_client, sample_event, sample_calendar

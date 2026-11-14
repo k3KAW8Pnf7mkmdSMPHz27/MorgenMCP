@@ -2,8 +2,9 @@
 
 import base64
 import json
-from datetime import date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastmcp.exceptions import ResourceError
@@ -125,22 +126,32 @@ def sample_event(event_id, calendar_id, account_id) -> Event:
 
 class TestTimeRanges:
     def test_today_range_is_midnight_to_midnight(self):
-        start_s, end_s = _today_range()
+        utc_bounds, (start_s, end_s) = _today_range(UTC)
         start = datetime.strptime(start_s, _LOCAL_DT_FMT)
         end = datetime.strptime(end_s, _LOCAL_DT_FMT)
         assert start.hour == 0 and start.minute == 0
         assert end - start == timedelta(days=1)
-        assert start.date() == date.today()
+        assert start.date() == datetime.now(UTC).date()
+        assert utc_bounds[0].endswith("Z") and utc_bounds[1].endswith("Z")
+
+    def test_today_range_converts_local_midnight_to_utc(self):
+        tz = ZoneInfo("America/Chicago")
+        (utc_start_s, utc_end_s), (local_start_s, local_end_s) = _today_range(tz)
+        local_start = datetime.strptime(local_start_s, _LOCAL_DT_FMT).replace(tzinfo=tz)
+        local_end = datetime.strptime(local_end_s, _LOCAL_DT_FMT).replace(tzinfo=tz)
+        assert local_start.hour == 0 and local_end.hour == 0
+        assert utc_start_s == local_start.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        assert utc_end_s == local_end.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     def test_this_week_range_is_seven_days_starting_monday(self):
-        start_s, end_s = _this_week_range()
+        _, (start_s, end_s) = _this_week_range(UTC)
         start = datetime.strptime(start_s, _LOCAL_DT_FMT)
         end = datetime.strptime(end_s, _LOCAL_DT_FMT)
         assert start.weekday() == 0  # Monday
         assert end - start == timedelta(days=7)
 
     def test_upcoming_range_seven_days_default(self):
-        start_s, end_s = _upcoming_range()
+        _, (start_s, end_s) = _upcoming_range(UTC)
         start = datetime.strptime(start_s, _LOCAL_DT_FMT)
         end = datetime.strptime(end_s, _LOCAL_DT_FMT)
         assert end - start == timedelta(days=7)
@@ -279,6 +290,27 @@ class TestEventWindowResources:
         assert body["count"] == 1
         line = body["events"][0]
         assert "14:00-14:30 UTC" in line
+
+    @pytest.mark.asyncio
+    async def test_res_events_today_queries_utc_for_display_tz(
+        self, monkeypatch, mock_client, sample_calendar
+    ):
+        """morgen://events/today converts local midnight in MORGENMCP_DISPLAY_TZ to UTC."""
+        monkeypatch.setenv("MORGENMCP_DISPLAY_TZ", "America/Chicago")
+        mock_client.list_calendars.return_value = [sample_calendar]
+        mock_client.list_events.return_value = []
+
+        body = json.loads(await res_events_today())
+
+        tz = ZoneInfo("America/Chicago")
+        expected_local_start = datetime.strptime(
+            body["window"]["start"], _LOCAL_DT_FMT
+        ).replace(tzinfo=tz)
+        expected_utc_start = expected_local_start.astimezone(UTC).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        call_kwargs = mock_client.list_events.call_args.kwargs
+        assert call_kwargs["start"] == expected_utc_start
 
     @pytest.mark.asyncio
     async def test_res_events_upcoming_handles_per_account_failure(

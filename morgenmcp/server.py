@@ -6,11 +6,15 @@ import argparse
 import asyncio
 import os
 import time
-from collections.abc import AsyncIterator
+from collections import defaultdict
+from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager, suppress
+from contextvars import ContextVar
 from pathlib import Path
+from typing import Any, SupportsFloat
 
 from fastmcp import FastMCP
+from fastmcp.resources.base import ResourceResult
 from fastmcp.server.middleware.caching import (
     CallToolSettings,
     ListPromptsSettings,
@@ -19,8 +23,15 @@ from fastmcp.server.middleware.caching import (
     ReadResourceSettings,
     ResponseCachingMiddleware,
 )
+from fastmcp.server.middleware.middleware import CallNext, MiddlewareContext
+from fastmcp.tools.base import ToolResult
 from fastmcp.utilities.logging import get_logger
-from mcp.types import ToolAnnotations
+from key_value.aio.stores.memory import MemoryStore
+from mcp.types import (
+    CallToolRequestParams,
+    ReadResourceRequestParams,
+    ToolAnnotations,
+)
 
 from morgenmcp import __version__
 from morgenmcp.client import (
@@ -625,8 +636,141 @@ _CACHE_TTL_S = 60
 # that actually hit the network (`call_tool` on the allowlist, and `read_resource`).
 _DISABLED = {"enabled": False}
 
+_ACTIVE_CACHE_TARGET: ContextVar[tuple[str, str] | None] = ContextVar(
+    "_ACTIVE_CACHE_TARGET", default=None
+)
+
+_INVALIDATION_RULES: tuple[
+    tuple[frozenset[str], tuple[str, ...], Callable[[str], bool]], ...
+] = (
+    (
+        frozenset(
+            {
+                "morgen_create_event",
+                "morgen_update_event",
+                "morgen_delete_event",
+                "morgen_batch_delete_events",
+                "morgen_batch_update_events",
+            }
+        ),
+        ("morgen_list_events",),
+        lambda u: (
+            u.startswith("morgen://events/")
+            or (u.startswith("morgen://calendar/") and u.endswith("/events"))
+        ),
+    ),
+    (
+        frozenset({"morgen_update_calendar_metadata"}),
+        ("morgen_list_calendars",),
+        lambda u: (
+            u == "morgen://calendars"
+            or (u.startswith("morgen://calendar/") and not u.endswith("/events"))
+        ),
+    ),
+    (
+        frozenset(
+            {
+                "morgen_create_task",
+                "morgen_update_task",
+                "morgen_move_task",
+                "morgen_complete_task",
+                "morgen_reopen_task",
+                "morgen_delete_task",
+                "morgen_batch_delete_tasks",
+            }
+        ),
+        ("morgen_list_tasks",),
+        lambda u: u.startswith("morgen://tasks"),
+    ),
+    (
+        frozenset({"morgen_create_tag", "morgen_update_tag", "morgen_delete_tag"}),
+        ("morgen_list_tags", "morgen_get_tag"),
+        lambda u: u == "morgen://tags",
+    ),
+)
+
+
+class _TrackedMemoryStore(MemoryStore):
+    """In-memory store that indexes cached keys by tool name or resource URI."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._tracked_keys: dict[tuple[str, str], set[str]] = defaultdict(set)
+
+    async def put(
+        self,
+        key: str,
+        value: Mapping[str, Any],
+        *,
+        collection: str | None = None,
+        ttl: SupportsFloat | None = None,
+    ) -> None:
+        await super().put(key, value, collection=collection, ttl=ttl)
+        target = _ACTIVE_CACHE_TARGET.get()
+        if target is not None and collection == target[0]:
+            self._tracked_keys[target].add(key)
+
+    async def invalidate_tools(self, tool_names: tuple[str, ...]) -> None:
+        for name in tool_names:
+            for key in self._tracked_keys.pop(("tools/call", name), ()):
+                await self.delete(key=key, collection="tools/call")
+
+    async def invalidate_resources(self, predicate: Callable[[str], bool]) -> None:
+        uris = [
+            uri
+            for col, uri in self._tracked_keys
+            if col == "resources/read" and predicate(uri)
+        ]
+        for uri in uris:
+            for key in self._tracked_keys.pop(("resources/read", uri), ()):
+                await self.delete(key=key, collection="resources/read")
+
+
+class _WriteInvalidatingCachingMiddleware(ResponseCachingMiddleware):
+    """ResponseCachingMiddleware that evicts affected reads after mutations."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        self._tracked_store = _TrackedMemoryStore()
+        super().__init__(cache_storage=self._tracked_store, **kwargs)
+
+    async def _invalidate_for_write(self, tool_name: str) -> None:
+        for write_tools, read_tools, resource_pred in _INVALIDATION_RULES:
+            if tool_name in write_tools:
+                await self._tracked_store.invalidate_tools(read_tools)
+                await self._tracked_store.invalidate_resources(resource_pred)
+
+    async def on_call_tool(
+        self,
+        context: MiddlewareContext[CallToolRequestParams],
+        call_next: CallNext[CallToolRequestParams, ToolResult],
+    ) -> ToolResult:
+        tool_name = context.message.name
+        if any(tool_name in write_tools for write_tools, _, _ in _INVALIDATION_RULES):
+            try:
+                return await call_next(context)
+            finally:
+                await self._invalidate_for_write(tool_name)
+
+        token = _ACTIVE_CACHE_TARGET.set(("tools/call", tool_name))
+        try:
+            return await super().on_call_tool(context, call_next)
+        finally:
+            _ACTIVE_CACHE_TARGET.reset(token)
+
+    async def on_read_resource(
+        self,
+        context: MiddlewareContext[ReadResourceRequestParams],
+        call_next: CallNext[ReadResourceRequestParams, ResourceResult],
+    ) -> ResourceResult:
+        token = _ACTIVE_CACHE_TARGET.set(("resources/read", str(context.message.uri)))
+        try:
+            return await super().on_read_resource(context, call_next)
+        finally:
+            _ACTIVE_CACHE_TARGET.reset(token)
+
+
 mcp.add_middleware(
-    ResponseCachingMiddleware(
+    _WriteInvalidatingCachingMiddleware(
         call_tool_settings=CallToolSettings(
             included_tools=_CACHEABLE_READ_TOOLS,
             ttl=_CACHE_TTL_S,
