@@ -123,12 +123,13 @@ class TestPersistenceWithFileTreeStore:
         set_store(store)
 
         ids = {
-            "aaaa00000000000000000001": None,
-            "bbbb00000000000000000002": None,
-            "cccc00000000000000000003": None,
+            real_id: register_id(real_id)
+            for real_id in (
+                "aaaa00000000000000000001",
+                "bbbb00000000000000000002",
+                "cccc00000000000000000003",
+            )
         }
-        for real_id in ids:
-            ids[real_id] = register_id(real_id)
         await flush_pending()
 
         clear_registry()

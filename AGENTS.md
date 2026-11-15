@@ -20,7 +20,7 @@ tag APIs through FastMCP. The package source is in `morgenmcp/`; tests are in
 - Before handing off Python changes, run:
   - `uv run ruff check .`
   - `uv run ruff format .`
-  - `uv run pyright morgenmcp/`
+  - `uv run pyright` (checks `morgenmcp/` and `tests/`, as CI does)
   - relevant tests (or the full non-integration suite when practical)
 
 ## Code conventions

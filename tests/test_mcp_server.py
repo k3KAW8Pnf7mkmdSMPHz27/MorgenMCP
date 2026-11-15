@@ -3,18 +3,31 @@
 import asyncio
 import base64
 import json
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
 import respx
 from fastmcp import Client
 from fastmcp.client.logging import LogMessage
-from mcp.types import TextResourceContents
+from mcp.types import TextContent, TextResourceContents
 
 from morgenmcp.client import MorgenClient
 from morgenmcp.models import Calendar, MorgenAPIError
 from morgenmcp.server import mcp
 from morgenmcp.tools.id_registry import clear_registry
+
+
+def _structured(result: Any) -> dict[str, Any]:
+    """Narrow ``CallToolResult.structured_content`` (``dict | None``) for typing."""
+    assert result.structured_content is not None
+    return result.structured_content
+
+
+def _text(content: Any) -> str:
+    """Return the text of one tool-result or resource content block."""
+    assert isinstance(content, TextContent | TextResourceContents), type(content)
+    return content.text
 
 
 @pytest.fixture(autouse=True)
@@ -106,7 +119,9 @@ class TestMCPServer:
                 "morgen_list_tags",
                 "morgen_get_tag",
             ]:
-                assert by_name[name].annotations.readOnlyHint is True
+                annotations = by_name[name].annotations
+                assert annotations is not None
+                assert annotations.readOnlyHint is True
 
     async def test_delete_tools_have_destructive_annotation(self):
         """Delete tools are annotated destructiveHint=True."""
@@ -120,7 +135,9 @@ class TestMCPServer:
                 "morgen_batch_delete_tasks",
                 "morgen_delete_tag",
             ]:
-                assert by_name[name].annotations.destructiveHint is True
+                annotations = by_name[name].annotations
+                assert annotations is not None
+                assert annotations.destructiveHint is True
 
     async def test_write_tools_not_readonly(self):
         """Write tools are annotated readOnlyHint=False."""
@@ -140,7 +157,9 @@ class TestMCPServer:
                 "morgen_create_tag",
                 "morgen_update_tag",
             ]:
-                assert by_name[name].annotations.readOnlyHint is False
+                annotations = by_name[name].annotations
+                assert annotations is not None
+                assert annotations.readOnlyHint is False
 
     async def test_all_tools_have_title(self):
         """All tools have a non-empty title annotation."""
@@ -185,7 +204,7 @@ class TestMCPServer:
             async with Client(mcp) as client:
                 result = await client.call_tool("morgen_list_tasks", {})
 
-        item = result.structured_content["tasks"][0]
+        item = _structured(result)["tasks"][0]
         assert item["position"] == 1.5
         assert item["scheduled"] is True
 
@@ -323,7 +342,7 @@ class TestMCPServer:
             assert "morgen://server" in uris
 
             payload = await client.read_resource("morgen://server")
-            body = json.loads(payload[0].text)
+            body = json.loads(_text(payload[0]))
             assert body["name"] == "morgen-calendar"
             assert body["virtualIdHash"]["scheme_version"] == HASH_SCHEME_VERSION
             assert body["virtualIdHash"]["algorithm"] == "md5"
@@ -412,7 +431,7 @@ class TestMCPServer:
 
         # Tool should return the surviving events (as JSON text content)
         assert result is not None
-        text = result.content[0].text
+        text = _text(result.content[0])
         assert "Survived" in text
 
         # Verify warning was sent through the MCP protocol
@@ -470,7 +489,7 @@ class TestMCPServer:
             async with Client(mcp) as client:
                 contents = await client.read_resource("morgen://accounts")
                 assert len(contents) == 1
-                payload = json.loads(contents[0].text)
+                payload = json.loads(_text(contents[0]))
                 assert payload == {"accounts": [], "count": 0}
 
 
@@ -521,7 +540,7 @@ class TestTypedOutputSchemas:
                 result = await client.call_tool("morgen_list_accounts", {})
 
         assert result.is_error is False
-        payload = result.structured_content
+        payload = _structured(result)
         assert payload["count"] == 1
         item = payload["accounts"][0]
         assert item["email"] == "user@example.com"
@@ -585,7 +604,7 @@ class TestTypedOutputSchemas:
                 )
 
         assert result.is_error is False
-        item = result.structured_content["events"][0]
+        item = _structured(result)["events"][0]
         assert item["title"] == "Bare"
         # filtered out, and validation allowed it
         assert "progress" not in item
@@ -624,7 +643,7 @@ class TestTypedOutputSchemas:
                 )
 
         assert result.is_error is False
-        updated = result.structured_content["updated"]
+        updated = _structured(result)["updated"]
         assert updated["busy"] is False
         assert updated["overrideColor"] is None
         assert updated["overrideName"] is None
@@ -682,8 +701,8 @@ class TestTypedOutputSchemas:
             async with Client(mcp) as client:
                 result = await client.call_tool(tool, args, raise_on_error=False)
 
-        assert result.is_error is False, result.content[0].text
-        return result.structured_content
+        assert result.is_error is False, _text(result.content[0])
+        return _structured(result)
 
     async def test_incremental_listing_preserves_completed_and_deleted_tasks(
         self, monkeypatch
@@ -729,7 +748,9 @@ class TestTypedOutputSchemas:
         """Both task tools advertise the JSON types Morgen actually sends."""
         async with Client(mcp) as client:
             by_name = {t.name: t for t in await client.list_tools()}
-        props = by_name[tool].outputSchema["properties"]
+        schema = by_name[tool].outputSchema
+        assert schema is not None
+        props = schema["properties"]
         item = props["tasks"]["items"] if tool == "morgen_list_tasks" else props["task"]
         assert item["properties"][field]["type"] == json_type
 
@@ -784,6 +805,7 @@ class TestTypedOutputSchemas:
         async with Client(mcp) as client:
             by_name = {t.name: t for t in await client.list_tools()}
         schema = by_name[tool].outputSchema
+        assert schema is not None
         props = schema["properties"]
         item = self._deref_schema(
             schema,
@@ -932,13 +954,13 @@ class TestTypedOutputSchemas:
                     {"title": "Subtask", "parent_task_id": parent_vid},
                     raise_on_error=False,
                 )
-                assert create_res.is_error is False, create_res.content[0].text
+                assert create_res.is_error is False, _text(create_res.content[0])
                 list_res = await client.call_tool(
                     "morgen_list_tasks", {"limit": 5}, raise_on_error=False
                 )
 
-        assert list_res.is_error is False, list_res.content[0].text
-        listed = list_res.structured_content["tasks"][0]
+        assert list_res.is_error is False, _text(list_res.content[0])
+        listed = _structured(list_res)["tasks"][0]
         assert listed["relatedTo"] == {parent_vid: {"relation": {"parent": True}}}
 
     async def test_get_task_unknown_returns_tool_error(self, monkeypatch):
@@ -1157,8 +1179,8 @@ class TestResponseCaching:
                 )
 
             assert client_mock.get_task.await_count == 2
-            assert before.structured_content["task"].get("deleted") is None
-            assert after.structured_content["task"]["deleted"] is True
+            assert _structured(before)["task"].get("deleted") is None
+            assert _structured(after)["task"]["deleted"] is True
 
     async def test_write_tool_is_not_cached(self):
         """Two identical calls to a write tool MUST hit the underlying client twice.
