@@ -1642,6 +1642,11 @@ class TestDeleteEvent:
         message = str(exc_info.value)
         assert f"Event with ID '{virtual_evt}' no longer exists" in message
         assert f"'{mode}' series delete was not applied" in message
+        # "future" must not invite a retry from an earlier occurrence.
+        if mode == "future":
+            assert "at or after the original one" in message
+        else:
+            assert "any surviving occurrence of the same series" in message
         assert sample_event_id not in message
 
     async def test_delete_event_api_error(self, mock_morgen_client, sample_event_id):

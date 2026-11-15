@@ -87,15 +87,28 @@ _EVENT_ALREADY_GONE_MESSAGE = (
 _SERIES_ANCHOR_GONE = (
     "Event with ID '{id}' no longer exists, so the '{mode}' series delete was "
     "not applied and other occurrences may remain. Re-list events and retry "
-    "with a surviving occurrence."
+    "with {retry_from}."
 )
+# "future" deletes from the supplied occurrence onward, so retrying from an
+# earlier occurrence would widen the scope; "all" can use any occurrence.
+_SERIES_RETRY_FROM = {
+    "future": (
+        "the first surviving occurrence of the same series at or after the "
+        "original one (an earlier occurrence would delete more than requested)"
+    ),
+    "all": "any surviving occurrence of the same series",
+}
 
 
 def _delete_not_found_error(event_id: str, series_update_mode: str) -> str | None:
     """Error text for a delete 404, or None when the 404 means success."""
     if series_update_mode == "single":
         return None
-    return _SERIES_ANCHOR_GONE.format(id=event_id, mode=series_update_mode)
+    return _SERIES_ANCHOR_GONE.format(
+        id=event_id,
+        mode=series_update_mode,
+        retry_from=_SERIES_RETRY_FROM[series_update_mode],
+    )
 
 
 def _resolve_event_id(event_id: str) -> str:
