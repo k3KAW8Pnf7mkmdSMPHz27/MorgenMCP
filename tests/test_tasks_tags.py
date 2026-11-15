@@ -631,12 +631,20 @@ class TestGetTag:
         with pytest.raises(ToolError, match="not found"):
             await get_tag("nonexist")
 
-    async def test_get_tag_api_error(self, mock_tag_client):
+    async def test_get_tag_not_found_upstream(self, mock_tag_client):
         mock_tag_client.get_tag.side_effect = MorgenAPIError(
             "Tag not found on server", status_code=404
         )
         v_id = register_id("real_tag_404")
-        with pytest.raises(ToolError, match="Failed to retrieve tag"):
+        with pytest.raises(ToolError, match=f"^Tag with ID '{v_id}' not found$"):
+            await get_tag(v_id)
+
+    async def test_get_tag_api_error(self, mock_tag_client):
+        mock_tag_client.get_tag.side_effect = MorgenAPIError(
+            "Server error", status_code=500
+        )
+        v_id = register_id("real_tag_500")
+        with pytest.raises(ToolError, match=r"API error \(HTTP 500\)"):
             await get_tag(v_id)
 
 
@@ -674,6 +682,31 @@ class TestUpdateTag:
         with pytest.raises(ToolError, match="color"):
             await update_tag(v, color="oops")
 
+    @pytest.mark.parametrize("bad_id", ["", "   "])
+    async def test_update_tag_empty_id(self, mock_tag_client, bad_id):
+        with pytest.raises(ToolError, match="tag_id cannot be empty"):
+            await update_tag(bad_id, name="x")
+        mock_tag_client.update_tag.assert_not_called()
+
+    async def test_update_tag_unknown_id(self, mock_tag_client):
+        with pytest.raises(ToolError, match="^Tag with ID 'nonexist' not found$"):
+            await update_tag("nonexist", name="x")
+        mock_tag_client.update_tag.assert_not_called()
+
+    async def test_update_tag_unknown_id_reported_before_field_errors(
+        self, mock_tag_client
+    ):
+        with pytest.raises(ToolError, match="Tag with ID 'nonexist' not found"):
+            await update_tag("nonexist", color="oops")
+
+    async def test_update_tag_not_found_upstream(self, mock_tag_client):
+        mock_tag_client.update_tag.side_effect = MorgenAPIError(
+            "Not found", status_code=404
+        )
+        v = register_id("tag_gone")
+        with pytest.raises(ToolError, match=f"^Tag with ID '{v}' not found$"):
+            await update_tag(v, name="x")
+
 
 class TestDeleteTag:
     async def test_delete_tag(self, mock_tag_client):
@@ -681,6 +714,26 @@ class TestDeleteTag:
         await delete_tag(v)
         sent = mock_tag_client.delete_tag.call_args.args[0]
         assert sent.id == "tag_real_id"
+
+    @pytest.mark.parametrize("bad_id", ["", "   "])
+    async def test_delete_tag_empty_id(self, mock_tag_client, bad_id):
+        with pytest.raises(ToolError, match="tag_id cannot be empty"):
+            await delete_tag(bad_id)
+        mock_tag_client.delete_tag.assert_not_called()
+
+    async def test_delete_tag_unknown_id(self, mock_tag_client):
+        with pytest.raises(ToolError, match="^Tag with ID 'nonexist' not found$"):
+            await delete_tag("nonexist")
+        mock_tag_client.delete_tag.assert_not_called()
+
+    async def test_delete_tag_not_found_upstream(self, mock_tag_client):
+        """Unlike events, a tag 404 on delete is an error (tags.mdx)."""
+        mock_tag_client.delete_tag.side_effect = MorgenAPIError(
+            "Not found", status_code=404
+        )
+        v = register_id("tag_gone")
+        with pytest.raises(ToolError, match=f"^Tag with ID '{v}' not found$"):
+            await delete_tag(v)
 
 
 class TestRelationModel:

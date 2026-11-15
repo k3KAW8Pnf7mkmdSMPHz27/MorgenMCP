@@ -1117,10 +1117,12 @@ class TestResponseCaching:
         assert "morgen_list_task_lists" in included
         assert "morgen_list_tasks" in included
         assert "morgen_list_tags" in included
-        assert "morgen_get_tag" in included
-        # `morgen_get_task` and writes must NOT be in the allowlist
+        # Single-item reads and writes must NOT be in the allowlist
         assert "morgen_get_task" not in included, (
             "morgen_get_task must not be cached (breaks post-mutation verification)"
+        )
+        assert "morgen_get_tag" not in included, (
+            "morgen_get_tag must not be cached (breaks post-mutation verification)"
         )
         for write_tool in (
             "morgen_create_event",
@@ -1181,6 +1183,68 @@ class TestResponseCaching:
             assert client_mock.get_task.await_count == 2
             assert _structured(before)["task"].get("deleted") is None
             assert _structured(after)["task"]["deleted"] is True
+
+    async def test_get_tag_is_not_cached(self):
+        """Repeat morgen_get_tag calls with no write in between still hit the API.
+
+        Write invalidation alone would pass a get -> update -> get test; this
+        pins that the tool is out of the cache entirely, so a tag changed
+        outside this server is never served stale.
+        """
+        from morgenmcp.models import Tag
+        from morgenmcp.tools.id_registry import register_id
+
+        real_id = "tag-uncached-repeat-read"
+        virtual_id = register_id(real_id)
+        v1 = Tag(id=real_id, name="Old", color="#111111")
+        v2 = Tag(id=real_id, name="Changed elsewhere", color="#222222")
+
+        with patch("morgenmcp.tools.tags.get_client") as mock:
+            client_mock = AsyncMock()
+            client_mock.get_tag.side_effect = [v1, v2]
+            mock.return_value = client_mock
+
+            async with Client(mcp) as client:
+                first = await client.call_tool("morgen_get_tag", {"tag_id": virtual_id})
+                second = await client.call_tool(
+                    "morgen_get_tag", {"tag_id": virtual_id}
+                )
+
+            assert client_mock.get_tag.await_count == 2
+            assert first.structured_content is not None
+            assert second.structured_content is not None
+            assert first.structured_content["name"] == "Old"
+            assert second.structured_content["name"] == "Changed elsewhere"
+
+    async def test_get_tag_reflects_update(self):
+        """get -> update -> get returns the updated tag."""
+        from morgenmcp.models import Tag
+        from morgenmcp.tools.id_registry import register_id
+
+        real_id = "tag-uncached-after-update"
+        virtual_id = register_id(real_id)
+        v1 = Tag(id=real_id, name="Old", color="#111111")
+        v2 = Tag(id=real_id, name="New", color="#111111")
+
+        with patch("morgenmcp.tools.tags.get_client") as mock:
+            client_mock = AsyncMock()
+            client_mock.get_tag.side_effect = [v1, v2]
+            mock.return_value = client_mock
+
+            async with Client(mcp) as client:
+                before = await client.call_tool(
+                    "morgen_get_tag", {"tag_id": virtual_id}
+                )
+                await client.call_tool(
+                    "morgen_update_tag", {"tag_id": virtual_id, "name": "New"}
+                )
+                after = await client.call_tool("morgen_get_tag", {"tag_id": virtual_id})
+
+            assert client_mock.get_tag.await_count == 2
+            assert before.structured_content is not None
+            assert after.structured_content is not None
+            assert before.structured_content["name"] == "Old"
+            assert after.structured_content["name"] == "New"
 
     async def test_write_tool_is_not_cached(self):
         """Two identical calls to a write tool MUST hit the underlying client twice.

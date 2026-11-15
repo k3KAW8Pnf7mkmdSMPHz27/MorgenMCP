@@ -608,9 +608,12 @@ mcp.resource(
 #
 # Allowlist-only on tools — writes (create/update/delete/complete/reopen/move)
 # MUST never be cached: same args returning a cached "success" silently turns
-# duplicate writes into no-ops. `morgen_get_task` is also excluded so
-# read-after-write verification (e.g. checking `"deleted": True` after
-# `delete_task`) never serves stale pre-mutation state. The list below is
+# duplicate writes into no-ops. The single-item reads `morgen_get_task` and
+# `morgen_get_tag` are also excluded: they cost 1 point each (vs. 10 for a
+# `/list` call), and they are what callers use for read-after-write
+# verification (e.g. `"deleted": True` after `delete_task`, a 404 after
+# `delete_tag`), so they must never serve stale state — including changes made
+# outside this server, which write invalidation cannot see. The list below is
 # conservative; everything not listed bypasses the cache.
 #
 # 60s TTL is short enough that a write the user just made appears almost
@@ -625,7 +628,6 @@ _CACHEABLE_READ_TOOLS = [
     "morgen_list_task_lists",
     "morgen_list_tasks",
     "morgen_list_tags",
-    "morgen_get_tag",
 ]
 _CACHE_TTL_S = 60
 
@@ -704,7 +706,7 @@ _DEFAULT_CACHE_DOMAINS: tuple[_CacheDomain, ...] = (
         write_tools=frozenset(
             {"morgen_create_tag", "morgen_update_tag", "morgen_delete_tag"}
         ),
-        read_tools=("morgen_list_tags", "morgen_get_tag"),
+        read_tools=("morgen_list_tags",),
         resource_pred=lambda u: u == "morgen://tags",
     ),
 )

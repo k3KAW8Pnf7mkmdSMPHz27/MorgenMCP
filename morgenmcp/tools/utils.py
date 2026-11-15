@@ -33,7 +33,23 @@ from morgenmcp.validators import (
 # Cap concurrent Morgen API calls issued by a single tool invocation. Batch
 # tools fan out one request per item; unbounded gather would fire them all at
 # once and trip Morgen's rate limiter on large batches.
+#
+# Re-audited against rate-limits.mdx (API key: 300 points / 15 min; `/list`
+# endpoints cost 10, everything else 1) and kept at 8. Concurrency bounds how
+# many requests are in flight at once (below the client's 10-connection pool);
+# it does not change point spend — a batch of N single-item calls costs N
+# points at any concurrency — so the tripled budget only adds headroom.
 BATCH_CONCURRENCY = 8
+
+
+def is_not_found(exc: BaseException) -> bool:
+    """True when ``exc`` is an upstream HTTP 404 from the Morgen API.
+
+    What a 404 means is endpoint-specific (events: authoritative absence;
+    tags: does not exist; tasks never return one), so callers decide how to
+    translate it rather than ``MorgenClient._handle_error``.
+    """
+    return isinstance(exc, MorgenAPIError) and exc.status_code == 404
 
 
 @dataclass
