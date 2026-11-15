@@ -988,6 +988,60 @@ class TestTypedOutputSchemas:
         assert f"Task with ID '{virtual_id}' not found" in text
         assert task_id not in text
 
+    @staticmethod
+    def _real_event_id() -> str:
+        raw = json.dumps(["user@example.com", "evt-gone", "507f1f77bcf86cd799439011"])
+        return base64.b64encode(raw.encode()).decode().rstrip("=")
+
+    async def test_delete_event_already_gone_passes_output_validation(
+        self, monkeypatch
+    ):
+        """An upstream 404 on delete returns a valid success payload with
+        alreadyGone=True, and leaks no raw IDs."""
+        from morgenmcp import client as client_module
+        from morgenmcp.tools.id_registry import register_id
+
+        monkeypatch.setattr(
+            client_module, "_client", client_module.MorgenClient(api_key="test-key")
+        )
+        real_id = self._real_event_id()
+        virtual_id = register_id(real_id)
+
+        with respx.mock(assert_all_called=True) as api:
+            api.post(host="api.morgen.so", path="/v3/events/delete").respond(
+                404,
+                json={
+                    "message": "Cancelled events cannot be retrieved from Google",
+                    "status": 404,
+                },
+            )
+            async with Client(mcp) as client:
+                result = await client.call_tool(
+                    "morgen_delete_event", {"event_id": virtual_id}
+                )
+                batch = await client.call_tool(
+                    "morgen_batch_delete_events", {"event_ids": [virtual_id]}
+                )
+
+        assert result.structured_content is not None
+        assert batch.structured_content is not None
+        assert result.structured_content["success"] is True
+        assert result.structured_content["alreadyGone"] is True
+        assert batch.structured_content["alreadyGone"] == [virtual_id]
+        assert batch.structured_content["deleted"] == []
+        assert batch.structured_content["failed"] == []
+        assert real_id not in str(result.structured_content)
+        assert real_id not in str(batch.structured_content)
+
+    async def test_already_gone_is_optional_in_delete_schemas(self):
+        async with Client(mcp) as client:
+            by_name = {t.name: t for t in await client.list_tools()}
+        for tool in ("morgen_delete_event", "morgen_batch_delete_events"):
+            schema = by_name[tool].outputSchema
+            assert schema is not None
+            assert "alreadyGone" in schema["properties"]
+            assert "alreadyGone" not in schema.get("required", [])
+
 
 class TestReadOnlyMode:
     """Read-only launch mode disables every mutating (write/delete) tool.

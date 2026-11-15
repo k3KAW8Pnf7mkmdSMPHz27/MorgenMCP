@@ -226,7 +226,8 @@ mcp = FastMCP(
        ones as informational, not as hard scheduling conflicts. Parse the tag
        by matching the trailing [<id> <tag>] at end of line, never by scanning
        for braces: an event TITLE may itself contain braces or brackets.
-    3. Use update_event or delete_event with just event_id
+    3. Use update_event or delete_event with just event_id. Deleting an
+       event that is already gone succeeds with alreadyGone=True.
     4. Use batch_delete_events or batch_update_events for bulk operations
 
     Task workflow:

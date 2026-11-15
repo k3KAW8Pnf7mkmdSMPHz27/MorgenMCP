@@ -20,8 +20,14 @@ from morgenmcp.models import (
     EventCreateRequest,
     EventDeleteRequest,
     EventUpdateRequest,
+    MorgenAPIError,
 )
-from morgenmcp.tools.id_registry import register_id, resolve_id, resolve_ids
+from morgenmcp.tools.id_registry import (
+    IDNotFoundError,
+    register_id,
+    resolve_id,
+    resolve_ids,
+)
 from morgenmcp.tools.id_utils import (
     extract_account_from_calendar,
     extract_ids_from_event,
@@ -47,6 +53,7 @@ from morgenmcp.tools.utils import (
     disable_response_caching,
     gather_bounded,
     handle_tool_errors,
+    is_not_found,
     omit_none,
 )
 from morgenmcp.validators import (
@@ -60,6 +67,31 @@ from morgenmcp.validators import (
 
 _DISPLAY_TZ_ENV = "MORGENMCP_DISPLAY_TZ"
 _UTC_TZ_NAMES = frozenset({"UTC", "Etc/UTC", "Etc/GMT", "GMT"})
+
+
+# events.mdx ("Deleted and unknown events"): a 404 from the events API is
+# authoritative absence — deleted, cancelled at the provider, or never on this
+# account — never a transient condition (those are 429/5xx/401/403).
+_EVENT_GONE = (
+    "Event with ID '{id}' no longer exists (deleted, cancelled, or not "
+    "retrievable from the calendar provider). Re-list events to refresh IDs."
+)
+_EVENT_ALREADY_GONE_MESSAGE = (
+    "Event was already gone (deleted, cancelled, or not retrievable); "
+    "nothing was removed."
+)
+
+
+def _resolve_event_id(event_id: str) -> str:
+    """Validate and resolve a virtual event ID to its real Morgen ID."""
+    if not event_id or not event_id.strip():
+        raise ToolError("event_id cannot be empty")
+    try:
+        return resolve_id(event_id)
+    except IDNotFoundError as e:
+        raise ToolError(
+            f"Event with ID '{event_id}' not found. Call list_events first."
+        ) from e
 
 
 def _system_localtime(dt: datetime) -> datetime:
@@ -674,7 +706,7 @@ async def update_event(
         raise ToolError("google_color_id must be a string '1' through '11'")
 
     # Resolve virtual event ID and extract account/calendar IDs
-    real_event_id = resolve_id(event_id)
+    real_event_id = _resolve_event_id(event_id)
     real_account_id, real_calendar_id = extract_ids_from_event(real_event_id)
 
     request = EventUpdateRequest(
@@ -697,7 +729,12 @@ async def update_event(
     )
 
     client = get_client()
-    await client.update_event(request, series_update_mode=series_update_mode)
+    try:
+        await client.update_event(request, series_update_mode=series_update_mode)
+    except MorgenAPIError as e:
+        if is_not_found(e):
+            raise ToolError(_EVENT_GONE.format(id=event_id)) from e
+        raise
 
     return {
         "success": True,
@@ -719,10 +756,13 @@ async def delete_event(
         series_update_mode: For recurring events - "single", "future", or "all".
 
     Returns:
-        Dictionary indicating success or error.
+        Dictionary indicating success. Deleting is idempotent: if the event is
+        already gone (Morgen answers 404 — deleted, cancelled, or no longer
+        retrievable), the call still succeeds and sets alreadyGone=True,
+        meaning nothing was removed by this call.
     """
     # Resolve virtual event ID and extract account/calendar IDs
-    real_event_id = resolve_id(event_id)
+    real_event_id = _resolve_event_id(event_id)
     real_account_id, real_calendar_id = extract_ids_from_event(real_event_id)
 
     request = EventDeleteRequest(
@@ -732,7 +772,21 @@ async def delete_event(
     )
 
     client = get_client()
-    await client.delete_event(request, series_update_mode=series_update_mode)
+    try:
+        await client.delete_event(request, series_update_mode=series_update_mode)
+    except MorgenAPIError as e:
+        # events.mdx: a repeated delete returns 404, not 204, and callers
+        # should treat it as success. A virtual ID only resolves for an event
+        # this server listed earlier, so the 404 means "gone since then".
+        if not is_not_found(e):
+            raise
+        return {
+            "success": True,
+            "message": _EVENT_ALREADY_GONE_MESSAGE,
+            "eventId": event_id,
+            "seriesUpdateMode": series_update_mode,
+            "alreadyGone": True,
+        }
 
     return {
         "success": True,
@@ -755,7 +809,10 @@ async def batch_delete_events(
         series_update_mode: For recurring events - "single", "future", or "all".
 
     Returns:
-        Dictionary with 'deleted' (list of virtual IDs) and 'failed' (list of {id, error}).
+        Dictionary with 'deleted' (list of virtual IDs), 'failed' (list of
+        {id, error}) and, when any were present, 'alreadyGone' (virtual IDs
+        Morgen answered 404 for: already deleted, cancelled, or no longer
+        retrievable — not failures, but nothing was removed for them).
     """
     if not event_ids:
         return {"deleted": [], "failed": [], "message": "No events to delete."}
@@ -763,6 +820,7 @@ async def batch_delete_events(
     client = get_client()
     deleted: list[str] = []
     failed: list[FailedItem] = []
+    already_gone: list[str] = []
 
     # Prepare delete operations
     to_delete: list[
@@ -770,7 +828,7 @@ async def batch_delete_events(
     ] = []  # (virtual_id, real_event_id, real_account_id, real_calendar_id)
     for virtual_event_id in event_ids:
         try:
-            real_event_id = resolve_id(virtual_event_id)
+            real_event_id = _resolve_event_id(virtual_event_id)
             real_account_id, real_calendar_id = extract_ids_from_event(real_event_id)
             to_delete.append(
                 (virtual_event_id, real_event_id, real_account_id, real_calendar_id)
@@ -796,7 +854,9 @@ async def batch_delete_events(
 
     for i, result in enumerate(results):
         virtual_event_id = to_delete[i][0]
-        if isinstance(result, Exception):
+        if is_not_found(result):
+            already_gone.append(virtual_event_id)
+        elif isinstance(result, Exception):
             if ctx:
                 await ctx.warning(
                     f"Failed to delete event {virtual_event_id}: {result}"
@@ -805,11 +865,16 @@ async def batch_delete_events(
         else:
             deleted.append(virtual_event_id)
 
-    return {
+    summary = f"Deleted {len(deleted)}, failed {len(failed)}"
+    batch_result: BatchDeleteResult = {
         "deleted": deleted,
         "failed": failed,
-        "summary": f"Deleted {len(deleted)}, failed {len(failed)}",
+        "summary": summary,
     }
+    if already_gone:
+        batch_result["alreadyGone"] = already_gone
+        batch_result["summary"] = f"{summary}, already gone {len(already_gone)}"
+    return batch_result
 
 
 @handle_tool_errors
@@ -860,7 +925,7 @@ async def batch_update_events(
             continue
 
         try:
-            real_event_id = resolve_id(virtual_event_id)
+            real_event_id = _resolve_event_id(virtual_event_id)
             real_account_id, real_calendar_id = extract_ids_from_event(real_event_id)
             to_update.append(
                 (
@@ -924,11 +989,14 @@ async def batch_update_events(
     for i, result in enumerate(results):
         virtual_event_id = to_update[i][0]
         if isinstance(result, Exception):
+            error = (
+                _EVENT_GONE.format(id=virtual_event_id)
+                if is_not_found(result)
+                else str(result)
+            )
             if ctx:
-                await ctx.warning(
-                    f"Failed to update event {virtual_event_id}: {result}"
-                )
-            failed.append({"id": virtual_event_id, "error": str(result)})
+                await ctx.warning(f"Failed to update event {virtual_event_id}: {error}")
+            failed.append({"id": virtual_event_id, "error": error})
         else:
             updated.append(virtual_event_id)
 

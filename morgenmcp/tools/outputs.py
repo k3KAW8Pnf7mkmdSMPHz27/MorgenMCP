@@ -205,12 +205,17 @@ class CreateEventResult(TypedDict):
 
 
 class MutateEventResult(TypedDict):
-    """Return of ``update_event`` / ``delete_event``."""
+    """Return of ``update_event`` / ``delete_event``.
+
+    ``alreadyGone`` is set only by ``delete_event`` when Morgen answers 404
+    (the event was already deleted, cancelled, or no longer retrievable).
+    """
 
     success: bool
     message: str
     eventId: str
     seriesUpdateMode: str
+    alreadyGone: NotRequired[bool]
 
 
 # ---------------------------------------------------------------------------
@@ -231,12 +236,17 @@ class BatchDeleteResult(TypedDict):
     The empty-input early return emits ``message`` and omits ``summary``; the
     populated path emits ``summary`` and omits ``message`` — so exactly one of
     the two is present and both are ``NotRequired``.
+
+    ``alreadyGone`` lists event IDs Morgen answered 404 for; only
+    ``batch_delete_events`` sets it, and only when non-empty. Tasks never 404
+    (a repeated task delete returns 204), so ``batch_delete_tasks`` never does.
     """
 
     deleted: list[str]
     failed: list[FailedItem]
     summary: NotRequired[str]
     message: NotRequired[str]
+    alreadyGone: NotRequired[list[str]]
 
 
 class BatchUpdateResult(TypedDict):
