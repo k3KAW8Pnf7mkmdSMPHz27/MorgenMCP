@@ -1033,6 +1033,37 @@ class TestTypedOutputSchemas:
         assert real_id not in str(result.structured_content)
         assert real_id not in str(batch.structured_content)
 
+    async def test_series_delete_missing_anchor_is_not_success(self, monkeypatch):
+        """A 404 anchor under all/future must not report the series as gone."""
+        from morgenmcp import client as client_module
+        from morgenmcp.tools.id_registry import register_id
+
+        monkeypatch.setattr(
+            client_module, "_client", client_module.MorgenClient(api_key="test-key")
+        )
+        virtual_id = register_id(self._real_event_id())
+
+        with respx.mock(assert_all_called=True) as api:
+            api.post(host="api.morgen.so", path="/v3/events/delete").respond(
+                404, json={"message": "Not found", "status": 404}
+            )
+            async with Client(mcp) as client:
+                single = await client.call_tool(
+                    "morgen_delete_event",
+                    {"event_id": virtual_id, "series_update_mode": "all"},
+                    raise_on_error=False,
+                )
+                batch = await client.call_tool(
+                    "morgen_batch_delete_events",
+                    {"event_ids": [virtual_id], "series_update_mode": "future"},
+                )
+
+        assert single.is_error
+        assert "series delete was not applied" in _text(single.content[0])
+        assert batch.structured_content is not None
+        assert "alreadyGone" not in batch.structured_content
+        assert [f["id"] for f in batch.structured_content["failed"]] == [virtual_id]
+
     async def test_already_gone_is_optional_in_delete_schemas(self):
         async with Client(mcp) as client:
             by_name = {t.name: t for t in await client.list_tools()}
@@ -1041,6 +1072,11 @@ class TestTypedOutputSchemas:
             assert schema is not None
             assert "alreadyGone" in schema["properties"]
             assert "alreadyGone" not in schema.get("required", [])
+        # Only the event-delete tools can emit it; others must not advertise it.
+        for tool in ("morgen_update_event", "morgen_batch_delete_tasks"):
+            schema = by_name[tool].outputSchema
+            assert schema is not None
+            assert "alreadyGone" not in schema["properties"]
 
 
 class TestReadOnlyMode:

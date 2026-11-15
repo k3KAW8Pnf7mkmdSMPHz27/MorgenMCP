@@ -33,9 +33,10 @@ from morgenmcp.tools.id_utils import (
     extract_ids_from_event,
 )
 from morgenmcp.tools.outputs import (
-    BatchDeleteResult,
+    BatchDeleteEventsResult,
     BatchUpdateResult,
     CreateEventResult,
+    DeleteEventResult,
     EventAlert,
     EventItem,
     EventLocation,
@@ -80,6 +81,21 @@ _EVENT_ALREADY_GONE_MESSAGE = (
     "Event was already gone (deleted, cancelled, or not retrievable); "
     "nothing was removed."
 )
+# A 404 on the anchor occurrence says nothing about the rest of the series:
+# events.mdx says delete reads the target first, so a cancelled occurrence
+# 404s while its siblings survive. Only "single" may treat 404 as success.
+_SERIES_ANCHOR_GONE = (
+    "Event with ID '{id}' no longer exists, so the '{mode}' series delete was "
+    "not applied and other occurrences may remain. Re-list events and retry "
+    "with a surviving occurrence."
+)
+
+
+def _delete_not_found_error(event_id: str, series_update_mode: str) -> str | None:
+    """Error text for a delete 404, or None when the 404 means success."""
+    if series_update_mode == "single":
+        return None
+    return _SERIES_ANCHOR_GONE.format(id=event_id, mode=series_update_mode)
 
 
 def _resolve_event_id(event_id: str) -> str:
@@ -748,7 +764,7 @@ async def update_event(
 async def delete_event(
     event_id: str,
     series_update_mode: Literal["single", "future", "all"] = "single",
-) -> MutateEventResult:
+) -> DeleteEventResult:
     """Delete a calendar event.
 
     Args:
@@ -756,10 +772,12 @@ async def delete_event(
         series_update_mode: For recurring events - "single", "future", or "all".
 
     Returns:
-        Dictionary indicating success. Deleting is idempotent: if the event is
-        already gone (Morgen answers 404 — deleted, cancelled, or no longer
-        retrievable), the call still succeeds and sets alreadyGone=True,
-        meaning nothing was removed by this call.
+        Dictionary indicating success. With series_update_mode="single",
+        deleting is idempotent: if the event is already gone (Morgen answers
+        404 — deleted, cancelled, or no longer retrievable), the call still
+        succeeds and sets alreadyGone=True, meaning nothing was removed. With
+        "future" or "all" that 404 is an error, since other occurrences may
+        remain.
     """
     # Resolve virtual event ID and extract account/calendar IDs
     real_event_id = _resolve_event_id(event_id)
@@ -776,10 +794,12 @@ async def delete_event(
         await client.delete_event(request, series_update_mode=series_update_mode)
     except MorgenAPIError as e:
         # events.mdx: a repeated delete returns 404, not 204, and callers
-        # should treat it as success. A virtual ID only resolves for an event
-        # this server listed earlier, so the 404 means "gone since then".
+        # should treat it as success, but only for the targeted occurrence.
         if not is_not_found(e):
             raise
+        error = _delete_not_found_error(event_id, series_update_mode)
+        if error:
+            raise ToolError(error) from e
         return {
             "success": True,
             "message": _EVENT_ALREADY_GONE_MESSAGE,
@@ -801,7 +821,7 @@ async def batch_delete_events(
     event_ids: list[str],
     series_update_mode: Literal["single", "future", "all"] = "single",
     ctx: Context | None = None,
-) -> BatchDeleteResult:
+) -> BatchDeleteEventsResult:
     """Delete multiple calendar events in a single tool call.
 
     Args:
@@ -812,7 +832,10 @@ async def batch_delete_events(
         Dictionary with 'deleted' (list of virtual IDs), 'failed' (list of
         {id, error}) and, when any were present, 'alreadyGone' (virtual IDs
         Morgen answered 404 for: already deleted, cancelled, or no longer
-        retrievable — not failures, but nothing was removed for them).
+        retrievable — not failures, but nothing was removed for them). Only
+        series_update_mode="single" reports 404s as alreadyGone; with
+        "future" or "all" they are failures, since other occurrences may
+        remain.
     """
     if not event_ids:
         return {"deleted": [], "failed": [], "message": "No events to delete."}
@@ -855,7 +878,13 @@ async def batch_delete_events(
     for i, result in enumerate(results):
         virtual_event_id = to_delete[i][0]
         if is_not_found(result):
-            already_gone.append(virtual_event_id)
+            error = _delete_not_found_error(virtual_event_id, series_update_mode)
+            if error is None:
+                already_gone.append(virtual_event_id)
+                continue
+            if ctx:
+                await ctx.warning(error)
+            failed.append({"id": virtual_event_id, "error": error})
         elif isinstance(result, Exception):
             if ctx:
                 await ctx.warning(
@@ -866,7 +895,7 @@ async def batch_delete_events(
             deleted.append(virtual_event_id)
 
     summary = f"Deleted {len(deleted)}, failed {len(failed)}"
-    batch_result: BatchDeleteResult = {
+    batch_result: BatchDeleteEventsResult = {
         "deleted": deleted,
         "failed": failed,
         "summary": summary,

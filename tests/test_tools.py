@@ -1617,13 +1617,32 @@ class TestDeleteEvent:
         )
 
         virtual_evt = register_id(sample_event_id)
-        result = await delete_event(event_id=virtual_evt, series_update_mode="all")
+        result = await delete_event(event_id=virtual_evt)
 
         assert result["success"] is True
         assert result["alreadyGone"] is True
         assert result["eventId"] == virtual_evt
-        assert result["seriesUpdateMode"] == "all"
+        assert result["seriesUpdateMode"] == "single"
         assert "nothing was removed" in result["message"]
+
+    @pytest.mark.parametrize("mode", ["future", "all"])
+    async def test_delete_event_series_missing_anchor_is_error(
+        self, mock_morgen_client, sample_event_id, mode
+    ):
+        """A 404 on the anchor occurrence does not prove the series is gone:
+        a cancelled occurrence 404s while its siblings survive."""
+        mock_morgen_client.delete_event.side_effect = MorgenAPIError(
+            "Event not found", status_code=404
+        )
+        virtual_evt = register_id(sample_event_id)
+
+        with pytest.raises(ToolError) as exc_info:
+            await delete_event(event_id=virtual_evt, series_update_mode=mode)
+
+        message = str(exc_info.value)
+        assert f"Event with ID '{virtual_evt}' no longer exists" in message
+        assert f"'{mode}' series delete was not applied" in message
+        assert sample_event_id not in message
 
     async def test_delete_event_api_error(self, mock_morgen_client, sample_event_id):
         """Non-404 API errors still fail."""
@@ -1757,6 +1776,36 @@ class TestBatchDeleteEvents:
         # Only the genuine failure warns.
         ctx.warning.assert_awaited_once()
         assert virtual_evt3 in ctx.warning.call_args[0][0]
+
+    @pytest.mark.parametrize("mode", ["future", "all"])
+    async def test_batch_delete_series_missing_anchor_fails(
+        self, mock_morgen_client, sample_account_id, mode
+    ):
+        """Under future/all a 404 anchor is a failure, never alreadyGone."""
+        evt_id1 = make_event_id("test@example.com", "uid1", sample_account_id)
+        evt_id2 = make_event_id("test@example.com", "uid2", sample_account_id)
+        virtual_evt1 = register_id(evt_id1)
+        virtual_evt2 = register_id(evt_id2)
+
+        async def fake_delete(request, series_update_mode):
+            if request.id == evt_id2:
+                raise MorgenAPIError("Event not found", status_code=404)
+
+        mock_morgen_client.delete_event.side_effect = fake_delete
+
+        ctx = AsyncMock()
+        result = await batch_delete_events(
+            event_ids=[virtual_evt1, virtual_evt2],
+            series_update_mode=mode,
+            ctx=ctx,
+        )
+
+        assert result["deleted"] == [virtual_evt1]
+        assert "alreadyGone" not in result
+        assert [f["id"] for f in result["failed"]] == [virtual_evt2]
+        assert f"'{mode}' series delete was not applied" in result["failed"][0]["error"]
+        assert result["summary"] == "Deleted 1, failed 1"
+        ctx.warning.assert_awaited_once()
 
     async def test_batch_delete_all_success_omits_already_gone(
         self, mock_morgen_client, sample_account_id
