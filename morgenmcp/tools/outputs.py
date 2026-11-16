@@ -27,7 +27,7 @@ hand-built camelCase dicts the tools emit.
 
 from __future__ import annotations
 
-from typing import Annotated, NotRequired, TypedDict
+from typing import Annotated, Literal, NotRequired, TypedDict
 
 from pydantic import MISSING, BaseModel, Field, WithJsonSchema
 
@@ -210,7 +210,7 @@ class MutateEventResult(TypedDict):
     success: bool
     message: str
     eventId: str
-    seriesUpdateMode: str
+    seriesUpdateMode: Literal["single", "future", "all"]
 
 
 class DeleteEventResult(MutateEventResult):
@@ -237,7 +237,7 @@ class FailedItem(TypedDict):
 
 
 class BatchDeleteResult(TypedDict):
-    """Return of ``batch_delete_events`` / ``batch_delete_tasks``.
+    """Return of ``batch_delete_tasks`` and base for ``BatchDeleteEventsResult``.
 
     The empty-input early return emits ``message`` and omits ``summary``; the
     populated path emits ``summary`` and omits ``message`` — so exactly one of

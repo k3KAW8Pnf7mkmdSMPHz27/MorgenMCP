@@ -23,7 +23,6 @@ from morgenmcp.models import (
     MorgenAPIError,
 )
 from morgenmcp.tools.id_registry import (
-    IDNotFoundError,
     register_id,
     resolve_id,
     resolve_ids,
@@ -56,6 +55,7 @@ from morgenmcp.tools.utils import (
     handle_tool_errors,
     is_not_found,
     omit_none,
+    resolve_virtual_id,
 )
 from morgenmcp.validators import (
     SUFFIXLESS_DATETIME_PATTERN,
@@ -71,15 +71,15 @@ _UTC_TZ_NAMES = frozenset({"UTC", "Etc/UTC", "Etc/GMT", "GMT"})
 
 
 # events.mdx ("Deleted and unknown events"): a 404 from the events API is
-# authoritative absence — deleted, cancelled at the provider, or never on this
-# account — never a transient condition (those are 429/5xx/401/403).
+# authoritative absence. Rate limits (429), provider outages (5xx), and
+# authorization or plan errors (401/403) retain their own status codes.
 _EVENT_GONE = (
     "Event with ID '{id}' no longer exists (deleted, cancelled, or not "
     "retrievable from the calendar provider). Re-list events to refresh IDs."
 )
 _EVENT_ALREADY_GONE_MESSAGE = (
-    "Event was already gone (deleted, cancelled, or not retrievable); "
-    "nothing was removed."
+    "Event was already gone (deleted, cancelled, or not retrievable from the "
+    "calendar provider). Nothing was removed."
 )
 # A 404 on the anchor occurrence says nothing about the rest of the series:
 # events.mdx says delete reads the target first, so a cancelled occurrence
@@ -100,7 +100,9 @@ _SERIES_RETRY_FROM = {
 }
 
 
-def _delete_not_found_error(event_id: str, series_update_mode: str) -> str | None:
+def _delete_not_found_error(
+    event_id: str, series_update_mode: Literal["single", "future", "all"]
+) -> str | None:
     """Error text for a delete 404, or None when the 404 means success."""
     if series_update_mode == "single":
         return None
@@ -113,14 +115,11 @@ def _delete_not_found_error(event_id: str, series_update_mode: str) -> str | Non
 
 def _resolve_event_id(event_id: str) -> str:
     """Validate and resolve a virtual event ID to its real Morgen ID."""
-    if not event_id or not event_id.strip():
-        raise ToolError("event_id cannot be empty")
-    try:
-        return resolve_id(event_id)
-    except IDNotFoundError as e:
-        raise ToolError(
-            f"Event with ID '{event_id}' not found. Call list_events first."
-        ) from e
+    return resolve_virtual_id(
+        event_id,
+        parameter="event_id",
+        not_found=f"Event with ID '{event_id}' not found. Call list_events first.",
+    )
 
 
 def _system_localtime(dt: datetime) -> datetime:
@@ -707,6 +706,8 @@ async def update_event(
     Returns:
         Dictionary indicating success or error.
     """
+    real_event_id = _resolve_event_id(event_id)
+
     # Validate timing fields constraint
     timing_fields = [start, duration, time_zone, is_all_day]
     timing_provided = [f for f in timing_fields if f is not None]
@@ -734,8 +735,6 @@ async def update_event(
     }:
         raise ToolError("google_color_id must be a string '1' through '11'")
 
-    # Resolve virtual event ID and extract account/calendar IDs
-    real_event_id = _resolve_event_id(event_id)
     real_account_id, real_calendar_id = extract_ids_from_event(real_event_id)
 
     request = EventUpdateRequest(
@@ -885,7 +884,7 @@ async def batch_delete_events(
 
     results = await gather_bounded(
         delete_single(real_event_id, real_account_id, real_calendar_id)
-        for virtual_event_id, real_event_id, real_account_id, real_calendar_id in to_delete
+        for _, real_event_id, real_account_id, real_calendar_id in to_delete
     )
 
     for i, result in enumerate(results):
@@ -898,12 +897,11 @@ async def batch_delete_events(
             if ctx:
                 await ctx.warning(error)
             failed.append({"id": virtual_event_id, "error": error})
-        elif isinstance(result, Exception):
+        elif isinstance(result, BaseException):
+            error = str(result) or type(result).__name__
             if ctx:
-                await ctx.warning(
-                    f"Failed to delete event {virtual_event_id}: {result}"
-                )
-            failed.append({"id": virtual_event_id, "error": str(result)})
+                await ctx.warning(f"Failed to delete event {virtual_event_id}: {error}")
+            failed.append({"id": virtual_event_id, "error": error})
         else:
             deleted.append(virtual_event_id)
 
@@ -949,25 +947,22 @@ async def batch_update_events(
     ] = []  # (virtual_id, real_event_id, real_account_id, real_calendar_id, update)
     for update in updates:
         virtual_event_id = update.get("event_id")
-        if not virtual_event_id:
+        if virtual_event_id is None:
             failed.append({"id": "(unknown)", "error": "Missing event_id in update"})
             continue
-
-        # Validate timing fields constraint
-        timing_fields = ["start", "duration", "time_zone", "is_all_day"]
-        timing_provided = [f for f in timing_fields if update.get(f) is not None]
-        if timing_provided and len(timing_provided) != 4:
-            failed.append(
-                {
-                    "id": virtual_event_id,
-                    "error": "When updating timing fields, all four (start, duration, "
-                    "time_zone, is_all_day) must be provided together.",
-                }
-            )
+        if not isinstance(virtual_event_id, str):
+            failed.append({"id": "(unknown)", "error": "event_id must be a string"})
             continue
 
         try:
             real_event_id = _resolve_event_id(virtual_event_id)
+            timing_fields = ["start", "duration", "time_zone", "is_all_day"]
+            timing_provided = [f for f in timing_fields if update.get(f) is not None]
+            if timing_provided and len(timing_provided) != 4:
+                raise ToolError(
+                    "When updating timing fields, all four (start, duration, "
+                    "time_zone, is_all_day) must be provided together."
+                )
             real_account_id, real_calendar_id = extract_ids_from_event(real_event_id)
             to_update.append(
                 (
@@ -1025,22 +1020,22 @@ async def batch_update_events(
 
     results = await gather_bounded(
         update_single(real_event_id, real_account_id, real_calendar_id, update)
-        for virtual_event_id, real_event_id, real_account_id, real_calendar_id, update in to_update
+        for _, real_event_id, real_account_id, real_calendar_id, update in to_update
     )
 
     for i, result in enumerate(results):
         virtual_event_id = to_update[i][0]
-        if isinstance(result, Exception):
-            error = (
-                _EVENT_GONE.format(id=virtual_event_id)
-                if is_not_found(result)
-                else str(result)
-            )
-            if ctx:
-                await ctx.warning(f"Failed to update event {virtual_event_id}: {error}")
-            failed.append({"id": virtual_event_id, "error": error})
-        else:
+        if not isinstance(result, BaseException):
             updated.append(virtual_event_id)
+            continue
+        if is_not_found(result):
+            error = warning = _EVENT_GONE.format(id=virtual_event_id)
+        else:
+            error = str(result) or type(result).__name__
+            warning = f"Failed to update event {virtual_event_id}: {error}"
+        if ctx:
+            await ctx.warning(warning)
+        failed.append({"id": virtual_event_id, "error": error})
 
     return {
         "updated": updated,

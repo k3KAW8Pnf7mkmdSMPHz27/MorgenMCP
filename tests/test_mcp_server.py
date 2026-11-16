@@ -993,17 +993,11 @@ class TestTypedOutputSchemas:
         raw = json.dumps(["user@example.com", "evt-gone", "507f1f77bcf86cd799439011"])
         return base64.b64encode(raw.encode()).decode().rstrip("=")
 
-    async def test_delete_event_already_gone_passes_output_validation(
-        self, monkeypatch
-    ):
+    async def test_delete_event_already_gone_passes_output_validation(self):
         """An upstream 404 on delete returns a valid success payload with
         alreadyGone=True, and leaks no raw IDs."""
-        from morgenmcp import client as client_module
         from morgenmcp.tools.id_registry import register_id
 
-        monkeypatch.setattr(
-            client_module, "_client", client_module.MorgenClient(api_key="test-key")
-        )
         real_id = self._real_event_id()
         virtual_id = register_id(real_id)
 
@@ -1015,54 +1009,54 @@ class TestTypedOutputSchemas:
                     "status": 404,
                 },
             )
-            async with Client(mcp) as client:
-                result = await client.call_tool(
-                    "morgen_delete_event", {"event_id": virtual_id}
-                )
-                batch = await client.call_tool(
-                    "morgen_batch_delete_events", {"event_ids": [virtual_id]}
-                )
+            async with MorgenClient(api_key="test-key") as upstream:
+                with patch("morgenmcp.tools.events.get_client", return_value=upstream):
+                    async with Client(mcp) as client:
+                        result = await client.call_tool(
+                            "morgen_delete_event", {"event_id": virtual_id}
+                        )
+                        batch = await client.call_tool(
+                            "morgen_batch_delete_events", {"event_ids": [virtual_id]}
+                        )
 
-        assert result.structured_content is not None
-        assert batch.structured_content is not None
-        assert result.structured_content["success"] is True
-        assert result.structured_content["alreadyGone"] is True
-        assert batch.structured_content["alreadyGone"] == [virtual_id]
-        assert batch.structured_content["deleted"] == []
-        assert batch.structured_content["failed"] == []
-        assert real_id not in str(result.structured_content)
-        assert real_id not in str(batch.structured_content)
+        result_data = _structured(result)
+        batch_data = _structured(batch)
+        assert result_data["success"] is True
+        assert result_data["alreadyGone"] is True
+        assert batch_data["alreadyGone"] == [virtual_id]
+        assert batch_data["deleted"] == []
+        assert batch_data["failed"] == []
+        assert real_id not in str(result_data)
+        assert real_id not in str(batch_data)
 
-    async def test_series_delete_missing_anchor_is_not_success(self, monkeypatch):
+    async def test_series_delete_missing_anchor_is_not_success(self):
         """A 404 anchor under all/future must not report the series as gone."""
-        from morgenmcp import client as client_module
         from morgenmcp.tools.id_registry import register_id
 
-        monkeypatch.setattr(
-            client_module, "_client", client_module.MorgenClient(api_key="test-key")
-        )
         virtual_id = register_id(self._real_event_id())
 
         with respx.mock(assert_all_called=True) as api:
             api.post(host="api.morgen.so", path="/v3/events/delete").respond(
                 404, json={"message": "Not found", "status": 404}
             )
-            async with Client(mcp) as client:
-                single = await client.call_tool(
-                    "morgen_delete_event",
-                    {"event_id": virtual_id, "series_update_mode": "all"},
-                    raise_on_error=False,
-                )
-                batch = await client.call_tool(
-                    "morgen_batch_delete_events",
-                    {"event_ids": [virtual_id], "series_update_mode": "future"},
-                )
+            async with MorgenClient(api_key="test-key") as upstream:
+                with patch("morgenmcp.tools.events.get_client", return_value=upstream):
+                    async with Client(mcp) as client:
+                        single = await client.call_tool(
+                            "morgen_delete_event",
+                            {"event_id": virtual_id, "series_update_mode": "all"},
+                            raise_on_error=False,
+                        )
+                        batch = await client.call_tool(
+                            "morgen_batch_delete_events",
+                            {"event_ids": [virtual_id], "series_update_mode": "future"},
+                        )
 
         assert single.is_error
         assert "series delete was not applied" in _text(single.content[0])
-        assert batch.structured_content is not None
-        assert "alreadyGone" not in batch.structured_content
-        assert [f["id"] for f in batch.structured_content["failed"]] == [virtual_id]
+        batch_data = _structured(batch)
+        assert "alreadyGone" not in batch_data
+        assert [f["id"] for f in batch_data["failed"]] == [virtual_id]
 
     async def test_already_gone_is_optional_in_delete_schemas(self):
         async with Client(mcp) as client:
@@ -1077,6 +1071,14 @@ class TestTypedOutputSchemas:
             schema = by_name[tool].outputSchema
             assert schema is not None
             assert "alreadyGone" not in schema["properties"]
+        for tool in ("morgen_update_event", "morgen_delete_event"):
+            schema = by_name[tool].outputSchema
+            assert schema is not None
+            assert set(schema["properties"]["seriesUpdateMode"]["enum"]) == {
+                "single",
+                "future",
+                "all",
+            }
 
 
 class TestReadOnlyMode:
@@ -1301,10 +1303,8 @@ class TestResponseCaching:
                 )
 
             assert client_mock.get_tag.await_count == 2
-            assert first.structured_content is not None
-            assert second.structured_content is not None
-            assert first.structured_content["name"] == "Old"
-            assert second.structured_content["name"] == "Changed elsewhere"
+            assert _structured(first)["name"] == "Old"
+            assert _structured(second)["name"] == "Changed elsewhere"
 
     async def test_get_tag_reflects_update(self):
         """get -> update -> get returns the updated tag."""
@@ -1331,10 +1331,42 @@ class TestResponseCaching:
                 after = await client.call_tool("morgen_get_tag", {"tag_id": virtual_id})
 
             assert client_mock.get_tag.await_count == 2
-            assert before.structured_content is not None
-            assert after.structured_content is not None
-            assert before.structured_content["name"] == "Old"
-            assert after.structured_content["name"] == "New"
+            assert _structured(before)["name"] == "Old"
+            assert _structured(after)["name"] == "New"
+
+    async def test_get_tag_reports_not_found_after_delete(self):
+        """Read-after-delete verifies the tag is gone through the MCP protocol."""
+        import httpx
+        from fastmcp.exceptions import ToolError
+
+        from morgenmcp.tools.id_registry import register_id
+
+        real_id = "tag-uncached-after-delete"
+        virtual_id = register_id(real_id)
+        arguments = {"tag_id": virtual_id}
+        with respx.mock(assert_all_called=True) as api:
+            delete = api.post(host="api.morgen.so", path="/v3/tags/delete").respond(204)
+
+            def read_tag(_: httpx.Request) -> httpx.Response:
+                if delete.called:
+                    return httpx.Response(404, json={"message": "Tag does not exist"})
+                return httpx.Response(200, json={"id": real_id, "name": "Old"})
+
+            get = api.get(
+                host="api.morgen.so", path="/v3/tags", params={"id": real_id}
+            ).mock(side_effect=read_tag)
+            async with MorgenClient(api_key="test-key") as upstream:
+                with patch("morgenmcp.tools.tags.get_client", return_value=upstream):
+                    async with Client(mcp) as client:
+                        before = await client.call_tool("morgen_get_tag", arguments)
+                        deleted = await client.call_tool("morgen_delete_tag", arguments)
+                        with pytest.raises(ToolError) as exc_info:
+                            await client.call_tool("morgen_get_tag", arguments)
+
+        assert _structured(before)["id"] == virtual_id
+        assert _structured(deleted)["success"] is True
+        assert str(exc_info.value) == f"Tag with ID '{virtual_id}' not found"
+        assert get.call_count == 2
 
     async def test_write_tool_is_not_cached(self):
         """Two identical calls to a write tool MUST hit the underlying client twice.

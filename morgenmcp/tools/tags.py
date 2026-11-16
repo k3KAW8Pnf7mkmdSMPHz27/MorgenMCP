@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import cast
 
 from fastmcp.exceptions import ToolError
@@ -14,7 +16,7 @@ from morgenmcp.models import (
     TagDeleteRequest,
     TagUpdateRequest,
 )
-from morgenmcp.tools.id_registry import IDNotFoundError, register_id, resolve_id
+from morgenmcp.tools.id_registry import register_id
 from morgenmcp.tools.outputs import (
     CreateTagResult,
     ListTagsResult,
@@ -26,22 +28,31 @@ from morgenmcp.tools.utils import (
     filter_none_values,
     handle_tool_errors,
     is_not_found,
+    resolve_virtual_id,
 )
 from morgenmcp.validators import validate_hex_color
 
 
-def _tag_not_found(tag_id: str) -> ToolError:
-    return ToolError(f"Tag with ID '{tag_id}' not found")
+def _tag_not_found(tag_id: str) -> str:
+    return f"Tag with ID '{tag_id}' not found"
 
 
 def _resolve_tag_id(tag_id: str) -> str:
     """Validate and resolve a virtual tag ID to its real Morgen ID."""
-    if not tag_id or not tag_id.strip():
-        raise ToolError("tag_id cannot be empty")
+    return resolve_virtual_id(
+        tag_id, parameter="tag_id", not_found=_tag_not_found(tag_id)
+    )
+
+
+@asynccontextmanager
+async def _tag_api_call(tag_id: str) -> AsyncIterator[None]:
+    """Translate Morgen's tag 404 to a tool error, including on delete."""
     try:
-        return resolve_id(tag_id)
-    except IDNotFoundError as e:
-        raise _tag_not_found(tag_id) from e
+        yield
+    except MorgenAPIError as e:
+        if is_not_found(e):
+            raise ToolError(_tag_not_found(tag_id)) from e
+        raise
 
 
 def _format_tag(tag: Tag) -> TagItem:
@@ -103,13 +114,8 @@ async def get_tag(tag_id: str) -> TagItem:
     real_id = _resolve_tag_id(tag_id)
 
     client = get_client()
-    try:
+    async with _tag_api_call(tag_id):
         tag = await client.get_tag(real_id)
-    except MorgenAPIError as e:
-        # tags.mdx documents 404 as "Tag does not exist".
-        if is_not_found(e):
-            raise _tag_not_found(tag_id) from e
-        raise
 
     return _format_tag(tag)
 
@@ -174,12 +180,8 @@ async def update_tag(
     request = TagUpdateRequest(id=real_id, name=name, color=color)
 
     client = get_client()
-    try:
+    async with _tag_api_call(tag_id):
         await client.update_tag(request)
-    except MorgenAPIError as e:
-        if is_not_found(e):
-            raise _tag_not_found(tag_id) from e
-        raise
 
     return {
         "success": True,
@@ -205,14 +207,8 @@ async def delete_tag(tag_id: str) -> MutateTagResult:
     request = TagDeleteRequest(id=real_id)
 
     client = get_client()
-    try:
+    async with _tag_api_call(tag_id):
         await client.delete_tag(request)
-    except MorgenAPIError as e:
-        # Unlike events, tags.mdx gives no idempotent-delete guidance: a 404
-        # means the tag does not exist, which is reported as an error.
-        if is_not_found(e):
-            raise _tag_not_found(tag_id) from e
-        raise
 
     return {
         "success": True,

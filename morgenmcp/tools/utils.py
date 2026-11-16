@@ -24,6 +24,7 @@ from morgenmcp.models import (
     ParticipantRoles,
     RecurrenceRule,
 )
+from morgenmcp.tools.id_registry import IDNotFoundError, resolve_id
 from morgenmcp.validators import (
     ValidationError,
     validate_alert_offset,
@@ -40,6 +41,16 @@ from morgenmcp.validators import (
 # it does not change point spend — a batch of N single-item calls costs N
 # points at any concurrency — so the tripled budget only adds headroom.
 BATCH_CONCURRENCY = 8
+
+
+def resolve_virtual_id(virtual_id: str, *, parameter: str, not_found: str) -> str:
+    """Validate a virtual ID and report a tool-specific lookup error."""
+    if not virtual_id or not virtual_id.strip():
+        raise ToolError(f"{parameter} cannot be empty")
+    try:
+        return resolve_id(virtual_id)
+    except IDNotFoundError as e:
+        raise ToolError(not_found) from e
 
 
 def is_not_found(exc: BaseException) -> bool:
