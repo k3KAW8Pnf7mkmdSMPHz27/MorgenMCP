@@ -148,6 +148,11 @@ class _RetryAfterTransport(httpx.AsyncBaseTransport):
     Morgen signals rate limiting with 429 + a Retry-After header. Honoring a
     short hint (sleep, retry once) lets batch fan-outs degrade gracefully
     instead of shedding items into their `failed` lists.
+
+    Re-audited against the 300-point API-key budget (rate-limits.mdx) and
+    kept as is: Retry-After is only sent once RateLimit-Remaining hits 0, so
+    the policy is independent of the ceiling, and a long wait is better
+    surfaced to the caller than slept through inside a tool call.
     """
 
     def __init__(

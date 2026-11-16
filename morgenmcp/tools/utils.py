@@ -24,6 +24,7 @@ from morgenmcp.models import (
     ParticipantRoles,
     RecurrenceRule,
 )
+from morgenmcp.tools.id_registry import IDNotFoundError, resolve_id
 from morgenmcp.validators import (
     ValidationError,
     validate_alert_offset,
@@ -33,7 +34,33 @@ from morgenmcp.validators import (
 # Cap concurrent Morgen API calls issued by a single tool invocation. Batch
 # tools fan out one request per item; unbounded gather would fire them all at
 # once and trip Morgen's rate limiter on large batches.
+#
+# Re-audited against rate-limits.mdx (API key: 300 points / 15 min; `/list`
+# endpoints cost 10, everything else 1) and kept at 8. Concurrency bounds how
+# many requests are in flight at once (below the client's 10-connection pool);
+# it does not change point spend — a batch of N single-item calls costs N
+# points at any concurrency — so the tripled budget only adds headroom.
 BATCH_CONCURRENCY = 8
+
+
+def resolve_virtual_id(virtual_id: str, *, parameter: str, not_found: str) -> str:
+    """Validate a virtual ID and report a tool-specific lookup error."""
+    if not virtual_id or not virtual_id.strip():
+        raise ToolError(f"{parameter} cannot be empty")
+    try:
+        return resolve_id(virtual_id)
+    except IDNotFoundError as e:
+        raise ToolError(not_found) from e
+
+
+def is_not_found(exc: BaseException) -> bool:
+    """True when ``exc`` is an upstream HTTP 404 from the Morgen API.
+
+    What a 404 means is endpoint-specific (events: authoritative absence;
+    tags: does not exist; tasks never return one), so callers decide how to
+    translate it rather than ``MorgenClient._handle_error``.
+    """
+    return isinstance(exc, MorgenAPIError) and exc.status_code == 404
 
 
 @dataclass

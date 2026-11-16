@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import cast
 
 from fastmcp.exceptions import ToolError
@@ -14,7 +16,7 @@ from morgenmcp.models import (
     TagDeleteRequest,
     TagUpdateRequest,
 )
-from morgenmcp.tools.id_registry import IDNotFoundError, register_id, resolve_id
+from morgenmcp.tools.id_registry import register_id
 from morgenmcp.tools.outputs import (
     CreateTagResult,
     ListTagsResult,
@@ -22,8 +24,35 @@ from morgenmcp.tools.outputs import (
     TagItem,
     fetch_coverage,
 )
-from morgenmcp.tools.utils import filter_none_values, handle_tool_errors
+from morgenmcp.tools.utils import (
+    filter_none_values,
+    handle_tool_errors,
+    is_not_found,
+    resolve_virtual_id,
+)
 from morgenmcp.validators import validate_hex_color
+
+
+def _tag_not_found(tag_id: str) -> str:
+    return f"Tag with ID '{tag_id}' not found"
+
+
+def _resolve_tag_id(tag_id: str) -> str:
+    """Validate and resolve a virtual tag ID to its real Morgen ID."""
+    return resolve_virtual_id(
+        tag_id, parameter="tag_id", not_found=_tag_not_found(tag_id)
+    )
+
+
+@asynccontextmanager
+async def _tag_api_call(tag_id: str) -> AsyncIterator[None]:
+    """Translate Morgen's tag 404 to a tool error, including on delete."""
+    try:
+        yield
+    except MorgenAPIError as e:
+        if is_not_found(e):
+            raise ToolError(_tag_not_found(tag_id)) from e
+        raise
 
 
 def _format_tag(tag: Tag) -> TagItem:
@@ -82,19 +111,11 @@ async def get_tag(tag_id: str) -> TagItem:
     Returns:
         Dictionary with tag details (id, name, color, updated, deleted).
     """
-    if not tag_id or not tag_id.strip():
-        raise ToolError("tag_id cannot be empty")
-
-    try:
-        real_id = resolve_id(tag_id)
-    except IDNotFoundError as e:
-        raise ToolError(f"Tag with ID '{tag_id}' not found") from e
+    real_id = _resolve_tag_id(tag_id)
 
     client = get_client()
-    try:
+    async with _tag_api_call(tag_id):
         tag = await client.get_tag(real_id)
-    except MorgenAPIError as e:
-        raise ToolError(f"Failed to retrieve tag: {e}") from e
 
     return _format_tag(tag)
 
@@ -148,6 +169,7 @@ async def update_tag(
     Returns:
         Dictionary indicating success.
     """
+    real_id = _resolve_tag_id(tag_id)
     if name is None and color is None:
         raise ToolError("At least one of name or color must be provided.")
     if name is not None and not name.strip():
@@ -155,11 +177,11 @@ async def update_tag(
     if color is not None:
         validate_hex_color(color)
 
-    real_id = resolve_id(tag_id)
     request = TagUpdateRequest(id=real_id, name=name, color=color)
 
     client = get_client()
-    await client.update_tag(request)
+    async with _tag_api_call(tag_id):
+        await client.update_tag(request)
 
     return {
         "success": True,
@@ -181,11 +203,12 @@ async def delete_tag(tag_id: str) -> MutateTagResult:
     Returns:
         Dictionary indicating success.
     """
-    real_id = resolve_id(tag_id)
+    real_id = _resolve_tag_id(tag_id)
     request = TagDeleteRequest(id=real_id)
 
     client = get_client()
-    await client.delete_tag(request)
+    async with _tag_api_call(tag_id):
+        await client.delete_tag(request)
 
     return {
         "success": True,

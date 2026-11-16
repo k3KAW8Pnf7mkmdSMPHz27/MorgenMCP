@@ -113,6 +113,6 @@ known-first-party = ["morgenmcp"]
 [tool.pyright]
 pythonVersion = "3.12"
 typeCheckingMode = "standard"
-include = ["morgenmcp"]
+include = ["morgenmcp", "tests"]
 venvPath = "."
 venv = ".venv"

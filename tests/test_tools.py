@@ -1,5 +1,6 @@
 """Unit tests for MCP tools."""
 
+import asyncio
 import base64
 import json
 import re
@@ -1528,19 +1529,50 @@ class TestUpdateEvent:
         call_kwargs = mock_morgen_client.update_event.call_args[1]
         assert call_kwargs["series_update_mode"] == "all"
 
-    async def test_update_event_api_error(self, mock_morgen_client, sample_event_id):
-        """Test event update with API error."""
+    async def test_update_event_not_found_upstream(
+        self, mock_morgen_client, sample_event_id
+    ):
+        """An upstream 404 means the event is gone (events.mdx), not a generic error."""
         mock_morgen_client.update_event.side_effect = MorgenAPIError(
-            "Event not found", status_code=404
+            "Cancelled events cannot be retrieved from Google", status_code=404
         )
 
         virtual_evt = register_id(sample_event_id)
 
-        with pytest.raises(ToolError, match="API error.*404"):
+        with pytest.raises(
+            ToolError, match=f"Event with ID '{virtual_evt}' no longer exists"
+        ):
             await update_event(
                 event_id=virtual_evt,
                 title="Updated",
             )
+
+    async def test_update_event_api_error(self, mock_morgen_client, sample_event_id):
+        """Non-404 API errors keep the generic error path."""
+        mock_morgen_client.update_event.side_effect = MorgenAPIError(
+            "Provider unavailable", status_code=503
+        )
+
+        virtual_evt = register_id(sample_event_id)
+
+        with pytest.raises(ToolError, match=r"API error \(HTTP 503\)"):
+            await update_event(
+                event_id=virtual_evt,
+                title="Updated",
+            )
+
+    @pytest.mark.parametrize("bad_id", ["", "   "])
+    async def test_update_event_empty_id(self, mock_morgen_client, bad_id):
+        with pytest.raises(ToolError, match="event_id cannot be empty"):
+            await update_event(event_id=bad_id, start="2023-03-15T14:00:00")
+        mock_morgen_client.update_event.assert_not_called()
+
+    async def test_update_event_unknown_id(self, mock_morgen_client):
+        with pytest.raises(
+            ToolError, match="Event with ID 'nonexist' not found. Call list_events"
+        ):
+            await update_event(event_id="nonexist", start="2023-03-15T14:00:00")
+        mock_morgen_client.update_event.assert_not_called()
 
 
 class TestDeleteEvent:
@@ -1571,16 +1603,74 @@ class TestDeleteEvent:
         assert result["success"] is True
         assert result["seriesUpdateMode"] == "future"
 
-    async def test_delete_event_api_error(self, mock_morgen_client, sample_event_id):
-        """Test event deletion with API error."""
+    async def test_delete_event_success_has_no_already_gone(
+        self, mock_morgen_client, sample_event_id
+    ):
+        mock_morgen_client.delete_event.return_value = None
+        result = await delete_event(event_id=register_id(sample_event_id))
+        assert result["message"] == "Event deleted successfully."
+        assert "alreadyGone" not in result
+
+    async def test_delete_event_already_gone(self, mock_morgen_client, sample_event_id):
+        """A single-event delete treats an upstream 404 as idempotent success."""
         mock_morgen_client.delete_event.side_effect = MorgenAPIError(
             "Event not found", status_code=404
         )
 
         virtual_evt = register_id(sample_event_id)
+        result = await delete_event(event_id=virtual_evt)
 
-        with pytest.raises(ToolError, match="API error.*404"):
+        assert result["success"] is True
+        assert result["alreadyGone"] is True
+        assert result["eventId"] == virtual_evt
+        assert result["seriesUpdateMode"] == "single"
+        assert result["message"].endswith("Nothing was removed.")
+
+    @pytest.mark.parametrize("mode", ["future", "all"])
+    async def test_delete_event_series_missing_anchor_is_error(
+        self, mock_morgen_client, sample_event_id, mode
+    ):
+        """A 404 on the anchor occurrence does not prove the series is gone:
+        a cancelled occurrence 404s while its siblings survive."""
+        mock_morgen_client.delete_event.side_effect = MorgenAPIError(
+            "Event not found", status_code=404
+        )
+        virtual_evt = register_id(sample_event_id)
+
+        with pytest.raises(ToolError) as exc_info:
+            await delete_event(event_id=virtual_evt, series_update_mode=mode)
+
+        message = str(exc_info.value)
+        assert f"Event with ID '{virtual_evt}' no longer exists" in message
+        assert f"'{mode}' series delete was not applied" in message
+        # "future" must not invite a retry from an earlier occurrence.
+        if mode == "future":
+            assert "at or after the original one" in message
+        else:
+            assert "any surviving occurrence of the same series" in message
+        assert sample_event_id not in message
+
+    async def test_delete_event_api_error(self, mock_morgen_client, sample_event_id):
+        """Non-404 API errors still fail."""
+        mock_morgen_client.delete_event.side_effect = MorgenAPIError(
+            "Server error", status_code=500
+        )
+
+        virtual_evt = register_id(sample_event_id)
+
+        with pytest.raises(ToolError, match=r"API error \(HTTP 500\)"):
             await delete_event(event_id=virtual_evt)
+
+    @pytest.mark.parametrize("bad_id", ["", "   "])
+    async def test_delete_event_empty_id(self, mock_morgen_client, bad_id):
+        with pytest.raises(ToolError, match="event_id cannot be empty"):
+            await delete_event(event_id=bad_id)
+        mock_morgen_client.delete_event.assert_not_called()
+
+    async def test_delete_event_unknown_id(self, mock_morgen_client):
+        with pytest.raises(ToolError, match="Event with ID 'nonexist' not found"):
+            await delete_event(event_id="nonexist")
+        mock_morgen_client.delete_event.assert_not_called()
 
 
 class TestToolOutputFormat:
@@ -1652,27 +1742,123 @@ class TestBatchDeleteEvents:
         assert result["deleted"] == [virtual_evt1]
         assert len(result["failed"]) == 1
         assert result["failed"][0]["id"] == "unregistered"
-        assert "not found" in result["failed"][0]["error"]
+        assert result["failed"][0]["error"] == (
+            "Event with ID 'unregistered' not found. Call list_events first."
+        )
 
     async def test_batch_delete_partial_failure(
         self, mock_morgen_client, sample_account_id
     ):
-        """Test batch deletion with partial API failure."""
+        """A 404 item is already gone, a 500 item fails, a 204 item is deleted."""
+        evt_id1 = make_event_id("test@example.com", "uid1", sample_account_id)
+        evt_id2 = make_event_id("test@example.com", "uid2", sample_account_id)
+        evt_id3 = make_event_id("test@example.com", "uid3", sample_account_id)
+        virtual_evt1 = register_id(evt_id1)
+        virtual_evt2 = register_id(evt_id2)
+        virtual_evt3 = register_id(evt_id3)
+
+        outcomes = {
+            evt_id1: None,
+            evt_id2: MorgenAPIError("Event not found", status_code=404),
+            evt_id3: MorgenAPIError("Server error", status_code=500),
+        }
+
+        async def fake_delete(request, series_update_mode):
+            outcome = outcomes[request.id]
+            if outcome is not None:
+                raise outcome
+
+        mock_morgen_client.delete_event.side_effect = fake_delete
+
+        ctx = AsyncMock()
+        result = await batch_delete_events(
+            event_ids=[virtual_evt1, virtual_evt2, virtual_evt3], ctx=ctx
+        )
+
+        assert result["deleted"] == [virtual_evt1]
+        assert result["alreadyGone"] == [virtual_evt2]
+        assert [f["id"] for f in result["failed"]] == [virtual_evt3]
+        assert result["summary"] == "Deleted 1, failed 1, already gone 1"
+        # Only the genuine failure warns.
+        ctx.warning.assert_awaited_once()
+        assert virtual_evt3 in ctx.warning.call_args[0][0]
+
+    async def test_batch_delete_all_already_gone(
+        self, mock_morgen_client, sample_account_id
+    ):
+        event_ids = [
+            register_id(make_event_id("test@example.com", uid, sample_account_id))
+            for uid in ("uid1", "uid2")
+        ]
+        mock_morgen_client.delete_event.side_effect = MorgenAPIError(
+            "Event not found", status_code=404
+        )
+        ctx = AsyncMock()
+
+        result = await batch_delete_events(event_ids=event_ids, ctx=ctx)
+
+        assert result == {
+            "deleted": [],
+            "failed": [],
+            "alreadyGone": event_ids,
+            "summary": "Deleted 0, failed 0, already gone 2",
+        }
+        ctx.warning.assert_not_awaited()
+
+    async def test_batch_delete_cancelled_item_fails(
+        self, mock_morgen_client, sample_event_id
+    ):
+        virtual_id = register_id(sample_event_id)
+        mock_morgen_client.delete_event.side_effect = asyncio.CancelledError()
+
+        result = await batch_delete_events(event_ids=[virtual_id])
+
+        assert result["deleted"] == []
+        assert result["failed"] == [{"id": virtual_id, "error": "CancelledError"}]
+
+    @pytest.mark.parametrize("mode", ["future", "all"])
+    async def test_batch_delete_series_missing_anchor_fails(
+        self, mock_morgen_client, sample_account_id, mode
+    ):
+        """Under future/all a 404 anchor is a failure, never alreadyGone."""
         evt_id1 = make_event_id("test@example.com", "uid1", sample_account_id)
         evt_id2 = make_event_id("test@example.com", "uid2", sample_account_id)
         virtual_evt1 = register_id(evt_id1)
         virtual_evt2 = register_id(evt_id2)
 
-        # First delete succeeds, second fails
-        mock_morgen_client.delete_event.side_effect = [
-            None,
-            MorgenAPIError("Event not found", status_code=404),
-        ]
+        async def fake_delete(request, series_update_mode):
+            if request.id == evt_id2:
+                raise MorgenAPIError("Event not found", status_code=404)
 
-        result = await batch_delete_events(event_ids=[virtual_evt1, virtual_evt2])
+        mock_morgen_client.delete_event.side_effect = fake_delete
 
-        assert virtual_evt1 in result["deleted"]
-        assert any(f["id"] == virtual_evt2 for f in result["failed"])
+        ctx = AsyncMock()
+        result = await batch_delete_events(
+            event_ids=[virtual_evt1, virtual_evt2],
+            series_update_mode=mode,
+            ctx=ctx,
+        )
+
+        assert result["deleted"] == [virtual_evt1]
+        assert "alreadyGone" not in result
+        assert [f["id"] for f in result["failed"]] == [virtual_evt2]
+        assert f"'{mode}' series delete was not applied" in result["failed"][0]["error"]
+        assert result["summary"] == "Deleted 1, failed 1"
+        ctx.warning.assert_awaited_once()
+
+    async def test_batch_delete_all_success_omits_already_gone(
+        self, mock_morgen_client, sample_account_id
+    ):
+        evt_id = make_event_id("test@example.com", "uid1", sample_account_id)
+        mock_morgen_client.delete_event.return_value = None
+        result = await batch_delete_events(event_ids=[register_id(evt_id)])
+        assert "alreadyGone" not in result
+        assert result["summary"] == "Deleted 1, failed 0"
+
+    async def test_batch_delete_empty_item_id(self, mock_morgen_client):
+        result = await batch_delete_events(event_ids=[""])
+        assert result["failed"] == [{"id": "", "error": "event_id cannot be empty"}]
+        mock_morgen_client.delete_event.assert_not_called()
 
     async def test_batch_delete_empty_list(self, mock_morgen_client):
         """Test batch deletion with empty list."""
@@ -1736,6 +1922,23 @@ class TestBatchUpdateEvents:
         assert len(result["failed"]) == 1
         assert "Missing event_id" in result["failed"][0]["error"]
 
+    @pytest.mark.parametrize("bad_id", ["", "   "])
+    async def test_batch_update_empty_event_id(self, mock_morgen_client, bad_id):
+        result = await batch_update_events(
+            updates=[{"event_id": bad_id, "start": "2023-03-15T14:00:00"}]
+        )
+
+        assert result["failed"] == [{"id": bad_id, "error": "event_id cannot be empty"}]
+        mock_morgen_client.update_event.assert_not_called()
+
+    async def test_batch_update_event_id_must_be_a_string(self, mock_morgen_client):
+        result = await batch_update_events(updates=[{"event_id": 123}])
+
+        assert result["failed"] == [
+            {"id": "(unknown)", "error": "event_id must be a string"}
+        ]
+        mock_morgen_client.update_event.assert_not_called()
+
     async def test_batch_update_timing_validation(
         self, mock_morgen_client, sample_account_id
     ):
@@ -1786,7 +1989,41 @@ class TestBatchUpdateEvents:
         )
 
         assert virtual_evt1 in result["updated"]
-        assert any(f["id"] == virtual_evt2 for f in result["failed"])
+        assert result["failed"] == [
+            {
+                "id": virtual_evt2,
+                "error": (
+                    f"Event with ID '{virtual_evt2}' no longer exists (deleted, "
+                    "cancelled, or not retrievable from the calendar provider). "
+                    "Re-list events to refresh IDs."
+                ),
+            }
+        ]
+
+    async def test_batch_update_unknown_id(self, mock_morgen_client):
+        result = await batch_update_events(
+            updates=[{"event_id": "nonexist", "start": "2023-03-15T14:00:00"}]
+        )
+        assert result["failed"] == [
+            {
+                "id": "nonexist",
+                "error": "Event with ID 'nonexist' not found. Call list_events first.",
+            }
+        ]
+        mock_morgen_client.update_event.assert_not_called()
+
+    async def test_batch_update_cancelled_item_fails(
+        self, mock_morgen_client, sample_event_id
+    ):
+        virtual_id = register_id(sample_event_id)
+        mock_morgen_client.update_event.side_effect = asyncio.CancelledError()
+
+        result = await batch_update_events(
+            updates=[{"event_id": virtual_id, "title": "Updated"}]
+        )
+
+        assert result["updated"] == []
+        assert result["failed"] == [{"id": virtual_id, "error": "CancelledError"}]
 
 
 class TestContextWarnings:
@@ -1898,7 +2135,7 @@ class TestContextWarnings:
         evt_id = make_event_id("test@example.com", "uid1", sample_account_id)
         virtual_evt = register_id(evt_id)
         mock_morgen_client.delete_event.side_effect = MorgenAPIError(
-            "Not found", status_code=404
+            "Server error", status_code=500
         )
 
         ctx = AsyncMock()
@@ -1924,8 +2161,9 @@ class TestContextWarnings:
         )
 
         assert len(result["failed"]) == 1
-        ctx.warning.assert_awaited_once()
-        assert virtual_evt in ctx.warning.call_args[0][0]
+        error = result["failed"][0]["error"]
+        assert error.count(virtual_evt) == 1
+        ctx.warning.assert_awaited_once_with(error)
 
     async def test_tools_work_without_context(
         self, mock_morgen_client, sample_calendar

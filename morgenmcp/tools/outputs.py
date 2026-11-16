@@ -27,7 +27,7 @@ hand-built camelCase dicts the tools emit.
 
 from __future__ import annotations
 
-from typing import Annotated, NotRequired, TypedDict
+from typing import Annotated, Literal, NotRequired, TypedDict
 
 from pydantic import MISSING, BaseModel, Field, WithJsonSchema
 
@@ -205,12 +205,23 @@ class CreateEventResult(TypedDict):
 
 
 class MutateEventResult(TypedDict):
-    """Return of ``update_event`` / ``delete_event``."""
+    """Return of ``update_event``."""
 
     success: bool
     message: str
     eventId: str
-    seriesUpdateMode: str
+    seriesUpdateMode: Literal["single", "future", "all"]
+
+
+class DeleteEventResult(MutateEventResult):
+    """Return of ``delete_event``.
+
+    ``alreadyGone`` is set only for ``seriesUpdateMode="single"`` when Morgen
+    answers 404 (the occurrence was already deleted, cancelled, or no longer
+    retrievable).
+    """
+
+    alreadyGone: NotRequired[bool]
 
 
 # ---------------------------------------------------------------------------
@@ -226,7 +237,7 @@ class FailedItem(TypedDict):
 
 
 class BatchDeleteResult(TypedDict):
-    """Return of ``batch_delete_events`` / ``batch_delete_tasks``.
+    """Return of ``batch_delete_tasks`` and base for ``BatchDeleteEventsResult``.
 
     The empty-input early return emits ``message`` and omits ``summary``; the
     populated path emits ``summary`` and omits ``message`` — so exactly one of
@@ -237,6 +248,18 @@ class BatchDeleteResult(TypedDict):
     failed: list[FailedItem]
     summary: NotRequired[str]
     message: NotRequired[str]
+
+
+class BatchDeleteEventsResult(BatchDeleteResult):
+    """Return of ``batch_delete_events``.
+
+    ``alreadyGone`` lists event IDs Morgen answered 404 for under
+    ``seriesUpdateMode="single"``, only when non-empty. Tasks never 404 (a
+    repeated task delete returns 204), so ``batch_delete_tasks`` keeps the
+    base type.
+    """
+
+    alreadyGone: NotRequired[list[str]]
 
 
 class BatchUpdateResult(TypedDict):

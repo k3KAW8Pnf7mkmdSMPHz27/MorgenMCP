@@ -3,18 +3,31 @@
 import asyncio
 import base64
 import json
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
 import respx
 from fastmcp import Client
 from fastmcp.client.logging import LogMessage
-from mcp.types import TextResourceContents
+from mcp.types import TextContent, TextResourceContents
 
 from morgenmcp.client import MorgenClient
 from morgenmcp.models import Calendar, MorgenAPIError
 from morgenmcp.server import mcp
 from morgenmcp.tools.id_registry import clear_registry
+
+
+def _structured(result: Any) -> dict[str, Any]:
+    """Narrow ``CallToolResult.structured_content`` (``dict | None``) for typing."""
+    assert result.structured_content is not None
+    return result.structured_content
+
+
+def _text(content: Any) -> str:
+    """Return the text of one tool-result or resource content block."""
+    assert isinstance(content, TextContent | TextResourceContents), type(content)
+    return content.text
 
 
 @pytest.fixture(autouse=True)
@@ -106,7 +119,9 @@ class TestMCPServer:
                 "morgen_list_tags",
                 "morgen_get_tag",
             ]:
-                assert by_name[name].annotations.readOnlyHint is True
+                annotations = by_name[name].annotations
+                assert annotations is not None
+                assert annotations.readOnlyHint is True
 
     async def test_delete_tools_have_destructive_annotation(self):
         """Delete tools are annotated destructiveHint=True."""
@@ -120,7 +135,9 @@ class TestMCPServer:
                 "morgen_batch_delete_tasks",
                 "morgen_delete_tag",
             ]:
-                assert by_name[name].annotations.destructiveHint is True
+                annotations = by_name[name].annotations
+                assert annotations is not None
+                assert annotations.destructiveHint is True
 
     async def test_write_tools_not_readonly(self):
         """Write tools are annotated readOnlyHint=False."""
@@ -140,7 +157,9 @@ class TestMCPServer:
                 "morgen_create_tag",
                 "morgen_update_tag",
             ]:
-                assert by_name[name].annotations.readOnlyHint is False
+                annotations = by_name[name].annotations
+                assert annotations is not None
+                assert annotations.readOnlyHint is False
 
     async def test_all_tools_have_title(self):
         """All tools have a non-empty title annotation."""
@@ -185,7 +204,7 @@ class TestMCPServer:
             async with Client(mcp) as client:
                 result = await client.call_tool("morgen_list_tasks", {})
 
-        item = result.structured_content["tasks"][0]
+        item = _structured(result)["tasks"][0]
         assert item["position"] == 1.5
         assert item["scheduled"] is True
 
@@ -323,7 +342,7 @@ class TestMCPServer:
             assert "morgen://server" in uris
 
             payload = await client.read_resource("morgen://server")
-            body = json.loads(payload[0].text)
+            body = json.loads(_text(payload[0]))
             assert body["name"] == "morgen-calendar"
             assert body["virtualIdHash"]["scheme_version"] == HASH_SCHEME_VERSION
             assert body["virtualIdHash"]["algorithm"] == "md5"
@@ -412,7 +431,7 @@ class TestMCPServer:
 
         # Tool should return the surviving events (as JSON text content)
         assert result is not None
-        text = result.content[0].text
+        text = _text(result.content[0])
         assert "Survived" in text
 
         # Verify warning was sent through the MCP protocol
@@ -470,7 +489,7 @@ class TestMCPServer:
             async with Client(mcp) as client:
                 contents = await client.read_resource("morgen://accounts")
                 assert len(contents) == 1
-                payload = json.loads(contents[0].text)
+                payload = json.loads(_text(contents[0]))
                 assert payload == {"accounts": [], "count": 0}
 
 
@@ -521,7 +540,7 @@ class TestTypedOutputSchemas:
                 result = await client.call_tool("morgen_list_accounts", {})
 
         assert result.is_error is False
-        payload = result.structured_content
+        payload = _structured(result)
         assert payload["count"] == 1
         item = payload["accounts"][0]
         assert item["email"] == "user@example.com"
@@ -585,7 +604,7 @@ class TestTypedOutputSchemas:
                 )
 
         assert result.is_error is False
-        item = result.structured_content["events"][0]
+        item = _structured(result)["events"][0]
         assert item["title"] == "Bare"
         # filtered out, and validation allowed it
         assert "progress" not in item
@@ -624,7 +643,7 @@ class TestTypedOutputSchemas:
                 )
 
         assert result.is_error is False
-        updated = result.structured_content["updated"]
+        updated = _structured(result)["updated"]
         assert updated["busy"] is False
         assert updated["overrideColor"] is None
         assert updated["overrideName"] is None
@@ -682,8 +701,8 @@ class TestTypedOutputSchemas:
             async with Client(mcp) as client:
                 result = await client.call_tool(tool, args, raise_on_error=False)
 
-        assert result.is_error is False, result.content[0].text
-        return result.structured_content
+        assert result.is_error is False, _text(result.content[0])
+        return _structured(result)
 
     async def test_incremental_listing_preserves_completed_and_deleted_tasks(
         self, monkeypatch
@@ -729,7 +748,9 @@ class TestTypedOutputSchemas:
         """Both task tools advertise the JSON types Morgen actually sends."""
         async with Client(mcp) as client:
             by_name = {t.name: t for t in await client.list_tools()}
-        props = by_name[tool].outputSchema["properties"]
+        schema = by_name[tool].outputSchema
+        assert schema is not None
+        props = schema["properties"]
         item = props["tasks"]["items"] if tool == "morgen_list_tasks" else props["task"]
         assert item["properties"][field]["type"] == json_type
 
@@ -784,6 +805,7 @@ class TestTypedOutputSchemas:
         async with Client(mcp) as client:
             by_name = {t.name: t for t in await client.list_tools()}
         schema = by_name[tool].outputSchema
+        assert schema is not None
         props = schema["properties"]
         item = self._deref_schema(
             schema,
@@ -932,13 +954,13 @@ class TestTypedOutputSchemas:
                     {"title": "Subtask", "parent_task_id": parent_vid},
                     raise_on_error=False,
                 )
-                assert create_res.is_error is False, create_res.content[0].text
+                assert create_res.is_error is False, _text(create_res.content[0])
                 list_res = await client.call_tool(
                     "morgen_list_tasks", {"limit": 5}, raise_on_error=False
                 )
 
-        assert list_res.is_error is False, list_res.content[0].text
-        listed = list_res.structured_content["tasks"][0]
+        assert list_res.is_error is False, _text(list_res.content[0])
+        listed = _structured(list_res)["tasks"][0]
         assert listed["relatedTo"] == {parent_vid: {"relation": {"parent": True}}}
 
     async def test_get_task_unknown_returns_tool_error(self, monkeypatch):
@@ -965,6 +987,98 @@ class TestTypedOutputSchemas:
         text = getattr(result.content[0], "text", "")
         assert f"Task with ID '{virtual_id}' not found" in text
         assert task_id not in text
+
+    @staticmethod
+    def _real_event_id() -> str:
+        raw = json.dumps(["user@example.com", "evt-gone", "507f1f77bcf86cd799439011"])
+        return base64.b64encode(raw.encode()).decode().rstrip("=")
+
+    async def test_delete_event_already_gone_passes_output_validation(self):
+        """An upstream 404 on delete returns a valid success payload with
+        alreadyGone=True, and leaks no raw IDs."""
+        from morgenmcp.tools.id_registry import register_id
+
+        real_id = self._real_event_id()
+        virtual_id = register_id(real_id)
+
+        with respx.mock(assert_all_called=True) as api:
+            api.post(host="api.morgen.so", path="/v3/events/delete").respond(
+                404,
+                json={
+                    "message": "Cancelled events cannot be retrieved from Google",
+                    "status": 404,
+                },
+            )
+            async with MorgenClient(api_key="test-key") as upstream:
+                with patch("morgenmcp.tools.events.get_client", return_value=upstream):
+                    async with Client(mcp) as client:
+                        result = await client.call_tool(
+                            "morgen_delete_event", {"event_id": virtual_id}
+                        )
+                        batch = await client.call_tool(
+                            "morgen_batch_delete_events", {"event_ids": [virtual_id]}
+                        )
+
+        result_data = _structured(result)
+        batch_data = _structured(batch)
+        assert result_data["success"] is True
+        assert result_data["alreadyGone"] is True
+        assert batch_data["alreadyGone"] == [virtual_id]
+        assert batch_data["deleted"] == []
+        assert batch_data["failed"] == []
+        assert real_id not in str(result_data)
+        assert real_id not in str(batch_data)
+
+    async def test_series_delete_missing_anchor_is_not_success(self):
+        """A 404 anchor under all/future must not report the series as gone."""
+        from morgenmcp.tools.id_registry import register_id
+
+        virtual_id = register_id(self._real_event_id())
+
+        with respx.mock(assert_all_called=True) as api:
+            api.post(host="api.morgen.so", path="/v3/events/delete").respond(
+                404, json={"message": "Not found", "status": 404}
+            )
+            async with MorgenClient(api_key="test-key") as upstream:
+                with patch("morgenmcp.tools.events.get_client", return_value=upstream):
+                    async with Client(mcp) as client:
+                        single = await client.call_tool(
+                            "morgen_delete_event",
+                            {"event_id": virtual_id, "series_update_mode": "all"},
+                            raise_on_error=False,
+                        )
+                        batch = await client.call_tool(
+                            "morgen_batch_delete_events",
+                            {"event_ids": [virtual_id], "series_update_mode": "future"},
+                        )
+
+        assert single.is_error
+        assert "series delete was not applied" in _text(single.content[0])
+        batch_data = _structured(batch)
+        assert "alreadyGone" not in batch_data
+        assert [f["id"] for f in batch_data["failed"]] == [virtual_id]
+
+    async def test_already_gone_is_optional_in_delete_schemas(self):
+        async with Client(mcp) as client:
+            by_name = {t.name: t for t in await client.list_tools()}
+        for tool in ("morgen_delete_event", "morgen_batch_delete_events"):
+            schema = by_name[tool].outputSchema
+            assert schema is not None
+            assert "alreadyGone" in schema["properties"]
+            assert "alreadyGone" not in schema.get("required", [])
+        # Only the event-delete tools can emit it; others must not advertise it.
+        for tool in ("morgen_update_event", "morgen_batch_delete_tasks"):
+            schema = by_name[tool].outputSchema
+            assert schema is not None
+            assert "alreadyGone" not in schema["properties"]
+        for tool in ("morgen_update_event", "morgen_delete_event"):
+            schema = by_name[tool].outputSchema
+            assert schema is not None
+            assert set(schema["properties"]["seriesUpdateMode"]["enum"]) == {
+                "single",
+                "future",
+                "all",
+            }
 
 
 class TestReadOnlyMode:
@@ -1095,10 +1209,12 @@ class TestResponseCaching:
         assert "morgen_list_task_lists" in included
         assert "morgen_list_tasks" in included
         assert "morgen_list_tags" in included
-        assert "morgen_get_tag" in included
-        # `morgen_get_task` and writes must NOT be in the allowlist
+        # Single-item reads and writes must NOT be in the allowlist
         assert "morgen_get_task" not in included, (
             "morgen_get_task must not be cached (breaks post-mutation verification)"
+        )
+        assert "morgen_get_tag" not in included, (
+            "morgen_get_tag must not be cached (breaks post-mutation verification)"
         )
         for write_tool in (
             "morgen_create_event",
@@ -1157,8 +1273,100 @@ class TestResponseCaching:
                 )
 
             assert client_mock.get_task.await_count == 2
-            assert before.structured_content["task"].get("deleted") is None
-            assert after.structured_content["task"]["deleted"] is True
+            assert _structured(before)["task"].get("deleted") is None
+            assert _structured(after)["task"]["deleted"] is True
+
+    async def test_get_tag_is_not_cached(self):
+        """Repeat morgen_get_tag calls with no write in between still hit the API.
+
+        Write invalidation alone would pass a get -> update -> get test; this
+        pins that the tool is out of the cache entirely, so a tag changed
+        outside this server is never served stale.
+        """
+        from morgenmcp.models import Tag
+        from morgenmcp.tools.id_registry import register_id
+
+        real_id = "tag-uncached-repeat-read"
+        virtual_id = register_id(real_id)
+        v1 = Tag(id=real_id, name="Old", color="#111111")
+        v2 = Tag(id=real_id, name="Changed elsewhere", color="#222222")
+
+        with patch("morgenmcp.tools.tags.get_client") as mock:
+            client_mock = AsyncMock()
+            client_mock.get_tag.side_effect = [v1, v2]
+            mock.return_value = client_mock
+
+            async with Client(mcp) as client:
+                first = await client.call_tool("morgen_get_tag", {"tag_id": virtual_id})
+                second = await client.call_tool(
+                    "morgen_get_tag", {"tag_id": virtual_id}
+                )
+
+            assert client_mock.get_tag.await_count == 2
+            assert _structured(first)["name"] == "Old"
+            assert _structured(second)["name"] == "Changed elsewhere"
+
+    async def test_get_tag_reflects_update(self):
+        """get -> update -> get returns the updated tag."""
+        from morgenmcp.models import Tag
+        from morgenmcp.tools.id_registry import register_id
+
+        real_id = "tag-uncached-after-update"
+        virtual_id = register_id(real_id)
+        v1 = Tag(id=real_id, name="Old", color="#111111")
+        v2 = Tag(id=real_id, name="New", color="#111111")
+
+        with patch("morgenmcp.tools.tags.get_client") as mock:
+            client_mock = AsyncMock()
+            client_mock.get_tag.side_effect = [v1, v2]
+            mock.return_value = client_mock
+
+            async with Client(mcp) as client:
+                before = await client.call_tool(
+                    "morgen_get_tag", {"tag_id": virtual_id}
+                )
+                await client.call_tool(
+                    "morgen_update_tag", {"tag_id": virtual_id, "name": "New"}
+                )
+                after = await client.call_tool("morgen_get_tag", {"tag_id": virtual_id})
+
+            assert client_mock.get_tag.await_count == 2
+            assert _structured(before)["name"] == "Old"
+            assert _structured(after)["name"] == "New"
+
+    async def test_get_tag_reports_not_found_after_delete(self):
+        """Read-after-delete verifies the tag is gone through the MCP protocol."""
+        import httpx
+        from fastmcp.exceptions import ToolError
+
+        from morgenmcp.tools.id_registry import register_id
+
+        real_id = "tag-uncached-after-delete"
+        virtual_id = register_id(real_id)
+        arguments = {"tag_id": virtual_id}
+        with respx.mock(assert_all_called=True) as api:
+            delete = api.post(host="api.morgen.so", path="/v3/tags/delete").respond(204)
+
+            def read_tag(_: httpx.Request) -> httpx.Response:
+                if delete.called:
+                    return httpx.Response(404, json={"message": "Tag does not exist"})
+                return httpx.Response(200, json={"id": real_id, "name": "Old"})
+
+            get = api.get(
+                host="api.morgen.so", path="/v3/tags", params={"id": real_id}
+            ).mock(side_effect=read_tag)
+            async with MorgenClient(api_key="test-key") as upstream:
+                with patch("morgenmcp.tools.tags.get_client", return_value=upstream):
+                    async with Client(mcp) as client:
+                        before = await client.call_tool("morgen_get_tag", arguments)
+                        deleted = await client.call_tool("morgen_delete_tag", arguments)
+                        with pytest.raises(ToolError) as exc_info:
+                            await client.call_tool("morgen_get_tag", arguments)
+
+        assert _structured(before)["id"] == virtual_id
+        assert _structured(deleted)["success"] is True
+        assert str(exc_info.value) == f"Tag with ID '{virtual_id}' not found"
+        assert get.call_count == 2
 
     async def test_write_tool_is_not_cached(self):
         """Two identical calls to a write tool MUST hit the underlying client twice.
