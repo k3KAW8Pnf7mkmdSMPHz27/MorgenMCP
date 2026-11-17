@@ -1248,6 +1248,56 @@ class TestResponseCaching:
 
             assert client_mock.list_calendars.await_count == 1
 
+    @pytest.mark.usefixtures("isolated_response_cache")
+    async def test_completing_task_invalidates_task_list_counts(self):
+        import httpx
+
+        from morgenmcp.tools.id_registry import register_id
+
+        task_id = "task-cache-invalidation"
+        virtual_id = register_id(task_id)
+        with respx.mock as api:
+            close_task = api.post(host="api.morgen.so", path="/v3/tasks/close").respond(
+                204
+            )
+
+            def list_tasks(_: httpx.Request) -> httpx.Response:
+                progress = "completed" if close_task.called else "needs-action"
+                return httpx.Response(
+                    200,
+                    json={
+                        "data": {
+                            "tasks": [
+                                {
+                                    "id": task_id,
+                                    "taskListId": "work",
+                                    "progress": progress,
+                                }
+                            ],
+                            "spaces": [{"id": "work", "name": "Work"}],
+                        }
+                    },
+                )
+
+            task_list = api.get(host="api.morgen.so", path="/v3/tasks/list").mock(
+                side_effect=list_tasks
+            )
+            async with MorgenClient(api_key="test-key") as upstream:
+                with patch("morgenmcp.tools.tasks.get_client", return_value=upstream):
+                    async with Client(mcp) as client:
+                        before = await client.call_tool("morgen_list_task_lists", {})
+                        await client.call_tool("morgen_list_task_lists", {})
+                        assert task_list.call_count == 1
+
+                        await client.call_tool(
+                            "morgen_complete_task", {"task_id": virtual_id}
+                        )
+                        after = await client.call_tool("morgen_list_task_lists", {})
+
+        assert _structured(before)["task_lists"][0]["task_count"] == 1
+        assert _structured(after)["task_lists"][0]["task_count"] == 0
+        assert task_list.call_count == 2
+
     async def test_get_task_is_not_cached_after_mutation(self):
         """morgen_get_task bypasses the 60s cache so post-delete reads see deleted=True."""
         from morgenmcp.models import Task
