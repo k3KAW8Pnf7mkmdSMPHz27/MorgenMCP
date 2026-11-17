@@ -701,7 +701,7 @@ _DEFAULT_CACHE_DOMAINS: tuple[_CacheDomain, ...] = (
                 "morgen_batch_delete_tasks",
             }
         ),
-        read_tools=("morgen_list_tasks",),
+        read_tools=("morgen_list_tasks", "morgen_list_task_lists"),
         resource_pred=lambda u: u.startswith("morgen://tasks"),
     ),
     _CacheDomain(
