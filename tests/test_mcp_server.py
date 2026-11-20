@@ -446,6 +446,95 @@ class TestMCPServer:
         # Verify progress was reported through the MCP protocol
         assert len(progress_updates) > 0
 
+        # Degradation must also ride in the payload, not only in logs:
+        # log delivery is per-request opt-in on the 2026-07-28 protocol.
+        assert result.structured_content is not None
+        assert result.structured_content["partial"] is True
+        failed = result.structured_content["failed_accounts"]
+        assert failed and account_id_2 not in failed  # virtual IDs only
+        from morgenmcp.tools.id_registry import resolve_id
+
+        assert resolve_id(failed[0]) == account_id_2
+
+    async def test_partial_flag_reaches_clients_without_log_optin(self):
+        """A caller that never opts into logs still learns the result is partial.
+
+        FastMCP's high-level Client auto-stamps ``logLevel=debug`` into every
+        request ``_meta`` (the modern opt-in), so log-handler-based coverage
+        cannot see the silent-degradation class this guards. Here the opt-in
+        is removed to emulate a bare modern caller: the warning channel must
+        stay silent and ``partial``/``failed_accounts`` must still be in the
+        structured result.
+        """
+        acc_ok = "bbbb00000000000000000001"
+        acc_bad = "bbbb00000000000000000002"
+
+        def _cal_id(acc_id: str) -> str:
+            payload = json.dumps(
+                [acc_id, f"{acc_id[-1]}@test.com"], separators=(",", ":")
+            )
+            return base64.b64encode(payload.encode()).decode().rstrip("=")
+
+        from morgenmcp.models import Event
+
+        cal_ok = Calendar(
+            id=_cal_id(acc_ok), account_id=acc_ok, integration_id="google"
+        )
+        cal_bad = Calendar(
+            id=_cal_id(acc_bad), account_id=acc_bad, integration_id="o365"
+        )
+        evt = Event(
+            id=base64.b64encode(
+                json.dumps(
+                    [f"{acc_ok[-1]}@test.com", "uid1", acc_ok], separators=(",", ":")
+                ).encode()
+            )
+            .decode()
+            .rstrip("="),
+            calendar_id=cal_ok.id,
+            account_id=acc_ok,
+            integration_id="google",
+            title="OnlyHealthy",
+            start="2025-01-01T10:00:00",
+            duration="PT1H",
+        )
+
+        collected_logs: list[LogMessage] = []
+
+        async def log_handler(message: LogMessage) -> None:
+            collected_logs.append(message)
+
+        with patch("morgenmcp.tools.events.get_client") as mock:
+            client_mock = AsyncMock()
+            mock.return_value = client_mock
+            client_mock.list_calendars.return_value = [cal_ok, cal_bad]
+
+            async def _list_events(**kwargs):
+                if kwargs["account_id"] == acc_ok:
+                    return [evt]
+                raise MorgenAPIError("timeout", status_code=504)
+
+            client_mock.list_events.side_effect = _list_events
+
+            client = Client(mcp, log_handler=log_handler)
+            # Emulate a modern caller that never opted into logs (FastMCP
+            # stamps "debug" by default — drop it before connecting).
+            client._session_kwargs["log_level"] = None
+            async with client:
+                result = await client.call_tool(
+                    "morgen_list_events",
+                    {"start": "2025-01-01T00:00:00", "end": "2025-01-02T00:00:00"},
+                )
+
+        assert collected_logs == [], "warnings leaked without a log opt-in"
+        sc = result.structured_content
+        assert sc is not None
+        assert sc["partial"] is True
+        assert sc["count"] == 1
+        from morgenmcp.tools.id_registry import resolve_id
+
+        assert resolve_id(sc["failed_accounts"][0]) == acc_bad
+
     async def test_lifespan_closes_client(self):
         """Server lifespan cleans up the HTTP client on shutdown."""
         with patch("morgenmcp.client.get_client") as mock_get:
@@ -1148,8 +1237,33 @@ class TestReadOnlyMode:
                 names = {t.name for t in await client.list_tools()}
                 assert names == self._READ_TOOLS
                 # A disabled tool is not merely unlisted — calling it fails.
-                with pytest.raises(ToolError):
-                    await client.call_tool("morgen_create_event", {})
+                # Arguments are VALID (resolvable virtual ID, well-formed
+                # timing) so the failure cannot be an accidental argument-
+                # validation error, and the write path must never be reached.
+                from morgenmcp.tools.id_registry import register_id
+
+                real_cal = (
+                    base64.b64encode(
+                        json.dumps(
+                            ["cccc00000000000000000001", "ro@test.com"],
+                            separators=(",", ":"),
+                        ).encode()
+                    )
+                    .decode()
+                    .rstrip("=")
+                )
+                with patch("morgenmcp.tools.events.get_client") as get_client_mock:
+                    with pytest.raises(ToolError):
+                        await client.call_tool(
+                            "morgen_create_event",
+                            {
+                                "calendar_id": register_id(real_cal),
+                                "title": "must never be created",
+                                "start": "2030-01-01T10:00:00",
+                                "duration": "PT1H",
+                            },
+                        )
+                    get_client_mock.assert_not_called()
         finally:
             mcp.enable(tags=_MUTATING_TAGS)
 

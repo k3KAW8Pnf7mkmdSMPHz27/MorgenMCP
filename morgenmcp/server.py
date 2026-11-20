@@ -530,80 +530,70 @@ mcp.tool(
 )(delete_tag)
 
 
-# MCP resources — read-only data clients can fetch without invoking tools
-_RESOURCE_ANNOTATIONS = {"readOnlyHint": True, "idempotentHint": True}
+# MCP resources — read-only data clients can fetch without invoking tools.
+# No annotations are registered: the MCP resource annotation schema defines
+# only audience/priority/lastModified, so hint-style metadata (readOnlyHint,
+# idempotentHint) is dropped by the SDK at serialization time.
 
 mcp.resource(
     "morgen://server",
     mime_type="application/json",
     tags={"server", "read"},
-    annotations=_RESOURCE_ANNOTATIONS,
 )(res_server)
 mcp.resource(
     "morgen://accounts",
     mime_type="application/json",
     tags={"accounts", "read"},
-    annotations=_RESOURCE_ANNOTATIONS,
 )(res_accounts)
 mcp.resource(
     "morgen://account/{account_id}",
     mime_type="application/json",
     tags={"accounts", "read"},
-    annotations=_RESOURCE_ANNOTATIONS,
 )(res_account)
 mcp.resource(
     "morgen://calendars",
     mime_type="application/json",
     tags={"calendars", "read"},
-    annotations=_RESOURCE_ANNOTATIONS,
 )(res_calendars)
 mcp.resource(
     "morgen://calendar/{calendar_id}",
     mime_type="application/json",
     tags={"calendars", "read"},
-    annotations=_RESOURCE_ANNOTATIONS,
 )(res_calendar)
 mcp.resource(
     "morgen://calendar/{calendar_id}/events",
     mime_type="application/json",
     tags={"calendars", "events", "read"},
-    annotations=_RESOURCE_ANNOTATIONS,
 )(res_calendar_events)
 mcp.resource(
     "morgen://events/today",
     mime_type="application/json",
     tags={"events", "read"},
-    annotations=_RESOURCE_ANNOTATIONS,
 )(res_events_today)
 mcp.resource(
     "morgen://events/this-week",
     mime_type="application/json",
     tags={"events", "read"},
-    annotations=_RESOURCE_ANNOTATIONS,
 )(res_events_this_week)
 mcp.resource(
     "morgen://events/upcoming",
     mime_type="application/json",
     tags={"events", "read"},
-    annotations=_RESOURCE_ANNOTATIONS,
 )(res_events_upcoming)
 mcp.resource(
     "morgen://tasks",
     mime_type="application/json",
     tags={"tasks", "read"},
-    annotations=_RESOURCE_ANNOTATIONS,
 )(res_tasks)
 mcp.resource(
     "morgen://tasks/today",
     mime_type="application/json",
     tags={"tasks", "read"},
-    annotations=_RESOURCE_ANNOTATIONS,
 )(res_tasks_today)
 mcp.resource(
     "morgen://tags",
     mime_type="application/json",
     tags={"tags", "read"},
-    annotations=_RESOURCE_ANNOTATIONS,
 )(res_tags)
 
 

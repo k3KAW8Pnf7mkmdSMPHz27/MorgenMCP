@@ -12,8 +12,10 @@ os.environ.setdefault("MORGEN_API_KEY", "test-placeholder-key")
 # Run the suite against FastMCP 4 WITHOUT the camelCase field-access shims
 # (inputSchema, isError, ...). The shims are scheduled for removal in
 # FastMCP 5; with this off, any camelCase read fails loudly in tests
-# instead of warning silently.
-os.environ.setdefault("FASTMCP_MCP_CAMELCASE_COMPAT", "false")
+# instead of warning silently. Assigned unconditionally on purpose:
+# setdefault would let an ambient FASTMCP_MCP_CAMELCASE_COMPAT=true in the
+# invoking shell silently re-enable the shims.
+os.environ["FASTMCP_MCP_CAMELCASE_COMPAT"] = "false"
 
 
 @pytest.fixture(autouse=True)
