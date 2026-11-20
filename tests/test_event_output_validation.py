@@ -240,7 +240,7 @@ async def test_sparse_builders_match_advertised_schema(
         advertised = {t.name: t for t in await client.list_tools()}
     if isinstance(item, BaseModel):
         item = item.model_dump()
-    schema = advertised[tool].outputSchema
+    schema = advertised[tool].output_schema
     assert schema is not None
     result = {collection: [item], "count": 1, **extra_fields}
     jsonschema.validate(result, schema)

@@ -121,7 +121,7 @@ class TestMCPServer:
             ]:
                 annotations = by_name[name].annotations
                 assert annotations is not None
-                assert annotations.readOnlyHint is True
+                assert annotations.read_only_hint is True
 
     async def test_delete_tools_have_destructive_annotation(self):
         """Delete tools are annotated destructiveHint=True."""
@@ -137,7 +137,7 @@ class TestMCPServer:
             ]:
                 annotations = by_name[name].annotations
                 assert annotations is not None
-                assert annotations.destructiveHint is True
+                assert annotations.destructive_hint is True
 
     async def test_write_tools_not_readonly(self):
         """Write tools are annotated readOnlyHint=False."""
@@ -159,7 +159,7 @@ class TestMCPServer:
             ]:
                 annotations = by_name[name].annotations
                 assert annotations is not None
-                assert annotations.readOnlyHint is False
+                assert annotations.read_only_hint is False
 
     async def test_all_tools_have_title(self):
         """All tools have a non-empty title annotation."""
@@ -324,13 +324,19 @@ class TestMCPServer:
             }
 
     async def test_initialize_advertises_morgenmcp_version(self):
-        """serverInfo on initialize carries morgenmcp's __version__, not FastMCP's."""
+        """serverInfo on initialize carries morgenmcp's __version__, not FastMCP's.
+
+        Uses mode="legacy": the FastMCP 4 default ("auto") negotiates the
+        sessionless protocol, which performs no initialize handshake. Legacy
+        covers the stdio clients on older protocol versions — the path this
+        assertion is about.
+        """
         from morgenmcp import __version__
 
-        async with Client(mcp) as client:
+        async with Client(mcp, mode="legacy") as client:
             assert client.initialize_result is not None
-            assert client.initialize_result.serverInfo.name == "morgen-calendar"
-            assert client.initialize_result.serverInfo.version == __version__
+            assert client.initialize_result.server_info.name == "morgen-calendar"
+            assert client.initialize_result.server_info.version == __version__
 
     async def test_server_resource_published(self):
         """morgen://server is registered and exposes the hash contract."""
@@ -460,7 +466,7 @@ class TestMCPServer:
             templates = await client.list_resource_templates()
 
             static_uris = {str(r.uri) for r in resources}
-            template_uris = {t.uriTemplate for t in templates}
+            template_uris = {t.uri_template for t in templates}
 
             assert static_uris == {
                 "morgen://server",
@@ -509,7 +515,7 @@ class TestTypedOutputSchemas:
         async with Client(mcp) as client:
             tools = await client.list_tools()
             by_name = {t.name: t for t in tools}
-            schema = by_name["morgen_list_accounts"].outputSchema
+            schema = by_name["morgen_list_accounts"].output_schema
             assert schema is not None
             assert set(schema.get("properties", {})) >= {"accounts", "count"}
             # A shaped schema constrains keys; the permissive fallback would be
@@ -748,7 +754,7 @@ class TestTypedOutputSchemas:
         """Both task tools advertise the JSON types Morgen actually sends."""
         async with Client(mcp) as client:
             by_name = {t.name: t for t in await client.list_tools()}
-        schema = by_name[tool].outputSchema
+        schema = by_name[tool].output_schema
         assert schema is not None
         props = schema["properties"]
         item = props["tasks"]["items"] if tool == "morgen_list_tasks" else props["task"]
@@ -804,7 +810,7 @@ class TestTypedOutputSchemas:
         """relatedTo.*.relation advertises a bool-valued object, not a string (#35)."""
         async with Client(mcp) as client:
             by_name = {t.name: t for t in await client.list_tools()}
-        schema = by_name[tool].outputSchema
+        schema = by_name[tool].output_schema
         assert schema is not None
         props = schema["properties"]
         item = self._deref_schema(
@@ -1062,17 +1068,17 @@ class TestTypedOutputSchemas:
         async with Client(mcp) as client:
             by_name = {t.name: t for t in await client.list_tools()}
         for tool in ("morgen_delete_event", "morgen_batch_delete_events"):
-            schema = by_name[tool].outputSchema
+            schema = by_name[tool].output_schema
             assert schema is not None
             assert "alreadyGone" in schema["properties"]
             assert "alreadyGone" not in schema.get("required", [])
         # Only the event-delete tools can emit it; others must not advertise it.
         for tool in ("morgen_update_event", "morgen_batch_delete_tasks"):
-            schema = by_name[tool].outputSchema
+            schema = by_name[tool].output_schema
             assert schema is not None
             assert "alreadyGone" not in schema["properties"]
         for tool in ("morgen_update_event", "morgen_delete_event"):
-            schema = by_name[tool].outputSchema
+            schema = by_name[tool].output_schema
             assert schema is not None
             assert set(schema["properties"]["seriesUpdateMode"]["enum"]) == {
                 "single",

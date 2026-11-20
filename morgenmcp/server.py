@@ -264,8 +264,8 @@ mcp.tool(
     timeout=30.0,
     annotations=ToolAnnotations(
         title="List Accounts",
-        readOnlyHint=True,
-        openWorldHint=True,
+        read_only_hint=True,
+        open_world_hint=True,
     ),
 )(list_accounts)
 mcp.tool(
@@ -274,8 +274,8 @@ mcp.tool(
     timeout=30.0,
     annotations=ToolAnnotations(
         title="List Calendars",
-        readOnlyHint=True,
-        openWorldHint=True,
+        read_only_hint=True,
+        open_world_hint=True,
     ),
 )(list_calendars)
 mcp.tool(
@@ -284,10 +284,10 @@ mcp.tool(
     timeout=30.0,
     annotations=ToolAnnotations(
         title="Update Calendar Metadata",
-        readOnlyHint=False,
-        destructiveHint=False,
-        idempotentHint=True,
-        openWorldHint=True,
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=True,
+        open_world_hint=True,
     ),
 )(update_calendar_metadata)
 mcp.tool(
@@ -296,8 +296,8 @@ mcp.tool(
     timeout=120.0,
     annotations=ToolAnnotations(
         title="List Events",
-        readOnlyHint=True,
-        openWorldHint=True,
+        read_only_hint=True,
+        open_world_hint=True,
     ),
 )(list_events)
 mcp.tool(
@@ -306,9 +306,9 @@ mcp.tool(
     timeout=30.0,
     annotations=ToolAnnotations(
         title="Create Event",
-        readOnlyHint=False,
-        destructiveHint=False,
-        openWorldHint=True,
+        read_only_hint=False,
+        destructive_hint=False,
+        open_world_hint=True,
     ),
 )(create_event)
 mcp.tool(
@@ -317,10 +317,10 @@ mcp.tool(
     timeout=60.0,
     annotations=ToolAnnotations(
         title="Update Event",
-        readOnlyHint=False,
-        destructiveHint=False,
-        idempotentHint=True,
-        openWorldHint=True,
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=True,
+        open_world_hint=True,
     ),
 )(update_event)
 mcp.tool(
@@ -329,9 +329,9 @@ mcp.tool(
     timeout=30.0,
     annotations=ToolAnnotations(
         title="Delete Event",
-        readOnlyHint=False,
-        destructiveHint=True,
-        openWorldHint=True,
+        read_only_hint=False,
+        destructive_hint=True,
+        open_world_hint=True,
     ),
 )(delete_event)
 mcp.tool(
@@ -340,9 +340,9 @@ mcp.tool(
     timeout=120.0,
     annotations=ToolAnnotations(
         title="Batch Delete Events",
-        readOnlyHint=False,
-        destructiveHint=True,
-        openWorldHint=True,
+        read_only_hint=False,
+        destructive_hint=True,
+        open_world_hint=True,
     ),
 )(batch_delete_events)
 mcp.tool(
@@ -351,10 +351,10 @@ mcp.tool(
     timeout=120.0,
     annotations=ToolAnnotations(
         title="Batch Update Events",
-        readOnlyHint=False,
-        destructiveHint=False,
-        idempotentHint=False,
-        openWorldHint=True,
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=False,
+        open_world_hint=True,
     ),
 )(batch_update_events)
 
@@ -365,9 +365,9 @@ mcp.tool(
     timeout=30.0,
     annotations=ToolAnnotations(
         title="List Task Lists",
-        readOnlyHint=True,
-        idempotentHint=True,
-        openWorldHint=True,
+        read_only_hint=True,
+        idempotent_hint=True,
+        open_world_hint=True,
     ),
 )(list_task_lists)
 mcp.tool(
@@ -376,8 +376,8 @@ mcp.tool(
     timeout=30.0,
     annotations=ToolAnnotations(
         title="List Tasks",
-        readOnlyHint=True,
-        openWorldHint=True,
+        read_only_hint=True,
+        open_world_hint=True,
     ),
 )(list_tasks)
 mcp.tool(
@@ -386,8 +386,8 @@ mcp.tool(
     timeout=30.0,
     annotations=ToolAnnotations(
         title="Get Task",
-        readOnlyHint=True,
-        openWorldHint=True,
+        read_only_hint=True,
+        open_world_hint=True,
     ),
 )(get_task)
 mcp.tool(
@@ -396,9 +396,9 @@ mcp.tool(
     timeout=30.0,
     annotations=ToolAnnotations(
         title="Create Task",
-        readOnlyHint=False,
-        destructiveHint=False,
-        openWorldHint=True,
+        read_only_hint=False,
+        destructive_hint=False,
+        open_world_hint=True,
     ),
 )(create_task)
 mcp.tool(
@@ -407,10 +407,10 @@ mcp.tool(
     timeout=30.0,
     annotations=ToolAnnotations(
         title="Update Task",
-        readOnlyHint=False,
-        destructiveHint=False,
-        idempotentHint=True,
-        openWorldHint=True,
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=True,
+        open_world_hint=True,
     ),
 )(update_task)
 mcp.tool(
@@ -419,10 +419,10 @@ mcp.tool(
     timeout=30.0,
     annotations=ToolAnnotations(
         title="Move Task",
-        readOnlyHint=False,
-        destructiveHint=False,
-        idempotentHint=True,
-        openWorldHint=True,
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=True,
+        open_world_hint=True,
     ),
 )(move_task)
 mcp.tool(
@@ -431,10 +431,10 @@ mcp.tool(
     timeout=30.0,
     annotations=ToolAnnotations(
         title="Complete Task",
-        readOnlyHint=False,
-        destructiveHint=False,
-        idempotentHint=True,
-        openWorldHint=True,
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=True,
+        open_world_hint=True,
     ),
 )(complete_task)
 mcp.tool(
@@ -443,10 +443,10 @@ mcp.tool(
     timeout=30.0,
     annotations=ToolAnnotations(
         title="Reopen Task",
-        readOnlyHint=False,
-        destructiveHint=False,
-        idempotentHint=True,
-        openWorldHint=True,
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=True,
+        open_world_hint=True,
     ),
 )(reopen_task)
 mcp.tool(
@@ -455,9 +455,9 @@ mcp.tool(
     timeout=30.0,
     annotations=ToolAnnotations(
         title="Delete Task",
-        readOnlyHint=False,
-        destructiveHint=True,
-        openWorldHint=True,
+        read_only_hint=False,
+        destructive_hint=True,
+        open_world_hint=True,
     ),
 )(delete_task)
 mcp.tool(
@@ -466,9 +466,9 @@ mcp.tool(
     timeout=120.0,
     annotations=ToolAnnotations(
         title="Batch Delete Tasks",
-        readOnlyHint=False,
-        destructiveHint=True,
-        openWorldHint=True,
+        read_only_hint=False,
+        destructive_hint=True,
+        open_world_hint=True,
     ),
 )(batch_delete_tasks)
 
@@ -479,8 +479,8 @@ mcp.tool(
     timeout=30.0,
     annotations=ToolAnnotations(
         title="List Tags",
-        readOnlyHint=True,
-        openWorldHint=True,
+        read_only_hint=True,
+        open_world_hint=True,
     ),
 )(list_tags)
 mcp.tool(
@@ -489,9 +489,9 @@ mcp.tool(
     timeout=30.0,
     annotations=ToolAnnotations(
         title="Get Tag",
-        readOnlyHint=True,
-        idempotentHint=True,
-        openWorldHint=True,
+        read_only_hint=True,
+        idempotent_hint=True,
+        open_world_hint=True,
     ),
 )(get_tag)
 mcp.tool(
@@ -500,9 +500,9 @@ mcp.tool(
     timeout=30.0,
     annotations=ToolAnnotations(
         title="Create Tag",
-        readOnlyHint=False,
-        destructiveHint=False,
-        openWorldHint=True,
+        read_only_hint=False,
+        destructive_hint=False,
+        open_world_hint=True,
     ),
 )(create_tag)
 mcp.tool(
@@ -511,10 +511,10 @@ mcp.tool(
     timeout=30.0,
     annotations=ToolAnnotations(
         title="Update Tag",
-        readOnlyHint=False,
-        destructiveHint=False,
-        idempotentHint=True,
-        openWorldHint=True,
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=True,
+        open_world_hint=True,
     ),
 )(update_tag)
 mcp.tool(
@@ -523,9 +523,9 @@ mcp.tool(
     timeout=30.0,
     annotations=ToolAnnotations(
         title="Delete Tag",
-        readOnlyHint=False,
-        destructiveHint=True,
-        openWorldHint=True,
+        read_only_hint=False,
+        destructive_hint=True,
+        open_world_hint=True,
     ),
 )(delete_tag)
 
