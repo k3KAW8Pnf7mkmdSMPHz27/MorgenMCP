@@ -264,8 +264,8 @@ mcp.tool(
     timeout=30.0,
     annotations=ToolAnnotations(
         title="List Accounts",
-        readOnlyHint=True,
-        openWorldHint=True,
+        read_only_hint=True,
+        open_world_hint=True,
     ),
 )(list_accounts)
 mcp.tool(
@@ -274,8 +274,8 @@ mcp.tool(
     timeout=30.0,
     annotations=ToolAnnotations(
         title="List Calendars",
-        readOnlyHint=True,
-        openWorldHint=True,
+        read_only_hint=True,
+        open_world_hint=True,
     ),
 )(list_calendars)
 mcp.tool(
@@ -284,10 +284,10 @@ mcp.tool(
     timeout=30.0,
     annotations=ToolAnnotations(
         title="Update Calendar Metadata",
-        readOnlyHint=False,
-        destructiveHint=False,
-        idempotentHint=True,
-        openWorldHint=True,
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=True,
+        open_world_hint=True,
     ),
 )(update_calendar_metadata)
 mcp.tool(
@@ -296,8 +296,8 @@ mcp.tool(
     timeout=120.0,
     annotations=ToolAnnotations(
         title="List Events",
-        readOnlyHint=True,
-        openWorldHint=True,
+        read_only_hint=True,
+        open_world_hint=True,
     ),
 )(list_events)
 mcp.tool(
@@ -306,9 +306,9 @@ mcp.tool(
     timeout=30.0,
     annotations=ToolAnnotations(
         title="Create Event",
-        readOnlyHint=False,
-        destructiveHint=False,
-        openWorldHint=True,
+        read_only_hint=False,
+        destructive_hint=False,
+        open_world_hint=True,
     ),
 )(create_event)
 mcp.tool(
@@ -317,10 +317,10 @@ mcp.tool(
     timeout=60.0,
     annotations=ToolAnnotations(
         title="Update Event",
-        readOnlyHint=False,
-        destructiveHint=False,
-        idempotentHint=True,
-        openWorldHint=True,
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=True,
+        open_world_hint=True,
     ),
 )(update_event)
 mcp.tool(
@@ -329,9 +329,9 @@ mcp.tool(
     timeout=30.0,
     annotations=ToolAnnotations(
         title="Delete Event",
-        readOnlyHint=False,
-        destructiveHint=True,
-        openWorldHint=True,
+        read_only_hint=False,
+        destructive_hint=True,
+        open_world_hint=True,
     ),
 )(delete_event)
 mcp.tool(
@@ -340,9 +340,9 @@ mcp.tool(
     timeout=120.0,
     annotations=ToolAnnotations(
         title="Batch Delete Events",
-        readOnlyHint=False,
-        destructiveHint=True,
-        openWorldHint=True,
+        read_only_hint=False,
+        destructive_hint=True,
+        open_world_hint=True,
     ),
 )(batch_delete_events)
 mcp.tool(
@@ -351,10 +351,10 @@ mcp.tool(
     timeout=120.0,
     annotations=ToolAnnotations(
         title="Batch Update Events",
-        readOnlyHint=False,
-        destructiveHint=False,
-        idempotentHint=False,
-        openWorldHint=True,
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=False,
+        open_world_hint=True,
     ),
 )(batch_update_events)
 
@@ -365,9 +365,9 @@ mcp.tool(
     timeout=30.0,
     annotations=ToolAnnotations(
         title="List Task Lists",
-        readOnlyHint=True,
-        idempotentHint=True,
-        openWorldHint=True,
+        read_only_hint=True,
+        idempotent_hint=True,
+        open_world_hint=True,
     ),
 )(list_task_lists)
 mcp.tool(
@@ -376,8 +376,8 @@ mcp.tool(
     timeout=30.0,
     annotations=ToolAnnotations(
         title="List Tasks",
-        readOnlyHint=True,
-        openWorldHint=True,
+        read_only_hint=True,
+        open_world_hint=True,
     ),
 )(list_tasks)
 mcp.tool(
@@ -386,8 +386,8 @@ mcp.tool(
     timeout=30.0,
     annotations=ToolAnnotations(
         title="Get Task",
-        readOnlyHint=True,
-        openWorldHint=True,
+        read_only_hint=True,
+        open_world_hint=True,
     ),
 )(get_task)
 mcp.tool(
@@ -396,9 +396,9 @@ mcp.tool(
     timeout=30.0,
     annotations=ToolAnnotations(
         title="Create Task",
-        readOnlyHint=False,
-        destructiveHint=False,
-        openWorldHint=True,
+        read_only_hint=False,
+        destructive_hint=False,
+        open_world_hint=True,
     ),
 )(create_task)
 mcp.tool(
@@ -407,10 +407,10 @@ mcp.tool(
     timeout=30.0,
     annotations=ToolAnnotations(
         title="Update Task",
-        readOnlyHint=False,
-        destructiveHint=False,
-        idempotentHint=True,
-        openWorldHint=True,
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=True,
+        open_world_hint=True,
     ),
 )(update_task)
 mcp.tool(
@@ -419,10 +419,10 @@ mcp.tool(
     timeout=30.0,
     annotations=ToolAnnotations(
         title="Move Task",
-        readOnlyHint=False,
-        destructiveHint=False,
-        idempotentHint=True,
-        openWorldHint=True,
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=True,
+        open_world_hint=True,
     ),
 )(move_task)
 mcp.tool(
@@ -431,10 +431,10 @@ mcp.tool(
     timeout=30.0,
     annotations=ToolAnnotations(
         title="Complete Task",
-        readOnlyHint=False,
-        destructiveHint=False,
-        idempotentHint=True,
-        openWorldHint=True,
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=True,
+        open_world_hint=True,
     ),
 )(complete_task)
 mcp.tool(
@@ -443,10 +443,10 @@ mcp.tool(
     timeout=30.0,
     annotations=ToolAnnotations(
         title="Reopen Task",
-        readOnlyHint=False,
-        destructiveHint=False,
-        idempotentHint=True,
-        openWorldHint=True,
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=True,
+        open_world_hint=True,
     ),
 )(reopen_task)
 mcp.tool(
@@ -455,9 +455,9 @@ mcp.tool(
     timeout=30.0,
     annotations=ToolAnnotations(
         title="Delete Task",
-        readOnlyHint=False,
-        destructiveHint=True,
-        openWorldHint=True,
+        read_only_hint=False,
+        destructive_hint=True,
+        open_world_hint=True,
     ),
 )(delete_task)
 mcp.tool(
@@ -466,9 +466,9 @@ mcp.tool(
     timeout=120.0,
     annotations=ToolAnnotations(
         title="Batch Delete Tasks",
-        readOnlyHint=False,
-        destructiveHint=True,
-        openWorldHint=True,
+        read_only_hint=False,
+        destructive_hint=True,
+        open_world_hint=True,
     ),
 )(batch_delete_tasks)
 
@@ -479,8 +479,8 @@ mcp.tool(
     timeout=30.0,
     annotations=ToolAnnotations(
         title="List Tags",
-        readOnlyHint=True,
-        openWorldHint=True,
+        read_only_hint=True,
+        open_world_hint=True,
     ),
 )(list_tags)
 mcp.tool(
@@ -489,9 +489,9 @@ mcp.tool(
     timeout=30.0,
     annotations=ToolAnnotations(
         title="Get Tag",
-        readOnlyHint=True,
-        idempotentHint=True,
-        openWorldHint=True,
+        read_only_hint=True,
+        idempotent_hint=True,
+        open_world_hint=True,
     ),
 )(get_tag)
 mcp.tool(
@@ -500,9 +500,9 @@ mcp.tool(
     timeout=30.0,
     annotations=ToolAnnotations(
         title="Create Tag",
-        readOnlyHint=False,
-        destructiveHint=False,
-        openWorldHint=True,
+        read_only_hint=False,
+        destructive_hint=False,
+        open_world_hint=True,
     ),
 )(create_tag)
 mcp.tool(
@@ -511,10 +511,10 @@ mcp.tool(
     timeout=30.0,
     annotations=ToolAnnotations(
         title="Update Tag",
-        readOnlyHint=False,
-        destructiveHint=False,
-        idempotentHint=True,
-        openWorldHint=True,
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=True,
+        open_world_hint=True,
     ),
 )(update_tag)
 mcp.tool(
@@ -523,87 +523,77 @@ mcp.tool(
     timeout=30.0,
     annotations=ToolAnnotations(
         title="Delete Tag",
-        readOnlyHint=False,
-        destructiveHint=True,
-        openWorldHint=True,
+        read_only_hint=False,
+        destructive_hint=True,
+        open_world_hint=True,
     ),
 )(delete_tag)
 
 
-# MCP resources — read-only data clients can fetch without invoking tools
-_RESOURCE_ANNOTATIONS = {"readOnlyHint": True, "idempotentHint": True}
+# MCP resources — read-only data clients can fetch without invoking tools.
+# No annotations are registered: the MCP resource annotation schema defines
+# only audience/priority/lastModified, so hint-style metadata (readOnlyHint,
+# idempotentHint) is dropped by the SDK at serialization time.
 
 mcp.resource(
     "morgen://server",
     mime_type="application/json",
     tags={"server", "read"},
-    annotations=_RESOURCE_ANNOTATIONS,
 )(res_server)
 mcp.resource(
     "morgen://accounts",
     mime_type="application/json",
     tags={"accounts", "read"},
-    annotations=_RESOURCE_ANNOTATIONS,
 )(res_accounts)
 mcp.resource(
     "morgen://account/{account_id}",
     mime_type="application/json",
     tags={"accounts", "read"},
-    annotations=_RESOURCE_ANNOTATIONS,
 )(res_account)
 mcp.resource(
     "morgen://calendars",
     mime_type="application/json",
     tags={"calendars", "read"},
-    annotations=_RESOURCE_ANNOTATIONS,
 )(res_calendars)
 mcp.resource(
     "morgen://calendar/{calendar_id}",
     mime_type="application/json",
     tags={"calendars", "read"},
-    annotations=_RESOURCE_ANNOTATIONS,
 )(res_calendar)
 mcp.resource(
     "morgen://calendar/{calendar_id}/events",
     mime_type="application/json",
     tags={"calendars", "events", "read"},
-    annotations=_RESOURCE_ANNOTATIONS,
 )(res_calendar_events)
 mcp.resource(
     "morgen://events/today",
     mime_type="application/json",
     tags={"events", "read"},
-    annotations=_RESOURCE_ANNOTATIONS,
 )(res_events_today)
 mcp.resource(
     "morgen://events/this-week",
     mime_type="application/json",
     tags={"events", "read"},
-    annotations=_RESOURCE_ANNOTATIONS,
 )(res_events_this_week)
 mcp.resource(
     "morgen://events/upcoming",
     mime_type="application/json",
     tags={"events", "read"},
-    annotations=_RESOURCE_ANNOTATIONS,
 )(res_events_upcoming)
 mcp.resource(
     "morgen://tasks",
     mime_type="application/json",
     tags={"tasks", "read"},
-    annotations=_RESOURCE_ANNOTATIONS,
 )(res_tasks)
 mcp.resource(
     "morgen://tasks/today",
     mime_type="application/json",
     tags={"tasks", "read"},
-    annotations=_RESOURCE_ANNOTATIONS,
 )(res_tasks_today)
 mcp.resource(
     "morgen://tags",
     mime_type="application/json",
     tags={"tags", "read"},
-    annotations=_RESOURCE_ANNOTATIONS,
 )(res_tags)
 
 

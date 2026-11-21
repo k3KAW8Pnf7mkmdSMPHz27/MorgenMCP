@@ -12,7 +12,7 @@ async def test_list_events_schema_documents_timezone_window_bounds():
         tools = await client.list_tools()
 
     tool = next(tool for tool in tools if tool.name == "morgen_list_events")
-    props = tool.inputSchema["properties"]
+    props = tool.input_schema["properties"]
     for bound in ("start", "end"):
         description = props[bound]["description"]
         assert "UTC" in description
