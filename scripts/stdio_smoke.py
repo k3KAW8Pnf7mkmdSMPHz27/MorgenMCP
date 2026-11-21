@@ -70,22 +70,50 @@ async def _read_until_id(
             return msg
 
 
-async def _reap(proc: asyncio.subprocess.Process) -> None:
-    """Close stdin and require a timely clean exit; kill+fail otherwise."""
+async def _reap(proc: asyncio.subprocess.Process, *, strict: bool) -> None:
+    """Close stdin, exit promptly (escalating to kill), drain stdout, report.
+
+    stdout must be drained before the loop closes: the subprocess
+    transport's pipe feed pauses once the stream buffer limit is exceeded,
+    so ``wait()`` can hang forever on a child that wrote a large line
+    (PR #57 review finding). Grace is short and a lingering child is
+    KILLED rather than poll-waited — measured locally, draining a
+    still-alive writer took ~75 s, while kill+drain is a few seconds.
+
+    ``strict`` must be False when reap runs while another exception is in
+    flight: teardown failures then stay silent so the original error
+    survives. sys.exc_info() is deliberately NOT used — a bare finally
+    does not establish handled-exception state, so the caller must say.
+    """
     try:
         if proc.stdin is not None:
             proc.stdin.close()
     except Exception:
         pass
+
+    rc: int | None = None
+    teardown_error: Exception | None = None
     try:
-        rc = await asyncio.wait_for(proc.wait(), timeout=15)
-    except TimeoutError:
-        proc.kill()
-        await proc.wait()
-        raise AssertionError(
-            "server did not shut down cleanly on stdin close"
-        ) from None
-    assert rc == 0, f"exit code {rc}"
+        try:
+            rc = await asyncio.wait_for(proc.wait(), timeout=10)
+        except TimeoutError:
+            proc.kill()
+            rc = await asyncio.wait_for(proc.wait(), timeout=10)
+        if proc.stdout is not None:
+            # Child is gone; drain buffered stdout to EOF (bounded).
+            while True:
+                chunk = await asyncio.wait_for(proc.stdout.read(65536), timeout=10)
+                if not chunk:
+                    break
+    except (TimeoutError, OSError) as exc:  # teardown itself wedged
+        teardown_error = exc
+
+    if not strict:
+        return
+    if teardown_error is not None:
+        raise AssertionError(f"server did not shut down cleanly: {teardown_error}")
+    if rc != 0:
+        raise AssertionError(f"exit code {rc}")
 
 
 async def _raw_legacy_wire_check(exe: str) -> None:
@@ -97,6 +125,7 @@ async def _raw_legacy_wire_check(exe: str) -> None:
         stderr=asyncio.subprocess.DEVNULL,
         env=_server_env(),
     )
+    failed = True
     try:
         deadline = time.monotonic() + _READ_TIMEOUT
 
@@ -129,8 +158,9 @@ async def _raw_legacy_wire_check(exe: str) -> None:
         wire = json.dumps(tools)
         for key in ("inputSchema", "outputSchema", "readOnlyHint"):
             assert f'"{key}"' in wire, f"camelCase wire key {key!r} missing"
+        failed = False
     finally:
-        await _reap(proc)
+        await _reap(proc, strict=not failed)
 
 
 async def _probe_mode(exe: str, mode: str) -> None:
@@ -157,12 +187,23 @@ async def main() -> None:
     exe = os.environ.get("SMOKE_SERVER")
     if not exe:
         sys.exit("SMOKE_SERVER must point at an installed morgenmcp launcher")
-    for probe in (
-        _probe_mode(exe, "auto"),
-        _probe_mode(exe, "legacy"),
-        _raw_legacy_wire_check(exe),
-    ):
-        await asyncio.wait_for(probe, timeout=_PHASE_TIMEOUT)
+    # Callables, not coroutine objects: eagerly created coroutines emit
+    # "never awaited" RuntimeWarnings for the probes a failure skips.
+    phases = (
+        ("auto client", lambda: _probe_mode(exe, "auto")),
+        ("legacy client", lambda: _probe_mode(exe, "legacy")),
+        ("raw legacy wire", lambda: _raw_legacy_wire_check(exe)),
+    )
+    for name, probe in phases:
+        try:
+            await asyncio.wait_for(probe(), timeout=_PHASE_TIMEOUT)
+        except TimeoutError:
+            raise AssertionError(f"{name} phase timed out") from None
+        except AssertionError:
+            raise
+        except Exception as exc:
+            # Name the failing phase in CI output instead of a raw traceback.
+            raise AssertionError(f"{name} phase failed: {exc!r}") from exc
     print(
         "stdio smoke OK: sessionless path negotiated, legacy handshake + "
         "camelCase wire keys, deadline-bounded reads, clean shutdown"
