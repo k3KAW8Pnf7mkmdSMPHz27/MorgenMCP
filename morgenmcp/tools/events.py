@@ -541,27 +541,26 @@ async def list_events(
     # log delivery is per-request opt-in on the modern protocol, so a caller
     # that did not stamp _meta.logLevel would otherwise see a complete-looking
     # result with a whole calendar silently missing. Virtual IDs only.
-    degradation: dict[str, Any] = {}
-    if query.is_partial:
-        degradation["partial"] = True
-        degradation["failed_accounts"] = [
-            register_id(acc_id) for acc_id, _ in query.account_failures
-        ]
-
     if compact:
         effective_display_tz = (
             display_timezone if display_timezone is not None else time_zone
         )
         display_tz = _resolve_display_tz(effective_display_tz)
-        return ListEventsResult(
-            events=[_format_compact_event(event, display_tz) for event in all_events],
-            count=len(all_events),
-            **degradation,
-        )
+        formatted: list[EventItem] | list[str] = [
+            _format_compact_event(event, display_tz) for event in all_events
+        ]
+    else:
+        formatted = [_format_full_event(event) for event in all_events]
+
     return ListEventsResult(
-        events=[_format_full_event(event) for event in all_events],
+        events=formatted,
         count=len(all_events),
-        **degradation,
+        partial=True if query.is_partial else MISSING,
+        failed_accounts=(
+            [register_id(acc_id) for acc_id, _ in query.account_failures]
+            if query.is_partial
+            else MISSING
+        ),
     )
 
 
