@@ -135,7 +135,7 @@ Virtual IDs are **deterministic** (`MD5(real_id)`) and **persisted to disk** via
 ### Environment
 
 - Python `>= 3.12` (set in `pyproject.toml`)
-- `fastmcp>=3.4,<3.5` — pinned to 3.4.x patch range
+- `fastmcp>=4,<5` — FastMCP 4.x (built on MCP Python SDK v2). Tests run with `FASTMCP_MCP_CAMELCASE_COMPAT=false` (see `tests/conftest.py`): read protocol model fields in snake_case (`input_schema`, `is_error`), never camelCase — the compat shims disappear in FastMCP 5
 
 ## Versioning & Release
 
@@ -172,7 +172,7 @@ When spawning Explore agents, **always include this instruction in the prompt**:
 | **FastMCP** | `docs/fastmcp/docs/` | Server framework: tools, context, auth, testing, deployment |
 
 - **Morgen docs submodule**: pinned at `e2fb838` (docs repo `main`)
-- **FastMCP docs submodule**: pinned at `1eedd1f6` (`v3.4.3`, matching the `fastmcp>=3.4,<3.5` pin); cloned `shallow = true`, so it carries no tags and `git describe` will fail
+- **FastMCP docs submodule**: pinned at `db5f1e50` (`v4.2.2`, matching the `fastmcp>=4,<5` pin); cloned `shallow = true`, so `git describe` may fail — fetch the tag explicitly before checkout
 
 **These are git submodules and are NOT populated by a fresh clone.** Nothing
 updates them automatically — there is no hook that does this. Check and

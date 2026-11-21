@@ -537,6 +537,17 @@ async def list_events(
 
     all_events = query.events
 
+    # Degraded listings carry the fact in the payload, not only in warnings:
+    # log delivery is per-request opt-in on the modern protocol, so a caller
+    # that did not stamp _meta.logLevel would otherwise see a complete-looking
+    # result with a whole calendar silently missing. Virtual IDs only.
+    degradation: dict[str, Any] = {}
+    if query.is_partial:
+        degradation["partial"] = True
+        degradation["failed_accounts"] = [
+            register_id(acc_id) for acc_id, _ in query.account_failures
+        ]
+
     if compact:
         effective_display_tz = (
             display_timezone if display_timezone is not None else time_zone
@@ -545,10 +556,12 @@ async def list_events(
         return ListEventsResult(
             events=[_format_compact_event(event, display_tz) for event in all_events],
             count=len(all_events),
+            **degradation,
         )
     return ListEventsResult(
         events=[_format_full_event(event) for event in all_events],
         count=len(all_events),
+        **degradation,
     )
 
 

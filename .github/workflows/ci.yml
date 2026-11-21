@@ -66,3 +66,10 @@ jobs:
             mcpb pack build/desktop build/development.mcpb
       - name: Check isolated bundle launcher without API calls
         run: uv run --directory build/desktop server.py --help
+      - name: Live stdio smoke against the wheel (no API calls)
+        run: |
+          set -euo pipefail
+          uv venv .smoke-venv
+          uv pip install --python .smoke-venv/bin/python dist/*.whl
+          SMOKE_SERVER="$PWD/.smoke-venv/bin/morgenmcp" uv run python scripts/stdio_smoke.py
+          rm -rf .smoke-venv

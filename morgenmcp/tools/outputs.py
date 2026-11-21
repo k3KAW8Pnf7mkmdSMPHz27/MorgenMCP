@@ -186,10 +186,18 @@ class EventItem(BaseModel):
 
 class ListEventsResult(BaseModel):
     """``list_events`` output. ``events`` is a list of ``EventItem`` in full
-    mode, or a list of formatted strings when ``compact=True``."""
+    mode, or a list of formatted strings when ``compact=True``.
+
+    ``partial``/``failed_accounts`` are present only when at least one account
+    could not be fetched: the 2026-07-28 protocol gates log delivery per
+    request, so a caller that never opted into logs must still be able to see
+    that the listing is incomplete. ``failed_accounts`` carries virtual IDs.
+    """
 
     events: list[EventItem] | list[str]
     count: int
+    partial: bool | MISSING = MISSING
+    failed_accounts: list[str] | MISSING = MISSING
 
 
 class CreatedEventRef(TypedDict):
