@@ -53,6 +53,31 @@ def resolve_virtual_id(virtual_id: str, *, parameter: str, not_found: str) -> st
         raise ToolError(not_found) from e
 
 
+def resolve_virtual_ids(
+    virtual_ids: Iterable[str],
+    *,
+    parameter: str,
+    not_found: Callable[[str], str],
+) -> list[str]:
+    """Resolve several virtual IDs, reporting the first bad one by its own ID."""
+    return [
+        resolve_virtual_id(vid, parameter=parameter, not_found=not_found(vid))
+        for vid in virtual_ids
+    ]
+
+
+def calendar_not_found(virtual_id: str) -> str:
+    return f"Calendar with ID '{virtual_id}' not found. Call list_calendars first."
+
+
+def tag_not_found(virtual_id: str) -> str:
+    return f"Tag with ID '{virtual_id}' not found"
+
+
+def account_not_found(virtual_id: str) -> str:
+    return f"Account with ID '{virtual_id}' not found. Call list_accounts first."
+
+
 def is_not_found(exc: BaseException) -> bool:
     """True when ``exc`` is an upstream HTTP 404 from the Morgen API.
 

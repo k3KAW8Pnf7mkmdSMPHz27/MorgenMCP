@@ -19,12 +19,7 @@ from morgenmcp.models import (
     TaskReopenRequest,
     TaskUpdateRequest,
 )
-from morgenmcp.tools.id_registry import (
-    IDNotFoundError,
-    register_id,
-    resolve_id,
-    resolve_ids,
-)
+from morgenmcp.tools.id_registry import IDNotFoundError, register_id, resolve_id
 from morgenmcp.tools.outputs import (
     BatchDeleteResult,
     CreatedTaskRef,
@@ -40,9 +35,13 @@ from morgenmcp.tools.outputs import (
     fetch_coverage,
 )
 from morgenmcp.tools.utils import (
+    account_not_found,
     gather_bounded,
     handle_tool_errors,
     omit_none,
+    resolve_virtual_id,
+    resolve_virtual_ids,
+    tag_not_found,
 )
 from morgenmcp.validators import (
     validate_duration,
@@ -89,12 +88,28 @@ def _format_task(task: Task) -> TaskItem:
 
 def _resolve_task_id(task_id: str, param_name: str = "task_id") -> str:
     """Validate and resolve a virtual task ID to its real Morgen ID."""
-    if not task_id or not task_id.strip():
-        raise ToolError(f"{param_name} cannot be empty")
+    return resolve_virtual_id(
+        task_id,
+        parameter=param_name,
+        not_found=f"Task with ID '{task_id}' not found",
+    )
+
+
+def _resolve_task_list_id(task_list_id: str) -> str:
+    """Resolve a virtual task-list ID, passing unregistered values through.
+
+    Task lists are not always registered (e.g. the literal ``"default"``), so an
+    unknown ID is forwarded as-is. Only ``IDNotFoundError`` is swallowed; any
+    other failure is a real bug and must surface.
+    """
     try:
-        return resolve_id(task_id)
-    except IDNotFoundError as e:
-        raise ToolError(f"Task with ID '{task_id}' not found") from e
+        return resolve_id(task_list_id)
+    except IDNotFoundError:
+        return task_list_id
+
+
+def _resolve_tag_ids(tag_ids: list[str]) -> list[str]:
+    return resolve_virtual_ids(tag_ids, parameter="tag_id", not_found=tag_not_found)
 
 
 def _build_related_to(parent_task_id: str | None) -> dict[str, TaskRelation] | None:
@@ -118,7 +133,15 @@ async def list_task_lists(
         Task lists, their count, and coverage of the upstream task fetch.
     """
     client = get_client()
-    real_account_id = resolve_id(account_id) if account_id is not None else None
+    real_account_id = (
+        resolve_virtual_id(
+            account_id,
+            parameter="account_id",
+            not_found=account_not_found(account_id),
+        )
+        if account_id is not None
+        else None
+    )
 
     res, fetch_limit = await client.list_tasks_and_spaces()
     tasks = res.tasks
@@ -234,10 +257,7 @@ async def list_tasks(
     tasks = res.tasks
 
     if task_list_id is not None:
-        try:
-            real_task_list_id = resolve_id(task_list_id)
-        except Exception:
-            real_task_list_id = task_list_id
+        real_task_list_id = _resolve_task_list_id(task_list_id)
 
         tasks = [
             t
@@ -325,13 +345,10 @@ async def create_task(
     if progress is not None:
         validate_progress(progress)
 
-    real_tags = resolve_ids(tag_ids) if tag_ids else None
-    real_task_list_id = None
-    if task_list_id is not None:
-        try:
-            real_task_list_id = resolve_id(task_list_id)
-        except Exception:
-            real_task_list_id = task_list_id
+    real_tags = _resolve_tag_ids(tag_ids) if tag_ids else None
+    real_task_list_id = (
+        _resolve_task_list_id(task_list_id) if task_list_id is not None else None
+    )
 
     request = TaskCreateRequest(
         title=title,
@@ -387,6 +404,8 @@ async def update_task(
     Returns:
         Dictionary indicating success.
     """
+    real_id = _resolve_task_id(task_id)
+
     if due is not None:
         validate_local_datetime(due, "due")
     if time_zone is not None:
@@ -398,14 +417,10 @@ async def update_task(
     if progress is not None:
         validate_progress(progress)
 
-    real_id = _resolve_task_id(task_id)
-    real_tags = resolve_ids(tag_ids) if tag_ids else None
-    real_task_list_id = None
-    if task_list_id is not None:
-        try:
-            real_task_list_id = resolve_id(task_list_id)
-        except Exception:
-            real_task_list_id = task_list_id
+    real_tags = _resolve_tag_ids(tag_ids) if tag_ids else None
+    real_task_list_id = (
+        _resolve_task_list_id(task_list_id) if task_list_id is not None else None
+    )
 
     request = TaskUpdateRequest(
         id=real_id,
@@ -596,10 +611,11 @@ async def batch_delete_tasks(
 
     for i, result in enumerate(results):
         virtual_id = to_delete[i][0]
-        if isinstance(result, Exception):
+        if isinstance(result, BaseException):
+            error = str(result) or type(result).__name__
             if ctx:
-                await ctx.warning(f"Failed to delete task {virtual_id}: {result}")
-            failed.append({"id": virtual_id, "error": str(result)})
+                await ctx.warning(f"Failed to delete task {virtual_id}: {error}")
+            failed.append({"id": virtual_id, "error": error})
         else:
             deleted.append(virtual_id)
 

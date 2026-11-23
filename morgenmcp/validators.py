@@ -252,6 +252,16 @@ def validate_priority(value: int) -> int:
     return value
 
 
+_GOOGLE_COLOR_IDS = frozenset(str(i) for i in range(1, 12))
+
+
+def validate_google_color_id(value: str) -> str:
+    """Validate a Google Calendar color ID ('1' through '11')."""
+    if value not in _GOOGLE_COLOR_IDS:
+        raise ValidationError("google_color_id must be a string '1' through '11'")
+    return value
+
+
 def validate_progress(value: str) -> str:
     """Validate task progress status string."""
     if value not in _VALID_TASK_PROGRESS:

@@ -7,14 +7,19 @@ from typing import cast
 from fastmcp.exceptions import ToolError
 
 from morgenmcp.client import get_client
-from morgenmcp.tools.id_registry import register_id, resolve_id
+from morgenmcp.tools.id_registry import register_id
 from morgenmcp.tools.id_utils import extract_account_from_calendar
 from morgenmcp.tools.outputs import (
     CalendarItem,
     ListCalendarsResult,
     UpdateCalendarMetadataResult,
 )
-from morgenmcp.tools.utils import filter_none_values, handle_tool_errors
+from morgenmcp.tools.utils import (
+    calendar_not_found,
+    filter_none_values,
+    handle_tool_errors,
+    resolve_virtual_id,
+)
 from morgenmcp.validators import validate_hex_color
 
 
@@ -103,6 +108,12 @@ async def update_calendar_metadata(
     Returns:
         Dictionary indicating success or error.
     """
+    real_calendar_id = resolve_virtual_id(
+        calendar_id,
+        parameter="calendar_id",
+        not_found=calendar_not_found(calendar_id),
+    )
+
     if busy is None and override_color is None and override_name is None:
         raise ToolError(
             "At least one of busy, override_color, or override_name must be provided."
@@ -111,8 +122,6 @@ async def update_calendar_metadata(
     if override_color is not None:
         validate_hex_color(override_color)
 
-    # Resolve virtual calendar ID and extract account ID
-    real_calendar_id = resolve_id(calendar_id)
     real_account_id = extract_account_from_calendar(real_calendar_id)
 
     client = get_client()

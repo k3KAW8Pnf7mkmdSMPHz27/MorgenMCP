@@ -2508,3 +2508,133 @@ class TestFormatFullEventExposesMetadata:
         result = result.model_dump()
         ev_out = result["events"][0]
         assert ev_out["alerts"] == [{"offset": "-PT15M", "action": "display"}]
+
+
+class TestBatchUpdateInputValidation:
+    """batch_update_events rejects bad input like update_event, before the API."""
+
+    @pytest.mark.parametrize(
+        ("bad_fields", "expected"),
+        [
+            ({"google_color_id": "99"}, "google_color_id must be a string"),
+            (
+                {"start": "2023-03-15T14:00:00"},
+                "all four must be provided together",
+            ),
+            (
+                {
+                    "start": "",
+                    "duration": "PT1H",
+                    "time_zone": "Europe/Berlin",
+                    "is_all_day": False,
+                },
+                "cannot be empty",
+            ),
+            (
+                {
+                    "start": "2023-03-15T14:00:00",
+                    "duration": "nope",
+                    "time_zone": "Europe/Berlin",
+                    "is_all_day": False,
+                },
+                "duration",
+            ),
+            (
+                {"alerts": ["-PT15M"], "use_default_alerts": True},
+                "mutually exclusive",
+            ),
+            ({"alerts": ["15 minutes"]}, "alert"),
+            (
+                {"recurrence_rules": [{"frequency": "fortnightly"}]},
+                "frequency",
+            ),
+        ],
+    )
+    async def test_invalid_fields_fail_before_api_without_warning(
+        self, mock_morgen_client, sample_event_id, bad_fields, expected
+    ):
+        virtual_evt = register_id(sample_event_id)
+        ctx = AsyncMock()
+
+        result = await batch_update_events(
+            updates=[{"event_id": virtual_evt, **bad_fields}], ctx=ctx
+        )
+
+        assert result["updated"] == []
+        assert len(result["failed"]) == 1
+        assert result["failed"][0]["id"] == virtual_evt
+        assert expected in result["failed"][0]["error"]
+        mock_morgen_client.update_event.assert_not_called()
+        ctx.warning.assert_not_awaited()
+
+    async def test_valid_items_still_applied_alongside_invalid_ones(
+        self, mock_morgen_client, sample_event_id
+    ):
+        good = register_id(sample_event_id)
+        bad = register_id(sample_event_id + "x")
+
+        result = await batch_update_events(
+            updates=[
+                {"event_id": bad, "google_color_id": "99"},
+                {"event_id": good, "google_color_id": "11"},
+            ]
+        )
+
+        assert result["updated"] == [good]
+        assert [f["id"] for f in result["failed"]] == [bad]
+        mock_morgen_client.update_event.assert_awaited_once()
+        sent = mock_morgen_client.update_event.call_args.args[0]
+        assert sent.google_color_id == "11"
+
+
+class TestCalendarIdConsistency:
+    """Bare calendar-ID lookups report a clean error, ID first."""
+
+    @pytest.mark.parametrize("bad_id", ["", "   "])
+    async def test_create_event_empty_calendar_id(self, mock_morgen_client, bad_id):
+        with pytest.raises(ToolError, match="calendar_id cannot be empty"):
+            await create_event(
+                calendar_id=bad_id,
+                title="X",
+                start="2023-03-15T09:00:00",
+                duration="PT15M",
+                time_zone="Europe/Berlin",
+            )
+
+    async def test_create_event_unknown_calendar_id_beats_field_errors(
+        self, mock_morgen_client
+    ):
+        with pytest.raises(
+            ToolError, match="Calendar with ID 'nonexist' not found"
+        ) as e:
+            await create_event(
+                calendar_id="nonexist",
+                title="",
+                start="garbage",
+                duration="PT15M",
+                time_zone="Europe/Berlin",
+            )
+        assert "Unexpected error" not in str(e.value)
+        mock_morgen_client.create_event.assert_not_called()
+
+    async def test_list_events_unknown_calendar_id(self, mock_morgen_client):
+        with pytest.raises(
+            ToolError, match="Calendar with ID 'nonexist' not found"
+        ) as e:
+            await list_events(
+                start="2025-01-01T00:00:00",
+                end="2025-01-02T00:00:00",
+                calendar_ids=["nonexist"],
+            )
+        assert "Unexpected error" not in str(e.value)
+
+    async def test_update_calendar_metadata_empty_id(self, mock_morgen_client):
+        with pytest.raises(ToolError, match="calendar_id cannot be empty"):
+            await update_calendar_metadata(calendar_id="", busy=True)
+
+    async def test_update_calendar_metadata_unknown_id_beats_missing_fields(
+        self, mock_morgen_client
+    ):
+        with pytest.raises(ToolError, match="Calendar with ID 'nonexist' not found"):
+            await update_calendar_metadata(calendar_id="nonexist")
+        mock_morgen_client.update_calendar_metadata.assert_not_called()
