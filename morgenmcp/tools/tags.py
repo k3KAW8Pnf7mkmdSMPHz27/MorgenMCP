@@ -29,18 +29,15 @@ from morgenmcp.tools.utils import (
     handle_tool_errors,
     is_not_found,
     resolve_virtual_id,
+    tag_not_found,
 )
 from morgenmcp.validators import validate_hex_color
-
-
-def _tag_not_found(tag_id: str) -> str:
-    return f"Tag with ID '{tag_id}' not found"
 
 
 def _resolve_tag_id(tag_id: str) -> str:
     """Validate and resolve a virtual tag ID to its real Morgen ID."""
     return resolve_virtual_id(
-        tag_id, parameter="tag_id", not_found=_tag_not_found(tag_id)
+        tag_id, parameter="tag_id", not_found=tag_not_found(tag_id)
     )
 
 
@@ -51,7 +48,7 @@ async def _tag_api_call(tag_id: str) -> AsyncIterator[None]:
         yield
     except MorgenAPIError as e:
         if is_not_found(e):
-            raise ToolError(_tag_not_found(tag_id)) from e
+            raise ToolError(tag_not_found(tag_id)) from e
         raise
 
 

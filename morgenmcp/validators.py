@@ -58,6 +58,8 @@ def validate_local_datetime(value: str, field_name: str = "datetime") -> str:
     """
     if not value:
         raise ValidationError(f"'{field_name}' cannot be empty")
+    if not isinstance(value, str):
+        raise ValidationError(f"'{field_name}' must be a string")
 
     # Check for common mistakes
     if value.endswith("Z"):
@@ -99,6 +101,8 @@ def validate_duration(value: str) -> str:
     """
     if not value:
         raise ValidationError("'duration' cannot be empty")
+    if not isinstance(value, str):
+        raise ValidationError("'duration' must be a string")
 
     if not ISO_DURATION_PATTERN.match(value):
         raise ValidationError(
@@ -136,6 +140,8 @@ def validate_timezone(value: str | None) -> str | None:
         raise ValidationError(
             "'timeZone' cannot be an empty string (use None for floating events)"
         )
+    if not isinstance(value, str):
+        raise ValidationError("'timeZone' must be a string")
 
     valid_timezones = _get_valid_timezones()
 
@@ -252,6 +258,36 @@ def validate_priority(value: int) -> int:
     return value
 
 
+_GOOGLE_COLOR_IDS = frozenset(str(i) for i in range(1, 12))
+
+
+def validate_google_color_id(value: str) -> str:
+    """Validate a Google Calendar color ID ('1' through '11')."""
+    if not isinstance(value, str) or value not in _GOOGLE_COLOR_IDS:
+        raise ValidationError("google_color_id must be a string '1' through '11'")
+    return value
+
+
+_VALID_PRIVACY = ("public", "private", "secret")
+_VALID_FREE_BUSY_STATUS = ("free", "busy")
+
+
+def validate_privacy(value: str) -> str:
+    """Validate an event privacy setting."""
+    if not isinstance(value, str) or value not in _VALID_PRIVACY:
+        raise ValidationError(f"privacy must be one of: {', '.join(_VALID_PRIVACY)}")
+    return value
+
+
+def validate_free_busy_status(value: str) -> str:
+    """Validate an event free/busy status."""
+    if not isinstance(value, str) or value not in _VALID_FREE_BUSY_STATUS:
+        raise ValidationError(
+            f"free_busy_status must be one of: {', '.join(_VALID_FREE_BUSY_STATUS)}"
+        )
+    return value
+
+
 def validate_progress(value: str) -> str:
     """Validate task progress status string."""
     if value not in _VALID_TASK_PROGRESS:
@@ -269,6 +305,8 @@ def validate_alert_offset(value: str) -> str:
     """
     if not value:
         raise ValidationError("alert offset cannot be empty")
+    if not isinstance(value, str):
+        raise ValidationError("alert offset must be a string")
     if not NEGATIVE_OFFSET_PATTERN.match(value):
         raise ValidationError(
             f"Invalid alert offset: '{value}'. "
@@ -292,7 +330,7 @@ def validate_recurrence_rule(rule: dict) -> None:
     frequency = rule.get("frequency")
     if not frequency:
         raise ValidationError("recurrence rule is missing required 'frequency'")
-    if frequency not in _VALID_RECURRENCE_FREQUENCIES:
+    if not isinstance(frequency, str) or frequency not in _VALID_RECURRENCE_FREQUENCIES:
         raise ValidationError(
             f"Invalid recurrence frequency '{frequency}'. "
             f"Must be one of: {sorted(_VALID_RECURRENCE_FREQUENCIES)}"
@@ -316,7 +354,7 @@ def validate_recurrence_rule(rule: dict) -> None:
                 if isinstance(day, dict)
                 else None
             )
-            if day_code not in _VALID_NDAYS:
+            if not isinstance(day_code, str) or day_code not in _VALID_NDAYS:
                 raise ValidationError(
                     f"Invalid weekday code '{day_code}'. "
                     f"Use two-letter lowercase codes: {sorted(_VALID_NDAYS)}"

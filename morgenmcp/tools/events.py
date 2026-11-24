@@ -22,11 +22,7 @@ from morgenmcp.models import (
     EventUpdateRequest,
     MorgenAPIError,
 )
-from morgenmcp.tools.id_registry import (
-    register_id,
-    resolve_id,
-    resolve_ids,
-)
+from morgenmcp.tools.id_registry import register_id
 from morgenmcp.tools.id_utils import (
     extract_account_from_calendar,
     extract_ids_from_event,
@@ -50,19 +46,24 @@ from morgenmcp.tools.utils import (
     build_locations_dict,
     build_participants_dict,
     build_recurrence_rules,
+    calendar_not_found,
     disable_response_caching,
     gather_bounded,
     handle_tool_errors,
     is_not_found,
     omit_none,
     resolve_virtual_id,
+    resolve_virtual_ids,
 )
 from morgenmcp.validators import (
     SUFFIXLESS_DATETIME_PATTERN,
     resolve_event_window,
     validate_duration,
     validate_email,
+    validate_free_busy_status,
+    validate_google_color_id,
     validate_local_datetime,
+    validate_privacy,
     validate_timezone,
 )
 
@@ -118,8 +119,56 @@ def _resolve_event_id(event_id: str) -> str:
     return resolve_virtual_id(
         event_id,
         parameter="event_id",
-        not_found=f"Event with ID '{event_id}' not found. Call list_events first.",
+        not_found=f"Event with ID '{event_id}' not found. Call morgen_list_events first.",
     )
+
+
+def _resolve_calendar_id(calendar_id: str) -> str:
+    """Validate and resolve a virtual calendar ID to its real Morgen ID."""
+    return resolve_virtual_id(
+        calendar_id,
+        parameter="calendar_id",
+        not_found=calendar_not_found(calendar_id),
+    )
+
+
+def _validate_event_update_fields(
+    *,
+    start: str | None,
+    duration: str | None,
+    time_zone: str | None,
+    is_all_day: bool | None,
+    alerts: Any,
+    use_default_alerts: bool | None,
+    google_color_id: str | None,
+    free_busy_status: str | None = None,
+    privacy: str | None = None,
+) -> None:
+    """Input checks shared by ``update_event`` and ``batch_update_events``."""
+    timing_provided = [
+        f for f in (start, duration, time_zone, is_all_day) if f is not None
+    ]
+    if timing_provided and len(timing_provided) != 4:
+        raise ToolError(
+            "When updating timing fields (start, duration, time_zone, is_all_day), "
+            "all four must be provided together."
+        )
+    if start is not None:
+        validate_local_datetime(start, "start")
+    if duration is not None:
+        validate_duration(duration)
+    if time_zone is not None:
+        validate_timezone(time_zone)
+    if alerts and use_default_alerts:
+        raise ToolError(
+            "alerts and use_default_alerts are mutually exclusive — pick one."
+        )
+    if google_color_id is not None:
+        validate_google_color_id(google_color_id)
+    if free_busy_status is not None:
+        validate_free_busy_status(free_busy_status)
+    if privacy is not None:
+        validate_privacy(privacy)
 
 
 def _system_localtime(dt: datetime) -> datetime:
@@ -504,7 +553,9 @@ async def list_events(
     if calendar_ids is not None:
         if not calendar_ids:
             raise ToolError("calendar_ids cannot be empty when provided")
-        real_calendar_ids = resolve_ids(calendar_ids)
+        real_calendar_ids = resolve_virtual_ids(
+            calendar_ids, parameter="calendar_id", not_found=calendar_not_found
+        )
 
     async def _report_progress(done: int, total: int) -> None:
         if ctx is not None:
@@ -613,6 +664,8 @@ async def create_event(
     Returns:
         Dictionary with created event ID and details.
     """
+    real_calendar_id = _resolve_calendar_id(calendar_id)
+
     if not title or not title.strip():
         raise ToolError("title cannot be empty")
 
@@ -629,13 +682,9 @@ async def create_event(
             "alerts and use_default_alerts are mutually exclusive — pick one."
         )
 
-    if google_color_id is not None and google_color_id not in {
-        str(i) for i in range(1, 12)
-    }:
-        raise ToolError("google_color_id must be a string '1' through '11'")
+    if google_color_id is not None:
+        validate_google_color_id(google_color_id)
 
-    # Resolve virtual calendar ID and extract account ID
-    real_calendar_id = resolve_id(calendar_id)
     real_account_id = extract_account_from_calendar(real_calendar_id)
 
     request = EventCreateRequest(
@@ -719,33 +768,17 @@ async def update_event(
         Dictionary indicating success or error.
     """
     real_event_id = _resolve_event_id(event_id)
-
-    # Validate timing fields constraint
-    timing_fields = [start, duration, time_zone, is_all_day]
-    timing_provided = [f for f in timing_fields if f is not None]
-    if timing_provided and len(timing_provided) != 4:
-        raise ToolError(
-            "When updating timing fields (start, duration, time_zone, is_all_day), "
-            "all four must be provided together."
-        )
-
-    # Validate inputs if provided
-    if start is not None:
-        validate_local_datetime(start, "start")
-    if duration is not None:
-        validate_duration(duration)
-    if time_zone is not None:
-        validate_timezone(time_zone)
-
-    if alerts and use_default_alerts:
-        raise ToolError(
-            "alerts and use_default_alerts are mutually exclusive — pick one."
-        )
-
-    if google_color_id is not None and google_color_id not in {
-        str(i) for i in range(1, 12)
-    }:
-        raise ToolError("google_color_id must be a string '1' through '11'")
+    _validate_event_update_fields(
+        start=start,
+        duration=duration,
+        time_zone=time_zone,
+        is_all_day=is_all_day,
+        alerts=alerts,
+        use_default_alerts=use_default_alerts,
+        google_color_id=google_color_id,
+        free_busy_status=free_busy_status,
+        privacy=privacy,
+    )
 
     real_account_id, real_calendar_id = extract_ids_from_event(real_event_id)
 
@@ -939,8 +972,9 @@ async def batch_update_events(
 
     Args:
         updates: List of update dicts. Each must have 'event_id' (virtual ID) and optional fields:
-            title, start, duration, time_zone, is_all_day, description, location,
-            free_busy_status, privacy.
+            title, start, duration, time_zone, is_all_day (all four timing fields
+            together or none), description, location, free_busy_status, privacy,
+            alerts or use_default_alerts (not both), recurrence_rules, google_color_id.
         series_update_mode: For recurring events - "single", "future", or "all".
 
     Returns:
@@ -953,10 +987,10 @@ async def batch_update_events(
     updated: list[str] = []
     failed: list[FailedItem] = []
 
-    # Validate and prepare updates
-    to_update: list[
-        tuple[str, str, str, str, dict[str, Any]]
-    ] = []  # (virtual_id, real_event_id, real_account_id, real_calendar_id, update)
+    # Validate and prepare updates. Everything that can be rejected from the
+    # input alone is rejected here, so those failures never reach the API (and
+    # never emit ctx.warning, which is reserved for upstream failures).
+    to_update: list[tuple[str, EventUpdateRequest]] = []
     for update in updates:
         virtual_event_id = update.get("event_id")
         if virtual_event_id is None:
@@ -968,71 +1002,48 @@ async def batch_update_events(
 
         try:
             real_event_id = _resolve_event_id(virtual_event_id)
-            timing_fields = ["start", "duration", "time_zone", "is_all_day"]
-            timing_provided = [f for f in timing_fields if update.get(f) is not None]
-            if timing_provided and len(timing_provided) != 4:
-                raise ToolError(
-                    "When updating timing fields, all four (start, duration, "
-                    "time_zone, is_all_day) must be provided together."
-                )
-            real_account_id, real_calendar_id = extract_ids_from_event(real_event_id)
-            to_update.append(
-                (
-                    virtual_event_id,
-                    real_event_id,
-                    real_account_id,
-                    real_calendar_id,
-                    update,
-                )
+            update_alerts = update.get("alerts")
+            update_default = update.get("use_default_alerts")
+            _validate_event_update_fields(
+                start=update.get("start"),
+                duration=update.get("duration"),
+                time_zone=update.get("time_zone"),
+                is_all_day=update.get("is_all_day"),
+                alerts=update_alerts,
+                use_default_alerts=update_default,
+                google_color_id=update.get("google_color_id"),
+                free_busy_status=update.get("free_busy_status"),
+                privacy=update.get("privacy"),
             )
+            real_account_id, real_calendar_id = extract_ids_from_event(real_event_id)
+            request = EventUpdateRequest(
+                id=real_event_id,
+                account_id=real_account_id,
+                calendar_id=real_calendar_id,
+                title=update.get("title"),
+                start=update.get("start"),
+                duration=update.get("duration"),
+                time_zone=update.get("time_zone"),
+                show_without_time=update.get("is_all_day"),
+                description=update.get("description"),
+                locations=build_locations_dict(
+                    update.get("location"), allow_empty=True
+                ),
+                alerts=build_alerts_dict(update_alerts),
+                use_default_alerts=update_default,
+                free_busy_status=update.get("free_busy_status"),
+                privacy=update.get("privacy"),
+                recurrence_rules=build_recurrence_rules(update.get("recurrence_rules")),
+                google_color_id=update.get("google_color_id"),
+            )
+            to_update.append((virtual_event_id, request))
         except Exception as e:
             failed.append({"id": virtual_event_id, "error": str(e)})
 
     # Apply updates in parallel
-    async def update_single(
-        real_event_id: str,
-        real_account_id: str,
-        real_calendar_id: str,
-        update: dict[str, Any],
-    ) -> None:
-        # Validate inputs
-        if update.get("start"):
-            validate_local_datetime(update["start"], "start")
-        if update.get("duration"):
-            validate_duration(update["duration"])
-        if update.get("time_zone"):
-            validate_timezone(update["time_zone"])
-
-        update_alerts = update.get("alerts")
-        update_default = update.get("use_default_alerts")
-        if update_alerts and update_default:
-            raise ToolError(
-                "alerts and use_default_alerts are mutually exclusive — pick one."
-            )
-
-        request = EventUpdateRequest(
-            id=real_event_id,
-            account_id=real_account_id,
-            calendar_id=real_calendar_id,
-            title=update.get("title"),
-            start=update.get("start"),
-            duration=update.get("duration"),
-            time_zone=update.get("time_zone"),
-            show_without_time=update.get("is_all_day"),
-            description=update.get("description"),
-            locations=build_locations_dict(update.get("location"), allow_empty=True),
-            alerts=build_alerts_dict(update_alerts),
-            use_default_alerts=update_default,
-            free_busy_status=update.get("free_busy_status"),
-            privacy=update.get("privacy"),
-            recurrence_rules=build_recurrence_rules(update.get("recurrence_rules")),
-            google_color_id=update.get("google_color_id"),
-        )
-        await client.update_event(request, series_update_mode=series_update_mode)
-
     results = await gather_bounded(
-        update_single(real_event_id, real_account_id, real_calendar_id, update)
-        for _, real_event_id, real_account_id, real_calendar_id, update in to_update
+        client.update_event(request, series_update_mode=series_update_mode)
+        for _, request in to_update
     )
 
     for i, result in enumerate(results):

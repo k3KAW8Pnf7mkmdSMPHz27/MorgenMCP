@@ -591,6 +591,83 @@ class TestSingleTaskIdValidation:
         assert mock_task_client.method_calls == []
 
 
+class TestVirtualIdConsistency:
+    """Bad virtual IDs get clean entity errors, never "Unexpected error"."""
+
+    async def test_list_task_lists_unknown_account_id(self, mock_task_client):
+        with pytest.raises(
+            ToolError,
+            match="Account with ID 'nonexist' not found. "
+            "Call morgen_list_accounts first.",
+        ):
+            await list_task_lists(account_id="nonexist")
+        mock_task_client.list_tasks_and_spaces.assert_not_called()
+
+    async def test_list_task_lists_empty_account_id(self, mock_task_client):
+        with pytest.raises(ToolError, match="account_id cannot be empty"):
+            await list_task_lists(account_id="  ")
+
+    @pytest.mark.parametrize("tool", ["create", "update"])
+    async def test_unknown_tag_id_rejected(self, mock_task_client, tool):
+        task = register_id("task_real")
+        with pytest.raises(ToolError, match="Tag with ID 'nonexist' not found") as e:
+            if tool == "create":
+                await create_task(title="X", tag_ids=["nonexist"])
+            else:
+                await update_task(task, tag_ids=["nonexist"])
+        assert "Unexpected error" not in str(e.value)
+        mock_task_client.create_task.assert_not_called()
+        mock_task_client.update_task.assert_not_called()
+
+    async def test_update_task_resolves_id_before_validating_fields(
+        self, mock_task_client
+    ):
+        with pytest.raises(ToolError, match="Task with ID 'nonexist' not found"):
+            await update_task("nonexist", priority=15)
+
+    async def test_unregistered_task_list_id_passes_through(self, mock_task_client):
+        mock_task_client.create_task.return_value = "new_real_id"
+        await create_task(title="X", task_list_id="default")
+        sent: TaskCreateRequest = mock_task_client.create_task.call_args.args[0]
+        assert sent.task_list_id == "default"
+
+    @pytest.mark.parametrize("tool", ["create", "update"])
+    async def test_task_list_resolution_failures_are_not_swallowed(
+        self, mock_task_client, tool
+    ):
+        """Only IDNotFoundError falls back to the raw value."""
+        task = register_id("task_real")
+        with (
+            patch(
+                "morgenmcp.tools.tasks.resolve_id",
+                side_effect=RuntimeError("store down"),
+            ),
+            pytest.raises(ToolError, match="store down"),
+        ):
+            if tool == "create":
+                await create_task(title="X", task_list_id="whatever")
+            else:
+                await update_task(task, task_list_id="whatever")
+
+    async def test_batch_delete_cancelled_item_is_failed_not_deleted(
+        self, mock_task_client
+    ):
+        import asyncio
+
+        good = register_id("task_good")
+        cancelled = register_id("task_cancelled")
+
+        async def _delete(req):
+            if req.id == "task_cancelled":
+                raise asyncio.CancelledError()
+
+        mock_task_client.delete_task.side_effect = _delete
+
+        result = await batch_delete_tasks([good, cancelled])
+        assert result["deleted"] == [good]
+        assert result["failed"] == [{"id": cancelled, "error": "CancelledError"}]
+
+
 class TestListTags:
     async def test_list_tags(self, mock_tag_client, sample_tag):
         mock_tag_client.list_tags.return_value = ([sample_tag], None)

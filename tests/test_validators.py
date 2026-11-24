@@ -11,9 +11,12 @@ from morgenmcp.validators import (
     validate_date_range,
     validate_duration,
     validate_email,
+    validate_free_busy_status,
+    validate_google_color_id,
     validate_hex_color,
     validate_local_datetime,
     validate_priority,
+    validate_privacy,
     validate_progress,
     validate_recurrence_rule,
     validate_timezone,
@@ -430,6 +433,57 @@ class TestValidateProgress:
     def test_invalid(self):
         with pytest.raises(ValidationError):
             validate_progress("done")
+
+
+class TestEnumAndTypeGuards:
+    """Wrong-typed input gets a field-specific error, never a Python TypeError."""
+
+    def test_google_color_id(self):
+        assert validate_google_color_id("11") == "11"
+        for bad in ("0", "12", "", [], {}, 5, None):
+            with pytest.raises(ValidationError, match="google_color_id must be"):
+                validate_google_color_id(bad)  # type: ignore[arg-type]
+
+    def test_privacy(self):
+        for ok in ("public", "private", "secret"):
+            assert validate_privacy(ok) == ok
+        for bad in ("typo", "", [], 5):
+            with pytest.raises(ValidationError, match="privacy must be one of"):
+                validate_privacy(bad)  # type: ignore[arg-type]
+
+    def test_free_busy_status(self):
+        for ok in ("free", "busy"):
+            assert validate_free_busy_status(ok) == ok
+        for bad in ("typo", "", [], 5):
+            with pytest.raises(
+                ValidationError, match="free_busy_status must be one of"
+            ):
+                validate_free_busy_status(bad)  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize(
+        ("func", "bad"),
+        [
+            (validate_local_datetime, 5),
+            (validate_local_datetime, ["2023-03-01T10:00:00"]),
+            (validate_duration, 5),
+            (validate_duration, ["PT1H"]),
+            (validate_timezone, 5),
+            (validate_timezone, ["UTC"]),
+            (validate_alert_offset, 5),
+            (validate_alert_offset, ["-PT15M"]),
+        ],
+    )
+    def test_non_string_rejected(self, func, bad):
+        with pytest.raises(ValidationError, match="must be a string"):
+            func(bad)
+
+    def test_recurrence_frequency_and_day_types(self):
+        with pytest.raises(ValidationError, match="Invalid recurrence frequency"):
+            validate_recurrence_rule({"frequency": ["daily"]})
+        with pytest.raises(ValidationError, match="Invalid weekday code"):
+            validate_recurrence_rule(
+                {"frequency": "weekly", "by_day": [{"day": ["mo"]}]}
+            )
 
 
 class TestValidateAlertOffset:
