@@ -60,8 +60,10 @@ from morgenmcp.validators import (
     resolve_event_window,
     validate_duration,
     validate_email,
+    validate_free_busy_status,
     validate_google_color_id,
     validate_local_datetime,
+    validate_privacy,
     validate_timezone,
 )
 
@@ -117,7 +119,7 @@ def _resolve_event_id(event_id: str) -> str:
     return resolve_virtual_id(
         event_id,
         parameter="event_id",
-        not_found=f"Event with ID '{event_id}' not found. Call list_events first.",
+        not_found=f"Event with ID '{event_id}' not found. Call morgen_list_events first.",
     )
 
 
@@ -139,6 +141,8 @@ def _validate_event_update_fields(
     alerts: Any,
     use_default_alerts: bool | None,
     google_color_id: str | None,
+    free_busy_status: str | None = None,
+    privacy: str | None = None,
 ) -> None:
     """Input checks shared by ``update_event`` and ``batch_update_events``."""
     timing_provided = [
@@ -161,6 +165,10 @@ def _validate_event_update_fields(
         )
     if google_color_id is not None:
         validate_google_color_id(google_color_id)
+    if free_busy_status is not None:
+        validate_free_busy_status(free_busy_status)
+    if privacy is not None:
+        validate_privacy(privacy)
 
 
 def _system_localtime(dt: datetime) -> datetime:
@@ -768,6 +776,8 @@ async def update_event(
         alerts=alerts,
         use_default_alerts=use_default_alerts,
         google_color_id=google_color_id,
+        free_busy_status=free_busy_status,
+        privacy=privacy,
     )
 
     real_account_id, real_calendar_id = extract_ids_from_event(real_event_id)
@@ -962,8 +972,9 @@ async def batch_update_events(
 
     Args:
         updates: List of update dicts. Each must have 'event_id' (virtual ID) and optional fields:
-            title, start, duration, time_zone, is_all_day, description, location,
-            free_busy_status, privacy.
+            title, start, duration, time_zone, is_all_day (all four timing fields
+            together or none), description, location, free_busy_status, privacy,
+            alerts or use_default_alerts (not both), recurrence_rules, google_color_id.
         series_update_mode: For recurring events - "single", "future", or "all".
 
     Returns:
@@ -1001,6 +1012,8 @@ async def batch_update_events(
                 alerts=update_alerts,
                 use_default_alerts=update_default,
                 google_color_id=update.get("google_color_id"),
+                free_busy_status=update.get("free_busy_status"),
+                privacy=update.get("privacy"),
             )
             real_account_id, real_calendar_id = extract_ids_from_event(real_event_id)
             request = EventUpdateRequest(

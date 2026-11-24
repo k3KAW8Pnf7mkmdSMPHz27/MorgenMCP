@@ -67,7 +67,9 @@ def resolve_virtual_ids(
 
 
 def calendar_not_found(virtual_id: str) -> str:
-    return f"Calendar with ID '{virtual_id}' not found. Call list_calendars first."
+    return (
+        f"Calendar with ID '{virtual_id}' not found. Call morgen_list_calendars first."
+    )
 
 
 def tag_not_found(virtual_id: str) -> str:
@@ -75,7 +77,7 @@ def tag_not_found(virtual_id: str) -> str:
 
 
 def account_not_found(virtual_id: str) -> str:
-    return f"Account with ID '{virtual_id}' not found. Call list_accounts first."
+    return f"Account with ID '{virtual_id}' not found. Call morgen_list_accounts first."
 
 
 def is_not_found(exc: BaseException) -> bool:
@@ -239,6 +241,10 @@ def build_alerts_dict(
     """
     if not offsets:
         return None
+    if not isinstance(offsets, list):
+        raise ValidationError(
+            "alerts must be a list of negative ISO 8601 offsets (e.g., ['-PT15M'])"
+        )
     alerts: dict[str, Alert | None] = {}
     for offset in offsets:
         validate_alert_offset(offset)

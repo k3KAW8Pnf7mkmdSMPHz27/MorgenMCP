@@ -1569,7 +1569,8 @@ class TestUpdateEvent:
 
     async def test_update_event_unknown_id(self, mock_morgen_client):
         with pytest.raises(
-            ToolError, match="Event with ID 'nonexist' not found. Call list_events"
+            ToolError,
+            match="Event with ID 'nonexist' not found. Call morgen_list_events",
         ):
             await update_event(event_id="nonexist", start="2023-03-15T14:00:00")
         mock_morgen_client.update_event.assert_not_called()
@@ -1743,7 +1744,7 @@ class TestBatchDeleteEvents:
         assert len(result["failed"]) == 1
         assert result["failed"][0]["id"] == "unregistered"
         assert result["failed"][0]["error"] == (
-            "Event with ID 'unregistered' not found. Call list_events first."
+            "Event with ID 'unregistered' not found. Call morgen_list_events first."
         )
 
     async def test_batch_delete_partial_failure(
@@ -2007,7 +2008,7 @@ class TestBatchUpdateEvents:
         assert result["failed"] == [
             {
                 "id": "nonexist",
-                "error": "Event with ID 'nonexist' not found. Call list_events first.",
+                "error": "Event with ID 'nonexist' not found. Call morgen_list_events first.",
             }
         ]
         mock_morgen_client.update_event.assert_not_called()
@@ -2517,6 +2518,45 @@ class TestBatchUpdateInputValidation:
         ("bad_fields", "expected"),
         [
             ({"google_color_id": "99"}, "google_color_id must be a string"),
+            ({"google_color_id": []}, "google_color_id must be a string"),
+            ({"google_color_id": 5}, "google_color_id must be a string"),
+            ({"privacy": "typo"}, "privacy must be one of"),
+            ({"privacy": ["public"]}, "privacy must be one of"),
+            ({"free_busy_status": "typo"}, "free_busy_status must be one of"),
+            ({"free_busy_status": {}}, "free_busy_status must be one of"),
+            (
+                {
+                    "start": 5,
+                    "duration": "PT1H",
+                    "time_zone": "Europe/Berlin",
+                    "is_all_day": False,
+                },
+                "'start' must be a string",
+            ),
+            (
+                {
+                    "start": "2023-03-15T14:00:00",
+                    "duration": ["PT1H"],
+                    "time_zone": "Europe/Berlin",
+                    "is_all_day": False,
+                },
+                "'duration' must be a string",
+            ),
+            (
+                {
+                    "start": "2023-03-15T14:00:00",
+                    "duration": "PT1H",
+                    "time_zone": ["Europe/Berlin"],
+                    "is_all_day": False,
+                },
+                "'timeZone' must be a string",
+            ),
+            ({"alerts": "-PT15M"}, "alerts must be a list"),
+            ({"alerts": [["-PT15M"]]}, "alert offset must be a string"),
+            (
+                {"recurrence_rules": [{"frequency": ["daily"]}]},
+                "Invalid recurrence frequency",
+            ),
             (
                 {"start": "2023-03-15T14:00:00"},
                 "all four must be provided together",
@@ -2563,8 +2603,37 @@ class TestBatchUpdateInputValidation:
         assert result["updated"] == []
         assert len(result["failed"]) == 1
         assert result["failed"][0]["id"] == virtual_evt
-        assert expected in result["failed"][0]["error"]
+        error = result["failed"][0]["error"]
+        assert expected in error
+        assert "unhashable" not in error
+        assert "object has no attribute" not in error
         mock_morgen_client.update_event.assert_not_called()
+        ctx.warning.assert_not_awaited()
+
+    @pytest.mark.parametrize(
+        "bad_fields",
+        [{"privacy": "typo"}, {"free_busy_status": "typo"}],
+    )
+    async def test_invalid_enum_field_does_not_reach_client(
+        self, mock_morgen_client, sample_event_id, bad_fields
+    ):
+        good = register_id(sample_event_id)
+        bad = register_id(sample_event_id + "x")
+        ctx = AsyncMock()
+
+        result = await batch_update_events(
+            updates=[
+                {"event_id": bad, **bad_fields},
+                {"event_id": good, "privacy": "private", "free_busy_status": "free"},
+            ],
+            ctx=ctx,
+        )
+
+        assert result["updated"] == [good]
+        assert [f["id"] for f in result["failed"]] == [bad]
+        mock_morgen_client.update_event.assert_awaited_once()
+        sent = mock_morgen_client.update_event.call_args.args[0]
+        assert (sent.privacy, sent.free_busy_status) == ("private", "free")
         ctx.warning.assert_not_awaited()
 
     async def test_valid_items_still_applied_alongside_invalid_ones(
@@ -2605,7 +2674,9 @@ class TestCalendarIdConsistency:
         self, mock_morgen_client
     ):
         with pytest.raises(
-            ToolError, match="Calendar with ID 'nonexist' not found"
+            ToolError,
+            match="Calendar with ID 'nonexist' not found. "
+            "Call morgen_list_calendars first.",
         ) as e:
             await create_event(
                 calendar_id="nonexist",
@@ -2619,7 +2690,9 @@ class TestCalendarIdConsistency:
 
     async def test_list_events_unknown_calendar_id(self, mock_morgen_client):
         with pytest.raises(
-            ToolError, match="Calendar with ID 'nonexist' not found"
+            ToolError,
+            match="Calendar with ID 'nonexist' not found. "
+            "Call morgen_list_calendars first.",
         ) as e:
             await list_events(
                 start="2025-01-01T00:00:00",
@@ -2635,6 +2708,10 @@ class TestCalendarIdConsistency:
     async def test_update_calendar_metadata_unknown_id_beats_missing_fields(
         self, mock_morgen_client
     ):
-        with pytest.raises(ToolError, match="Calendar with ID 'nonexist' not found"):
+        with pytest.raises(
+            ToolError,
+            match="Calendar with ID 'nonexist' not found. "
+            "Call morgen_list_calendars first.",
+        ):
             await update_calendar_metadata(calendar_id="nonexist")
         mock_morgen_client.update_calendar_metadata.assert_not_called()

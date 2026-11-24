@@ -595,7 +595,11 @@ class TestVirtualIdConsistency:
     """Bad virtual IDs get clean entity errors, never "Unexpected error"."""
 
     async def test_list_task_lists_unknown_account_id(self, mock_task_client):
-        with pytest.raises(ToolError, match="Account with ID 'nonexist' not found"):
+        with pytest.raises(
+            ToolError,
+            match="Account with ID 'nonexist' not found. "
+            "Call morgen_list_accounts first.",
+        ):
             await list_task_lists(account_id="nonexist")
         mock_task_client.list_tasks_and_spaces.assert_not_called()
 
